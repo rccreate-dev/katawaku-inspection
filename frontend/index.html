@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<!-- 開発用: connect-src に localhost/127.0.0.1 を許可。本番配備では http://localhost:* http://127.0.0.1:* を削除すること。frame-ancestors は meta では無効のためホスティング側ヘッダで設定する。 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com http://localhost:* http://127.0.0.1:*">
+<!-- 本番: connect-src は GAS(script.google.com / script.googleusercontent.com)のみ。frame-ancestors は meta では無効のためホスティング側ヘッダで設定する。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com">
 <meta name="theme-color" content="#0c6b67">
 <meta name="color-scheme" content="light dark">
 <link rel="manifest" href="manifest.webmanifest">
