@@ -1,0 +1,83 @@
+// 初期名簿の投入(使い捨て。GASエディタに貼り付けて runRoster を1回だけ実行する)。2026-10-08
+// 何度実行しても二重登録しない(名前・現場名・担当の一致で判定)。
+function runRoster() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    Repo.resetCache();
+    var now = Util.nowIso();
+    var today = Util.today();
+    var log = [];
+
+    // 設定: appBaseUrl
+    var cfg = Repo.get('Config', 'appBaseUrl');
+    if (cfg && !cfg.value) { Repo.update('Config', cfg, { value: 'https://rccreate-dev.github.io/katawaku-inspection', updatedAt: now }); log.push('Config.appBaseUrl を設定'); }
+
+    // ユーザー
+    var lead = Repo.all('Users').filter(function (u) { return u.role === 'lead' && u.status !== 'disabled'; })[0];
+    var userDefs = [
+      ['金', 'qa'], ['櫻井', 'qa'],
+      ['福住', 'foreman'], ['ジェレミア', 'foreman'], ['ヨビ', 'foreman'], ['タマ', 'foreman'], ['ムンテ', 'foreman']
+    ];
+    var uid = {};
+    userDefs.forEach(function (d) {
+      var ex = Repo.all('Users').filter(function (u) { return u.name === d[0]; })[0];
+      if (!ex) {
+        ex = Repo.append('Users', {
+          userId: Util.newId('u'), name: d[0], nameKana: '', role: d[1], status: 'invited', lang: 'ja', email: '',
+          qaQualified: d[1] === 'qa', pinSalt: '', pinHash: '', failedCount: 0, lockedAt: '', lastLoginAt: '',
+          note: 'runRoster', createdAt: now, updatedAt: now
+        });
+        log.push('ユーザー追加: ' + d[0] + '(' + d[1] + ')');
+      }
+      uid[d[0]] = ex.userId;
+    });
+    uid['細野'] = lead.userId;
+
+    // 現場 [名前, 主担当QA, 代行QA, 職長, 副職長]
+    var FLOORS = 'B1F,1F,2F,3F,4F,5F,6F,7F,8F,RF';
+    var sites = [
+      ['奥沢中学校', '金', '細野', '福住', null],
+      ['京浜島センター', '金', '細野', null, null],
+      ['町田Ⅱ', '金', '細野', null, null],
+      ['Jビル赤坂', '金', '細野', 'ジェレミア', 'ヨビ'],
+      ['岩本町', '金', '細野', 'タマ', 'ムンテ'],
+      ['鶴見プロジェクト', '金', '細野', null, null],
+      ['八柱駅前新築工事', '金', '細野', null, null],
+      ['OHA中原区木月', '金', '細野', null, null],
+      ['若草待機所', '櫻井', '金', null, null],
+      ['白金台5丁目', '金', '細野', null, null],
+      ['横浜市西区南浅間', '金', '細野', null, null]
+    ];
+    sites.forEach(function (s) {
+      var site = Repo.all('Sites').filter(function (x) { return x.name === s[0]; })[0];
+      if (!site) {
+        site = Repo.append('Sites', {
+          siteId: Util.newId('s'), name: s[0], status: 'active', floors: FLOORS, zones: '', primeContractor: '', address: '',
+          joinKey: Util.randomAlnum(16), driveFolderId: '', startDate: '', endDate: '', createdAt: now, updatedAt: now
+        });
+        log.push('現場追加: ' + s[0]);
+      }
+      var add = function (userName, role, team) {
+        var userId = uid[userName];
+        var dup = Repo.all('Assignments').filter(function (a) {
+          return a.siteId === site.siteId && a.userId === userId && a.assignRole === role && String(a.active).toUpperCase() !== 'FALSE';
+        })[0];
+        if (dup) return;
+        Repo.append('Assignments', {
+          assignId: Util.newId('a'), siteId: site.siteId, userId: userId, assignRole: role, team: team || '',
+          validFrom: today, validTo: '', active: true, createdBy: lead.userId, createdAt: now, updatedAt: now
+        });
+        log.push('担当追加: ' + s[0] + ' / ' + userName + ' / ' + role);
+      };
+      add(s[1], 'qa_main', '');
+      add(s[2], 'qa_sub', '');
+      if (s[3]) add(s[3], 'foreman', s[3] + '班');
+      if (s[4]) add(s[4], 'subforeman', s[3] + '班');
+    });
+    log.forEach(function (l) { Logger.log(l); });
+    Logger.log('完了: ' + log.length + '件');
+  } finally {
+    lock.releaseLock();
+  }
+}
