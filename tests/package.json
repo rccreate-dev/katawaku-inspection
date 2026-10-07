@@ -1,0 +1,12 @@
+{
+  "name": "katawaku-tests",
+  "private": true,
+  "description": "型枠検査記録アプリのテスト(契約テストは依存なし。E2Eのみ playwright を使用)",
+  "scripts": {
+    "contract": "node --test contract/*.test.js",
+    "e2e": "node --test --test-concurrency=1 e2e/*.spec.js"
+  },
+  "devDependencies": {
+    "playwright": "1.56.0"
+  }
+}

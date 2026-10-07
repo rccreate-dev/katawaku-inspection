@@ -1,0 +1,387 @@
+{
+ "_comment": "契約テスト(C-STATE-05)とユニットテスト(U-VALID-01)の共用データ。各項目の既定: result=ok, photos=重点項目なら1/他は0, note=\"\", values=[]。items で上書き(photos=職長写真の枚数)。pourPlannedAt=false は打設予定日時なし。itemDefs はマスタ差し替え(mock-only)。expect は rule+itemId の集合と完全一致(空=提出成功)。",
+ "keyItems": [
+  "i2",
+  "i3",
+  "i9",
+  "i11",
+  "i12",
+  "i13",
+  "i15"
+ ],
+ "cases": [
+  {
+   "id": "V01",
+   "desc": "全項目ok・重点項目に写真あり(違反なし)",
+   "pourPlannedAt": true,
+   "items": {},
+   "expect": []
+  },
+  {
+   "id": "V02",
+   "desc": "i1が未回答",
+   "pourPlannedAt": true,
+   "items": {
+    "i1": {
+     "result": null
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i1"
+    }
+   ]
+  },
+  {
+   "id": "V03",
+   "desc": "i1とi8が未回答(複数列挙)",
+   "pourPlannedAt": true,
+   "items": {
+    "i1": {
+     "result": null
+    },
+    "i8": {
+     "result": null
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i1"
+    },
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i8"
+    }
+   ]
+  },
+  {
+   "id": "V04",
+   "desc": "i8がNGで写真も備考もない",
+   "pourPlannedAt": true,
+   "items": {
+    "i8": {
+     "result": "ng",
+     "photos": 0,
+     "note": ""
+    }
+   },
+   "expect": [
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i8"
+    },
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i8"
+    }
+   ]
+  },
+  {
+   "id": "V05",
+   "desc": "i8がNGで写真あり・備考なし",
+   "pourPlannedAt": true,
+   "items": {
+    "i8": {
+     "result": "ng",
+     "photos": 1,
+     "note": ""
+    }
+   },
+   "expect": [
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i8"
+    }
+   ]
+  },
+  {
+   "id": "V06",
+   "desc": "i8がNGで備考あり・写真なし",
+   "pourPlannedAt": true,
+   "items": {
+    "i8": {
+     "result": "ng",
+     "photos": 0,
+     "note": "隙間あり"
+    }
+   },
+   "expect": [
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i8"
+    }
+   ]
+  },
+  {
+   "id": "V07",
+   "desc": "i8がNGで備考が空白のみ",
+   "pourPlannedAt": true,
+   "items": {
+    "i8": {
+     "result": "ng",
+     "photos": 1,
+     "note": "   "
+    }
+   },
+   "expect": [
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i8"
+    }
+   ]
+  },
+  {
+   "id": "V08",
+   "desc": "重点項目i9がokで写真なし",
+   "pourPlannedAt": true,
+   "items": {
+    "i9": {
+     "result": "ok",
+     "photos": 0
+    }
+   },
+   "expect": [
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i9"
+    }
+   ]
+  },
+  {
+   "id": "V09",
+   "desc": "重点項目i9が該当なしなら写真不要",
+   "pourPlannedAt": true,
+   "items": {
+    "i9": {
+     "result": "na",
+     "photos": 0
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V10",
+   "desc": "i4(許容5)が値[6]でok",
+   "pourPlannedAt": true,
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "V11",
+   "desc": "i4(許容5)が値[5,-5]でok(境界は許容内)",
+   "pourPlannedAt": true,
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      5,
+      -5
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V12",
+   "desc": "i4が値[-6]でNG(写真・備考あり)",
+   "pourPlannedAt": true,
+   "items": {
+    "i4": {
+     "result": "ng",
+     "values": [
+      -6
+     ],
+     "photos": 1,
+     "note": "建入れ不良"
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V13",
+   "desc": "打設予定日時なし",
+   "pourPlannedAt": false,
+   "items": {},
+   "expect": [
+    {
+     "rule": "POUR_PLAN_REQUIRED"
+    }
+   ]
+  },
+  {
+   "id": "V14",
+   "desc": "measure=required(最少2点)で1点のみ",
+   "pourPlannedAt": true,
+   "itemDefs": {
+    "i4": {
+     "measure": "required",
+     "minMeasures": 2
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      1
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "V15",
+   "desc": "measure=required(最少2点)で2点",
+   "pourPlannedAt": true,
+   "itemDefs": {
+    "i4": {
+     "measure": "required",
+     "minMeasures": 2
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      1,
+      2
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V16",
+   "desc": "measure=requiredでも該当なしは測定不要",
+   "pourPlannedAt": true,
+   "itemDefs": {
+    "i4": {
+     "measure": "required",
+     "minMeasures": 2
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "na",
+     "values": []
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V17",
+   "desc": "複合: 未回答+NG不備+重点写真なし+許容超え+予定なし(全て列挙)",
+   "pourPlannedAt": false,
+   "items": {
+    "i1": {
+     "result": null
+    },
+    "i8": {
+     "result": "ng",
+     "photos": 0,
+     "note": ""
+    },
+    "i9": {
+     "result": "ok",
+     "photos": 0
+    },
+    "i4": {
+     "result": "ok",
+     "values": [
+      9
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i1"
+    },
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i8"
+    },
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i8"
+    },
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i9"
+    },
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i4"
+    },
+    {
+     "rule": "POUR_PLAN_REQUIRED"
+    }
+   ]
+  },
+  {
+   "id": "V18",
+   "desc": "i6(許容2)が値[3]でok",
+   "pourPlannedAt": true,
+   "items": {
+    "i6": {
+     "result": "ok",
+     "values": [
+      3
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i6"
+    }
+   ]
+  },
+  {
+   "id": "V19",
+   "desc": "i6(許容2)が値[2,-2]でok",
+   "pourPlannedAt": true,
+   "items": {
+    "i6": {
+     "result": "ok",
+     "values": [
+      2,
+      -2
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V20",
+   "desc": "重点項目i12がNGで写真・備考あり",
+   "pourPlannedAt": true,
+   "items": {
+    "i12": {
+     "result": "ng",
+     "photos": 1,
+     "note": "控え不足"
+    }
+   },
+   "expect": []
+  }
+ ]
+}

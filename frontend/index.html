@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<!-- 開発用: connect-src に localhost/127.0.0.1 を許可。本番配備では http://localhost:* http://127.0.0.1:* を削除すること。frame-ancestors は meta では無効のためホスティング側ヘッダで設定する。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src blob:; connect-src 'self' https://script.google.com https://script.googleusercontent.com http://localhost:* http://127.0.0.1:*">
+<meta name="theme-color" content="#0c6b67">
+<meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<title>Katawaku</title>
+</head>
+<body>
+<div id="app" class="app">
+  <header class="top" id="top"></header>
+  <div id="banners"></div>
+  <main id="view" class="view" tabindex="-1"></main>
+</div>
+<nav id="tabbar" class="tabbar" hidden></nav>
+<div id="overlay"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="config.js"></script>
+<script src="i18n.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="js/core.js"></script>
+<script src="js/time.js"></script>
+<script src="js/db.js"></script>
+<script src="js/api.js"></script>
+<script src="js/validate.js"></script>
+<script src="js/outbox.js"></script>
+<script src="js/photo.js"></script>
+<script src="js/data.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/ui/components.js"></script>
+<script src="js/ui/modals.js"></script>
+<script src="js/ui/s01.js"></script>
+<script src="js/ui/s03.js"></script>
+<script src="js/ui/s06.js"></script>
+<script src="js/ui/s08.js"></script>
+<script src="js/ui/s09.js"></script>
+<script src="js/ui/s10.js"></script>
+<script src="js/ui/s11.js"></script>
+<script src="js/ui/s16.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
