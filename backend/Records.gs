@@ -394,7 +394,7 @@ function act_createRecord(ctx) {
   } else {
     var clash = slotConflict_(null, p.siteId, p.floor, zone, p.lot, p.stage, null);
     if (clash) {
-      throw new ApiError('ALREADY_EXISTS', '同じ現場・階・工区・ロット・段階の記録が既にあります', {
+      throw new ApiError('ALREADY_EXISTS', '同じ現場・階・工区・打設箇所・段階の記録が既にあります', {
         recordId: clash.recordId, mine: inTeamScope_(actor, clash)
       });
     }
