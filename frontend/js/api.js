@@ -64,6 +64,8 @@
         }
       }
       KW.state.netFails = 0;
+      // サーバーから応答が返った=通信できている。過去の通信失敗で「圏外」のまま固まらないよう復帰させる
+      if (KW.state.online === false && navigator.onLine !== false) { KW.state.online = true; KW.bus.emit('net:changed', true); }
       if (!b.ok) {
         var err = b.error || { code: 'INTERNAL' };
         if (AUTH_CODES[err.code] && !opts.silentAuth && !PUBLIC[action]) KW.bus.emit('auth:error', err.code, err);

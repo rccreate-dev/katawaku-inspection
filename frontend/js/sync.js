@@ -258,6 +258,15 @@
     KW.outbox.recoverSending().then(function () { return KW.outbox.unblock(['outdated']); }).then(refreshCounts).then(function () { kick(); });
     window.addEventListener('online', function () { setOnline(true); KW.state.netFails = 0; kick(); pollOnce(); });
     window.addEventListener('offline', function () { setOnline(false); });
+    // 通信失敗で「圏外」になった後も、ブラウザが online イベントを出さない場合がある。15秒ごとと画面復帰時に疎通を確かめて自動復帰する
+    function probe() {
+      if (KW.state.online || navigator.onLine === false || document.visibilityState === 'hidden') return;
+      KW.api.call('ping', {}, { timeoutMs: 10000 }).then(function (res) {
+        if (res.ok) { setOnline(true); KW.state.netFails = 0; kick(); pollOnce(); }
+      });
+    }
+    setInterval(probe, 15000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') probe(); });
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') { kick(); pollOnce(); bootstrap(false); }
     });
