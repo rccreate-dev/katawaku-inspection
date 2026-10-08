@@ -226,3 +226,8 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
   .app{padding-inline:12px}
   .sigs{grid-template-columns:1fr}
 }
+
+/* 実測入力の行: [＋/－][数値][測定点を追加] */
+.mrow{display:flex;gap:6px;align-items:center;margin-top:6px}
+.mrow .inp{flex:1}
+.mrow .btn{white-space:nowrap;min-height:48px}

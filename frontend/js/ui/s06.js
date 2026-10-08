@@ -176,17 +176,18 @@
           chips.appendChild(h('span', { class: 'val' + (over ? ' over' : '') }, (v > 0 ? '+' : '') + v,
             editable ? h('button', { type: 'button', 'aria-label': t('act.delete'), on: { click: function () { x.values.splice(i, 1); touch(it.itemId); redrawItem(it.itemId); } } }, '×') : null));
         });
-        var inp = h('input', { type: 'number', inputmode: 'decimal', step: 'any', disabled: !editable, 'aria-label': t('lbl.measure') });
+        var inp = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', class: 'inp', disabled: !editable, 'aria-label': t('lbl.measure') });
         var add = h('button', { type: 'button', class: 'btn small ghost', disabled: !editable || (x.values || []).length >= 10 }, t('scr.S06.add_point'));
         add.addEventListener('click', function () {
-          var n = Number(inp.value);
-          if (inp.value === '' || !isFinite(n)) return;
+          var n = C.parseMeasure(inp.value);
+          if (n === null) return;
           x.values = (x.values || []).concat([n]); touch(it.itemId); redrawItem(it.itemId);
         });
         inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add.click(); } });
         wrap.appendChild(h('span', null, t('lbl.measure') + ' (' + (def.unit || 'mm') + ')'));
         wrap.appendChild(chips);
-        wrap.appendChild(inp); wrap.appendChild(add);
+        wrap.appendChild(h('div', { class: 'mrow' }, C.signToggle(inp, !editable), inp, add));
+        wrap.appendChild(h('span', { class: 'sub' }, t('scr.S06.measure_help')));
         var hint = [];
         if (def.tol != null) hint.push(t('lbl.tol') + ' ±' + def.tol + (def.unit || 'mm'));
         if (def.measure === 'required') hint.push(t('scr.S06.min_points', { n: def.minMeasures }));

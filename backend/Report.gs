@@ -65,7 +65,7 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   h.push('<!--REPORT ' + esc_(rec.recordId) + ' v' + version + ' ' + esc_(rec.status) + '-->');
   h.push('<h1>型枠工事 ' + esc_(stage) + '検査記録</h1>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
-  h.push('<tr><th>階・工区・ロット</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
+  h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
   h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
   h.push('<tr><th>ステータス</th><td>' + esc_(STATUS_LABEL_[rec.status] || rec.status) + '</td><th>提出ラウンド</th><td>' + rec.round + '</td></tr>');
   h.push('<tr><th>生成日時</th><td>' + esc_(dtShort_(nowDt)) + '</td><th>版</th><td>v' + version + '</td></tr></table>');

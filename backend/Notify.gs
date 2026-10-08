@@ -30,7 +30,7 @@ var Notify = {
 
   body_: function (kind, site, rec, linkType) {
     var lines = [kind + 'があります。', '現場: ' + (site ? site.name : '')];
-    if (rec) lines.push('階: ' + rec.floor + ' / ロット: ' + rec.lot);
+    if (rec) lines.push('階: ' + rec.floor + ' / 打設箇所: ' + rec.lot);
     lines.push(linkType === 'joins' ? this.link_('joins') : this.link_('record/' + (rec ? rec.recordId : '')));
     return lines.join('\n');
   },

@@ -15,6 +15,23 @@
   C.chip = function (kind, text) { return h('span', { class: 'chip ' + (kind || '') }, text); };
 
   C.banner = function (kind, children) { return h('div', { class: 'banner ' + (kind || ''), role: kind === 'bad' ? 'alert' : null }, children); };
+  /* 実測入力: スマホの小数キーボードには「−」が無いため、符号切替ボタンを併設する(P-36)。
+     値は半角/全角マイナスを許容して Number に直す。空・不正は null。 */
+  C.signToggle = function (inp, disabled) {
+    var b = h('button', { type: 'button', class: 'btn small ghost sign', 'aria-label': t('lbl.sign_toggle'), disabled: !!disabled }, '＋/－');
+    b.addEventListener('click', function () {
+      var v = String(inp.value || '').trim();
+      inp.value = (v.charAt(0) === '-') ? v.slice(1) : '-' + v;
+      inp.focus();
+    });
+    return b;
+  };
+  C.parseMeasure = function (raw) {
+    var s = String(raw == null ? '' : raw).trim().replace(/[−－ー‐]/g, '-').replace(/[＋]/g, '+').replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+    if (s === '' || s === '-' || s === '+') return null;
+    var n = Number(s);
+    return isFinite(n) ? n : null;
+  };
   C.msg = function (kind, text) { return h('div', { class: 'msg ' + (kind || '') }, text); };
   C.skeleton = function (n) { var f = document.createDocumentFragment(); for (var i = 0; i < (n || 3); i++) f.appendChild(h('div', { class: 'skel' })); return f; };
 

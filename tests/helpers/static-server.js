@@ -20,6 +20,11 @@ function startStatic({ apiUrl, port = 0 }) {
         // 配信時のみ API_URL を差し替える(ファイル自体は変更しない)
         buf = Buffer.from(String(buf).replace(/API_URL:\s*'[^']*'/, `API_URL: '${apiUrl}'`));
       }
+      if (p === '/index.html') {
+        // 本番CSPはGASだけを許可している。テスト時だけ、差し替えたAPI(mock/harness)のオリジンを許可する(ファイル自体は変更しない)
+        let origin = ''; try { origin = new URL(apiUrl).origin; } catch (e) { /* 無視 */ }
+        if (origin) buf = Buffer.from(String(buf).replace("connect-src 'self'", "connect-src 'self' " + origin));
+      }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
       res.end(buf);
     });
