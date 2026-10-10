@@ -60,6 +60,8 @@
             takenAt: m.takenAt, width: m.width, height: m.height, bytes: m.bytes, sha256: m.sha256, stampText: m.stampText
           };
           if (row.params.itemId) params.itemId = row.params.itemId;
+          // 図面(版1.6): kind と markers を同送(itemId は付けない)
+          if (m.kind === 'drawing') { params.kind = 'drawing'; params.markers = m.markers || []; }
           // サムネは index=0 のリクエストに同梱(単発は常に同梱)
           if (idx === 0) return KW.photo.blobToB64(pb.thumb).then(function (tb) { params.thumb = tb; return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 }); });
           return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 });

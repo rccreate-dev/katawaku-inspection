@@ -119,6 +119,14 @@
           if (g !== lastG) { el.appendChild(h('div', { class: 'grp' }, g)); lastG = g; }
           el.appendChild(C.itemReadonly(it, i));
         });
+        // 図面(読み取り専用。SPEC §7.7)
+        el.appendChild(C.drawingSection({
+          recordId: id, side: null,
+          get: function () { return { detail: d, work: null, blobs: [] }; },
+          canEdit: function () { return false; },
+          items: function () { return []; },
+          refreshBlobs: function () { return Promise.resolve(); }
+        }));
         // コメント追記
         if (has(d, 'addNote')) {
           var ta = h('textarea', { maxlength: '2000', 'aria-label': t('scr.S08.add_note') });

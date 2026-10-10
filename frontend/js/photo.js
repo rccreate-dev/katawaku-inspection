@@ -175,7 +175,78 @@
     return { single: false, total: chunks.length, chunks: chunks, tooLarge: chunks.length > 12 };
   }
 
+  /* ---- 図面(SPEC §7.7)の純関数 ---- */
+  var DRAWING_MAX_EDGE = 1800;
+  var DRAWING_QUALITIES = [0.8, 0.7, 0.6, 0.5];
+  var DRAWING_RETRY_QUALITY = 0.6;
+  var DRAWING_RETRY_COUNT = 4;
+
+  /* 項目番号の表示: 1〜20 は丸数字(①〜⑳)、21以上は通常の数字 */
+  function drawingNo(n) {
+    n = Math.floor(Number(n));
+    return (n >= 1 && n <= 20) ? String.fromCharCode(0x2460 + n - 1) : String(n);
+  }
+
+  /*
+   * 印の文字(§7.7-2)。no=画面の項目番号、k=置いた順の通し番号(1始まり)、c=その項目の印の数、measure=項目の測定区分。
+   * ・measure≠none は常に「N-k」 ・measure=none は c=1 のとき「N」、c>=2 のとき「N-k」
+   */
+  function drawingLabel(no, k, c, measure) {
+    var base = drawingNo(no);
+    return (measure !== 'none' || c >= 2) ? base + '-' + k : base;
+  }
+
+  /*
+   * 印の並び(置いた順)から label の配列を決め直す。削除後の付け直しにも使う(枝番は常に1から連続)。
+   * markers: [{itemId}]、items: [{itemId, no, measure}]。items に無い itemId の label は '' になる。
+   */
+  function drawingLabels(markers, items) {
+    var info = {}, count = {}, seen = {};
+    (items || []).forEach(function (it) { info[it.itemId] = it; });
+    (markers || []).forEach(function (m) { count[m.itemId] = (count[m.itemId] || 0) + 1; });
+    return (markers || []).map(function (m) {
+      var it = info[m.itemId];
+      if (!it) return '';
+      seen[m.itemId] = (seen[m.itemId] || 0) + 1;
+      return drawingLabel(it.no, seen[m.itemId], count[m.itemId], it.measure);
+    });
+  }
+
+  /*
+   * 図面の縮小・再圧縮の計画(§7.7-3)。長辺1800px以下に縮小し、
+   * 品質 0.8 → 0.7 → 0.6 → 0.5、それでも超えるなら寸法を0.85倍にして再試行(最大4回。品質0.6)。
+   * 戻り値: { base:{w,h}, attempts:[{scale,quality,w,h}] }
+   */
+  function fitDrawing(w, h, opts) {
+    var maxEdge = (opts && opts.maxEdge) || DRAWING_MAX_EDGE;
+    var base = scaledSize(w, h, maxEdge);
+    var list = DRAWING_QUALITIES.map(function (q) { return { scale: 1, quality: q }; });
+    for (var i = 1; i <= DRAWING_RETRY_COUNT; i++) list.push({ scale: Math.pow(0.85, i), quality: DRAWING_RETRY_QUALITY });
+    list.forEach(function (a) { a.w = Math.max(1, Math.round(base.w * a.scale)); a.h = Math.max(1, Math.round(base.h * a.scale)); });
+    return { base: base, attempts: list };
+  }
+
+  /*
+   * 計画を順に試し、maxBytes 以下になった時点で採用する。encode(attempt) -> Promise<{size,...}>
+   * 戻り値: { result, size, attempts(試した回数), tooLarge(最後まで maxBytes 超) }
+   */
+  function encodeDrawing(plan, encode, maxBytes) {
+    var tried = 0, last = null;
+    function step(i) {
+      if (i >= plan.attempts.length) return Promise.resolve(done());
+      tried++;
+      return encode(plan.attempts[i]).then(function (r) {
+        last = r;
+        return r.size <= maxBytes ? done() : step(i + 1);
+      });
+    }
+    function done() { return { result: last, size: last.size, attempts: tried, tooLarge: last.size > maxBytes }; }
+    return step(0);
+  }
+
   var api = {
+    drawingNo: drawingNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, encodeDrawing: encodeDrawing,
+    toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,
     process: process, startCamera: startCamera, stopCamera: stopCamera, chunksOf: chunksOf, blobToB64: blobToB64, sha256Hex: sha256Hex

@@ -4,13 +4,13 @@
  * ・同一 SW_VERSION の間は、シェルのファイルを実行時に取得して上書きしない(JS/CSS/i18n が新旧混在になるのを防ぐ)。
  * ・唯一の例外はナビゲーション(HTMLへの遷移)だけ stale-while-revalidate。
  * ・APIは一切キャッシュしない(別オリジンは素通し)。 */
-var SW_VERSION = '1.0.0-13';
+var SW_VERSION = '1.0.0-14';
 var CACHE = 'katawaku-shell-' + SW_VERSION;
 var SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'manifest.webmanifest',
   'vendor/qrcode.js',
-  'js/core.js', 'js/time.js', 'js/db.js', 'js/api.js', 'js/validate.js', 'js/outbox.js', 'js/photo.js', 'js/data.js', 'js/sync.js',
-  'js/ui/components.js', 'js/ui/modals.js', 'js/ui/s01.js', 'js/ui/s03.js', 'js/ui/s06.js', 'js/ui/s08.js', 'js/ui/s09.js', 'js/ui/s10.js', 'js/ui/s11.js', 'js/ui/s16.js',
+  'js/core.js', 'js/time.js', 'js/db.js', 'js/api.js', 'js/validate.js', 'js/outbox.js', 'js/photo.js', 'js/drawing.js', 'js/data.js', 'js/sync.js',
+  'js/ui/components.js', 'js/ui/modals.js', 'js/ui/drawings.js', 'js/ui/s01.js', 'js/ui/s03.js', 'js/ui/s06.js', 'js/ui/s08.js', 'js/ui/s09.js', 'js/ui/s10.js', 'js/ui/s11.js', 'js/ui/s16.js',
   'js/app.js', 'icons/icon-192.png', 'icons/icon-512.png'
 ];
 

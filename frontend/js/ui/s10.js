@@ -17,6 +17,7 @@
       var detail, work, blobs = [], rows = [];
       C.siteNameOfRecord(id).then(function (n) { if (ctx.alive() && !detail) ctx.chrome({ back: '#/', site: n }); });
       var pending = {}, commentDirty = false;
+      var drawBox = null;
       var itemNodes = {}, verdictBox = null, serverViol = null, busyVerdict = false;
       var save = KW.debounce(doSave, 500);
 
@@ -323,6 +324,19 @@
           ta.addEventListener('input', function () { work.qaComment = ta.value; commentDirty = true; work.dirty = true; save(); drawVerdict(); });
           el.appendChild(h('div', { class: 'card' }, h('label', { class: 'lbl' }, t('scr.S10.comment')), ta));
         }
+        // 図面(SPEC §7.7): 管理者(side=qa)が追加・削除。職長の図面は読み取りのみ
+        drawBox = C.drawingSection({
+          recordId: id, side: 'qa',
+          get: function () { return { detail: detail, work: work, blobs: blobs }; },
+          canEdit: function () { return editable() && has(detail, 'uploadPhotoChunk'); },
+          items: function () {
+            return allItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, def: i.def }; })
+              .filter(function (o) { return o.def.audience !== 'foreman'; })
+              .map(function (o) { return { itemId: o.itemId, no: o.no, measure: o.def.measure, text: KW.itemText(o.def) }; });
+          },
+          refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
+        });
+        el.appendChild(drawBox);
         verdictBox = h('div'); el.appendChild(verdictBox);
         drawVerdict();
       }
@@ -357,7 +371,7 @@
         Promise.all([KW.data.getRow(id), KW.data.photoBlobsFor(id)]).then(function (v) {
           if (!ctx.alive()) return;
           if (v[0] && v[0].detail) detail = v[0].detail;
-          blobs = v[1]; Object.keys(itemNodes).forEach(redraw); drawVerdict();
+          blobs = v[1]; Object.keys(itemNodes).forEach(redraw); if (drawBox) drawBox.redraw(); drawVerdict();
         });
       });
       ctx.on('poll:done', function () {

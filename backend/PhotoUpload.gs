@@ -83,13 +83,16 @@ function photoFolders_(rec, site) {
 }
 
 /** ロック外: 本体とサムネをDriveに保存。サムネだけ失敗したら本体も消して DRIVE_ERROR */
-function photoSave_(rec, site, itemId, p, v, taken) {
+function photoSave_(rec, site, itemId, p, v, taken, kind) {
   var fileId = '', thumbId = '';
   try {
     var f = photoFolders_(rec, site);
     var floorF = subFolder_(f.siteFolder, Util.sanitizeName(rec.floor));
     var dateF = subFolder_(floorF, Util.dateOf(taken));
-    var name = rec.recordId + '_' + (itemId || 'prime') + '_' + p.side + '_' + p.photoId + '.jpg';
+    // 図面は {recordId}_drawing_{side}_{photoId}.jpg(§5.4.4)
+    var name = kind === 'drawing'
+      ? rec.recordId + '_drawing_' + p.side + '_' + p.photoId + '.jpg'
+      : rec.recordId + '_' + (itemId || 'prime') + '_' + p.side + '_' + p.photoId + '.jpg';
     fileId = dateF.createFile(Utilities.newBlob(v.bytes, 'image/jpeg', name)).getId();
     thumbId = f.thumbs.createFile(Utilities.newBlob(v.thumbBytes, 'image/jpeg', p.photoId + '.jpg')).getId();
     var siteFolderId = f.siteFolder.getId();
@@ -111,6 +114,28 @@ function photoReceivedAll_(total) {
   return all;
 }
 
+/** その項目が side の audience に合うか(self=foreman/both、qa=qa/both) */
+function photoAudienceOk_(row, side) {
+  return side === 'self' ? row.snapshot.audience !== 'qa' : row.snapshot.audience !== 'foreman';
+}
+
+/**
+ * 図面の markers 検証(§5.4.4)。配列0〜60件、各要素 {itemId,label,x,y}。
+ * 不正なら VALIDATION_FAILED(FIELD_INVALID, path=markers)。通れば itemId/label/x/y だけに絞った配列を返す
+ */
+function photoMarkers_(raw, rows, side) {
+  var bad = function () { return violation_([{ rule: 'FIELD_INVALID', path: 'markers' }]); };
+  if (!Array.isArray(raw) || raw.length > 60) throw bad();
+  var ok = {};
+  rows.forEach(function (r) { if (photoAudienceOk_(r, side)) ok[r.itemId] = true; });
+  return raw.map(function (m) {
+    if (!Util.isObj(m) || typeof m.itemId !== 'string' || !ok[m.itemId]) throw bad();
+    if (typeof m.label !== 'string' || m.label.length < 1 || m.label.length > 8) throw bad();
+    if (typeof m.x !== 'number' || typeof m.y !== 'number' || !(m.x >= 0 && m.x <= 1) || !(m.y >= 0 && m.y <= 1)) throw bad();
+    return { itemId: m.itemId, label: m.label, x: m.x, y: m.y };
+  });
+}
+
 function act_uploadPhotoChunk(ctx) {
   var p = ctx.params, actor = ctx.actor;
   if (!Util.isClientGenId(p.photoId, 'p')) throw violation_([{ rule: 'FIELD_INVALID', path: 'photoId' }]);
@@ -118,14 +143,27 @@ function act_uploadPhotoChunk(ctx) {
   // 一次判定(ロック外。早期失敗のため。確定判定はロック内)
   requireAuth_(actor, 'uploadPhotoChunk', { record: rec, params: p });
 
+  // kind / markers(版1.6。§5.4.4)。kind 省略は検査写真
+  var kind = p.kind === undefined || p.kind === null ? 'photo' : p.kind;
+  if (kind !== 'photo' && kind !== 'drawing') throw violation_([{ rule: 'FIELD_INVALID', path: 'kind' }]);
+  var isDrawing = kind === 'drawing';
+  var markers = null;
+
   // itemId の整合
   var itemId = p.itemId || '';
-  if (p.side === 'prime') {
+  if (isDrawing) {
     if (itemId) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
+    if (p.side === 'prime') throw violation_([{ rule: 'FIELD_INVALID', path: 'side' }]);
+    markers = photoMarkers_(p.markers, itemsOf_(rec.recordId), p.side);
   } else {
-    var row = itemsOf_(rec.recordId).filter(function (r) { return r.itemId === itemId; })[0];
-    var okAud = row && (p.side === 'self' ? row.snapshot.audience !== 'qa' : row.snapshot.audience !== 'foreman');
-    if (!itemId || !okAud) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
+    if (p.markers !== undefined && p.markers !== null) throw violation_([{ rule: 'FIELD_INVALID', path: 'markers' }]);
+    if (p.side === 'prime') {
+      if (itemId) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
+    } else {
+      var row = itemsOf_(rec.recordId).filter(function (r) { return r.itemId === itemId; })[0];
+      var okAud = row && photoAudienceOk_(row, p.side);
+      if (!itemId || !okAud) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
+    }
   }
   if (p.index >= p.total) throw violation_([{ rule: 'FIELD_INVALID', path: 'index' }]); // total=1 で index≠0 もここ
   if (!/^[0-9a-f]{64}$/.test(p.sha256)) throw violation_([{ rule: 'FIELD_INVALID', path: 'sha256' }]);
@@ -178,16 +216,20 @@ function act_uploadPhotoChunk(ctx) {
   }
 
   // 上限の事前確認(早期失敗。確定判定はロック内)。同じ photoId の再送は冪等成功になり得るので数えない
+  // 図面(kind=drawing)は記録×sideで5枚まで。検査写真(項目×side)の数には互いに含めない
+  var DRAWING_MAX = 5;
+  var maxCount = isDrawing ? DRAWING_MAX : lim.maxPer;
   var countSame = function () {
     return activePhotos_(rec.recordId).filter(function (x) {
-      return x.side === p.side && x.itemId === itemId && x.photoId !== p.photoId;
+      return x.side === p.side && x.photoId !== p.photoId && photoKindOf_(x) === kind && (isDrawing || x.itemId === itemId);
     }).length;
   };
-  if (countSame() >= lim.maxPer) throw new ApiError('PHOTO_LIMIT', '1項目あたりの写真上限です', { max: lim.maxPer });
+  // 同じ photoId の既存行があるときは、確定判定(ロック内の手順2=冪等/不一致→PHOTO_INVALID)に任せる
+  if (!Repo.get('Photos', p.photoId) && countSame() >= maxCount) throw new ApiError('PHOTO_LIMIT', isDrawing ? '図面の上限です' : '1項目あたりの写真上限です', { max: maxCount });
 
   // Drive保存(ロックの外)
   var site = Repo.get('Sites', rec.siteId);
-  var saved = photoSave_(rec, site, itemId, p, v, taken);
+  var saved = photoSave_(rec, site, itemId, p, v, taken, kind);
 
   var committed = false; // Photos 行になったら true(以降はファイルを消さない)
   try {
@@ -201,7 +243,7 @@ function act_uploadPhotoChunk(ctx) {
       var dup = Repo.get('Photos', p.photoId);
       if (dup) {
         // 5項目すべて一致(撮影者が認証済みユーザーと同じ)のときだけ冪等成功。他人の写真の存在を示す情報は返さない
-        if (dup.recordId !== rec2.recordId || dup.itemId !== itemId || dup.side !== p.side || dup.sha256 !== p.sha256 ||
+        if (dup.recordId !== rec2.recordId || dup.itemId !== itemId || photoKindOf_(dup) !== kind || dup.side !== p.side || dup.sha256 !== p.sha256 ||
           dup.takenBy !== a2.actor.userId) {
           throw new ApiError('PHOTO_INVALID', '写真を登録できません');
         }
@@ -209,13 +251,14 @@ function act_uploadPhotoChunk(ctx) {
       }
 
       // 項目あたり上限(確定)
-      if (countSame() >= lim.maxPer) throw new ApiError('PHOTO_LIMIT', '1項目あたりの写真上限です', { max: lim.maxPer });
+      if (countSame() >= maxCount) throw new ApiError('PHOTO_LIMIT', isDrawing ? '図面の上限です' : '1項目あたりの写真上限です', { max: maxCount });
 
       var now = Util.now();
       var photo = Repo.append('Photos', {
         photoId: p.photoId, recordId: rec2.recordId, itemId: itemId, side: p.side, round: rec2.round, takenBy: a2.actor.userId,
         takenAt: Util.fmtDt(taken), receivedAt: Util.fmtDt(now), mime: 'image/jpeg', bytes: p.bytes, width: p.width, height: p.height,
-        sha256: p.sha256, stampText: p.stampText, driveFileId: saved.fileId, thumbFileId: saved.thumbId, clockSuspect: suspect, deleted: false
+        sha256: p.sha256, stampText: p.stampText, driveFileId: saved.fileId, thumbFileId: saved.thumbId, clockSuspect: suspect, deleted: false,
+        kind: kind, markers: isDrawing ? markers : null
       });
       committed = true;
       touchRecord_(rec2, {});

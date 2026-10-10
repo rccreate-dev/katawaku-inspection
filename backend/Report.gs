@@ -57,7 +57,53 @@ function reportSubject_(rec, site) {
   return parts.filter(function (x) { return x; }).join(' ');
 }
 
-function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt) {
+/** 確認箇所(図面)の1ページ分(SPEC §10.2c)。table と mm 固定のみ。印は画像に焼き込み済みなので描き足さない */
+function buildDrawingPageHtml_(ph, rows, seq, resChip) {
+  var b64 = '';
+  try { b64 = photoBytesB64_(ph.driveFileId); } catch (e) { b64 = ''; }
+  var w = Number(ph.width), hh = Number(ph.height);
+  var style;
+  if (!(w > 0 && hh > 0) || w >= hh) {
+    // 横長: 幅186mm。ただし高さが170mmを超えるなら高さ170mm
+    style = (w > 0 && hh > 0 && 186 * hh / w > 170) ? 'height:170mm' : 'width:186mm';
+  } else {
+    style = 'height:170mm';
+  }
+  var who = (ph.side === 'qa' ? '管理者' : '職長') + ': ' + userName_(ph.takenBy);
+  var o = [];
+  o.push('<div style="page-break-before:always"><h2>確認箇所(図面)</h2>');
+  o.push('<p>' + esc_(who) + ' / ' + esc_(dtShort_(ph.takenAt)) + '</p>');
+  o.push('<table style="table-layout:fixed;width:186mm;border:0"><tr><td style="border:0;text-align:center;padding:0">' +
+    (b64 ? '<img style="' + style + '" src="data:image/jpeg;base64,' + b64 + '">' : '画像を読み込めませんでした') + '</td></tr></table>');
+  var markers = Array.isArray(ph.markers) ? ph.markers : [];
+  if (!markers.length) {
+    o.push('<p>印の書き込みなし</p></div>');
+    return o.join('\n');
+  }
+  var byItem = {}, ids = [];
+  markers.forEach(function (m) {
+    if (!seq[m.itemId]) return;
+    if (!byItem[m.itemId]) { byItem[m.itemId] = []; ids.push(m.itemId); }
+    byItem[m.itemId].push(m.label);
+  });
+  ids.sort(function (a, b) { return seq[a] - seq[b]; });
+  var cell = 'white-space:nowrap;overflow:hidden;height:6mm;line-height:6mm;padding:0 2px;vertical-align:middle';
+  o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:30mm"><col style="width:100mm"><col style="width:28mm"><col style="width:28mm"></colgroup>');
+  o.push('<tr><th style="' + cell + '">番号</th><th style="' + cell + '">項目</th><th style="' + cell + '">職長</th><th style="' + cell + '">管理者</th></tr>');
+  ids.forEach(function (id) {
+    var row = rows[seq[id] - 1], snap = row.snapshot;
+    o.push('<tr><td style="' + cell + '">' + esc_(byItem[id].join(', ')) + '</td><td style="' + cell + '">No.' + seq[id] + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) +
+      '</td><td style="' + cell + '">' + resChip(row.selfResult, row.selfSeverity) + '</td><td style="' + cell + '">' + resChip(row.qaResult, row.qaSeverity) + '</td></tr>');
+  });
+  o.push('</table></div>');
+  return o.join('\n');
+}
+
+function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, nowDt) {
+  // 版1.6: 写真ページ(60枚上限・並び)には図面を含めない。図面は §10.2c で別に載せる
+  var photos = allPhotos.filter(function (x) { return photoKindOf_(x) !== 'drawing'; });
+  var drawings = allPhotos.filter(function (x) { return photoKindOf_(x) === 'drawing'; })
+    .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : (a.takenAt > b.takenAt ? 1 : 0); });
   var hash = reportSnapshotHash_(rec, rows, events.filter(function (e) { return /^verdict_/.test(e.kind); }));
   var stage = STAGE_LABEL_[rec.stage] || rec.stage;
   var h = [];
@@ -128,6 +174,18 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   });
   h.push('</table>');
   h.push('<p style="font-size:8px;color:#444">管理者コメントの全文は写真ページおよび電子記録で確認できます。</p>');
+
+  // 確認箇所(図面)(SPEC §10.2c): 項目表の直後・NG・是正の経過の前。0枚なら見出しごと出さない
+  if (drawings.length) {
+    var dseq = {};
+    rows.forEach(function (r, i) { dseq[r.itemId] = i + 1; });
+    var chip = function (res, sev) {
+      var t = (RESULT_LABEL_[res] || '-') + (res === 'ng' && sev ? '(' + (sev === 'major' ? '重大' : '軽微') + ')' : '');
+      return res === 'ng' ? '<span style="color:#c00;font-weight:bold">' + esc_(t) + '</span>' : esc_(t);
+    };
+    drawings.slice(0, 6).forEach(function (d) { h.push(buildDrawingPageHtml_(d, rows, dseq, chip)); });
+    if (drawings.length > 6) h.push('<p>他' + (drawings.length - 6) + '枚は電子記録で閲覧可</p>');
+  }
 
   // NG・是正の経過
   h.push('<h2>NG・是正の経過</h2>');

@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.5.3 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
+- 版: 1.6.0 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -28,6 +28,7 @@
 | `severity`(NG項目の重さ) | `minor` / `major` |
 | `verdict`(品質管理者の判定) | `ok` / `minor` / `major` |
 | `side`(写真・入力の主体) | `self`(職長) / `qa`(品質管理者) / `prime`(元請サイン証跡) |
+| `photoKind`(`Photos.kind`。版1.6) | `photo`(検査写真。空欄も `photo` 扱い) / `drawing`(図面。確認箇所の書き込み付き。§7.7) |
 | `noteKind` | `foreman` / `manager` |
 | `primeMethod`(元請サイン方法) | `paper`(紙に署名) / `pdf`(PDFへ署名・押印) / `onsite`(現地で対面確認) |
 | `lang` | `ja` / `id` |
@@ -455,6 +456,13 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | clockSuspect | bool | 必 | 端末時刻が不正と判定したとき `TRUE` |
 | deleted | bool | 必 | 論理削除(既定FALSE) |
 | deletedBy / deletedAt | id/dt | | |
+| kind | enum(photo,drawing) | | 版1.6。空=`photo`(旧行)。`drawing` は図面(§7.7)。**列は末尾に追加**(既存シートは `setupSheets()` が不足列を末尾に補う。§2.9a) |
+| markers | json | | 版1.6。`kind=drawing` のみ。確認箇所の印の配列(§7.7)。`photo` では空 |
+
+**図面の行(`kind=drawing`)の値**: `itemId` は空、`side` は `self` または `qa`(`prime` 不可)、`mime` は `image/jpeg`、本体=書き込み(印)を焼き込み済みのJPEG、`stampText`=§7.2 と同じ書式の文字列(ただし画素には焼き込まない)、`takenAt`=登録操作の時刻。
+
+### 2.9a 既存シートへの列追加(版1.6)
+`setupSheets()` は、既存シートの **ヘッダが SPEC の先頭部分と一致し、列数がSPECより少ない** 場合(列の末尾追加だけの差)は、エラーにせず不足列のヘッダを末尾に書き足す(データ行は触らない)。それ以外の不一致(順序違い・余分な列・名前違い)は従来どおりエラー。版1.6 の対象は `Photos` の `kind`,`markers` のみ。
 
 ### 2.10 Notes(コメント追記ログ)  PK=`noteId`  **追記専用**
 
@@ -786,7 +794,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 ```
 `result`/`severity` 未入力は `null`、`note` 未入力は `""`、`values` 未入力は `[]`。**職長に対しては、status が `draft`/`submitted` のとき `qa` を `null` で返す**(QAの下書きを見せない)。`fix`/`qa_ok`/`approved` では `qa` を返す(是正指示の確認用)。
 
-**PhotoMeta** `{ "photoId","itemId":"i9|null","side":"self|qa|prime","round":1,"takenBy":"u_tanaka","takenByName":"田中","takenAt":"…","width":1280,"height":960,"bytes":214532,"stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58" }`(削除済みは含めない)
+**PhotoMeta** `{ "photoId","itemId":"i9|null","side":"self|qa|prime","round":1,"takenBy":"u_tanaka","takenByName":"田中","takenAt":"…","width":1280,"height":960,"bytes":214532,"stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58","kind":"photo|drawing","markers":null }`(削除済みは含めない。**版1.6**: `kind` は常に返す(旧行は `photo`)。`markers` は `kind=drawing` のとき `[{ "itemId":"i9","label":"④-1","x":0.231,"y":0.412 }]`、`photo` では `null`。`x`,`y` は画像の左上を(0,0)・右下を(1,1)とした割合)
 
 **Note** `{ "noteId","itemId":"str|null","kind":"foreman|manager","authorUserId","authorName","authorRole","round","text","source":"submit|verdict|addNote","createdAt" }`
 
@@ -794,7 +802,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **RecordDetail** = RecordSummary(masked=false)のキー全て +
 ```json
-{ "items":[ <ItemEntry> ], "primePhotos":[ <PhotoMeta> ], "notes":[ <Note> ], "events":[ <EventView> ],
+{ "items":[ <ItemEntry> ], "primePhotos":[ <PhotoMeta> ], "drawings":[ <PhotoMeta> ], "notes":[ <Note> ], "events":[ <EventView> ],
   "qaComment":"", "stopInfo": { "by":"u_tanaka","byName":"田中","at":"…","reason":"…" },
   "signatures": {
     "foreman": { "userId","name","at" },
@@ -802,6 +810,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
     "prime":   { "recordedBy","recordedByName","signerName","method","at" } },
   "timing": { "selfDeadlineAt":"…|null","qaOpenAt":"…|null","qaDeadlineAt":"…|null","selfLate":false,"qaLate":false } }
 ```
+- **`drawings`(版1.6)**: `kind=drawing` の未削除の行(`takenAt` 昇順、両side)。`items[].self.photos`・`items[].qa.photos`・`primePhotos` には **含めない**(`kind=photo` のみ)。**職長に対しては status が `draft`/`submitted` のとき `side=qa` の図面を含めない**(`qa` の下書き非表示と同じ)。無ければ `[]`。
 - `notes` と `events` は時刻昇順。`events` は直近100件。`stopInfo`/`signatures.*` は無ければ `null`。`signatures.foreman`=直近の提出、`signatures.qa`=`qaVerdict=ok` のときのみ、`signatures.prime`=元請サイン記録済みのときのみ。`qaComment` は職長にも `fix`/`qa_ok`/`approved` では返す(`draft`/`submitted` では `""`)。
 - 項目は `def.seq` 昇順。`audience=qa` の項目は職長には返さない(`self` 入力不要)。
 
@@ -1016,8 +1025,12 @@ params:
   "index":0, "total":1, "mime":"image/jpeg", "data":"<base64。単発=本体全体(≤photoSingleMaxChars)/分割=一部(≤photoChunkChars)>",
   "thumb":"<base64。index=0のときのみ必須>",
   "takenAt":"2026-10-07T09:58:12+09:00", "width":1280, "height":960,
-  "bytes":214532, "sha256":"<本体全体のSHA-256 hex>", "stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58" }
+  "bytes":214532, "sha256":"<本体全体のSHA-256 hex>", "stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58",
+  "kind":"photo", "markers":null }
 ```
+- **`kind` / `markers`(版1.6。省略可。省略は `kind="photo"`・`markers=null`)**: `kind="drawing"`(図面。§7.7)のとき、`itemId` は **空または省略**(値があれば `FIELD_INVALID`、path=`itemId`)、`side` は `self`/`qa` のみ(`prime` は `FIELD_INVALID`、path=`side`)、`markers` は **配列(0〜60件)**。各要素は `{ "itemId","label","x","y" }`: `itemId` はその記録の項目で `audience` が `side` に合うもの、`label` は1〜8文字の文字列、`x`・`y` は 0 以上 1 以下の数。1つでも不正なら `VALIDATION_FAILED`(`FIELD_INVALID`、path=`markers`)。`kind="drawing"` で `markers` が配列でない(null・省略を含む)ときも同じ。**評価順**: 他のactionと同じく §4.2 の `authorize`(役割・状態)が入力検証より先に効く(例: 職長が `side=prime` を送ると `FORBIDDEN_ROLE`。`FIELD_INVALID`(path=`side`)になるのは `qa_ok` の記録に対する担当QAのときだけ)。`kind="photo"` で `markers` が null/省略以外なら `FIELD_INVALID`(path=`markers`)、`kind` が `photo`/`drawing` 以外も同じ(path=`kind`)。`markers` は `Photos.markers`(json)にそのまま保存する(`itemId`/`label`/`x`/`y` 以外のキーは捨てる)。
+- **図面の上限(版1.6)**: 記録×side あたり未削除の図面は **5枚まで**(固定値。Config にしない)。超えるとき `PHOTO_LIMIT`(`{max:5}`)。図面は `photoMaxPerItem` の数に **含めない**(項目の写真枚数にも数えない)。逆に、検査写真は図面の数に含めない。
+- 図面も **本体 `bytes` ≤ `photoMaxBytes`**・JPEG・SHA-256・サムネ(§7.3 の検査)は検査写真と同じ。冪等性は `photoId` 単位(既存行の一致条件に `kind` も加える。不一致は `PHOTO_INVALID`)。Driveのファイル名は `{recordId}_drawing_{side}_{photoId}.jpg`。
 - **モード**(版1.4): **単発モード** = `total=1` かつ `index=0`。1リクエストで検証・組立・Drive保存・`Photos` 追記まで完了し `complete:true` を返す(CacheServiceを使わない)。`thumb` は同じリクエストに含める(`index===0` のとき必須、という従来の規則のまま)。**分割モード** = `total` 2〜12(後方互換。従来どおり)。`total=1` で `index≠0`、`index>=total`、`total` が1〜12の整数でない → `VALIDATION_FAILED`(`FIELD_INVALID`、`path`=`index`/`total`)。
 - クライアントの選び方は §7.3(base64長 ≤ `photoSingleMaxChars` なら必ず単発。超える場合と旧サーバーのときだけ分割)。サーバーはどちらのモードも受理する(クライアントが選ぶ)。
 - メタ(`takenAt`〜`stampText`)は **全リクエスト(全チャンク)に付ける**(サーバーはステートレスに検査できる)。分割モードのチャンクは **index昇順に1つずつ**送る。
@@ -1041,7 +1054,7 @@ params:
 - **Driveファイルの後始末(孤児を作らない)**: ロック外で作った本体とサムネは、ロック内の1〜3で成功しなかった全経路(エラー応答・例外・`LOCK_TIMEOUT`・手順2の冪等成功)で、応答を返す前に `setTrashed(true)`(ゴミ箱)にする。削除の失敗は握りつぶしてよい(主処理の結果を優先。ログにファイルIDのみ)。本体の保存に成功しサムネの保存に失敗したときは `DRIVE_ERROR` とし、保存済みの本体も削除する。
 - **同一 `photoId` の並行・再送**: 同時に複数届いても `Photos` 行は1行だけ。後着は手順2で成功し、自分のDriveファイルを削除する(先着の行のファイルは残る)。完成済みの再送は、手順1(再認証)に通れば成功を返す。
 - **分割モード**: 途中チャンク(`index<total-1`)は、一次 `authorize` と文字数検査(1)のあと `CacheService`(キー `pc:{photoId}:{index}`、TTL 21600秒。サムネは `pt:{photoId}`)に保存するだけで、**ロックを取らず、シートに書かない**。最終チャンクで全index(0〜total-1)がCacheに揃っていれば連結して上の検証(1〜7)→Drive保存→ロック内の処理(1〜6)→成功後にCacheを消す(失敗時は消さなくてよい)。欠け・失効は検証の前に `CHUNK_MISSING`(`{missing}`)。クライアントは当該写真を **index 0 から再送**。
-- 権限: §4.1(`side`別)。`itemId` は `side=prime` で空、それ以外は必須(記録の項目に存在し `audience` が合うこと)。
+- 権限: §4.1(`side`別。**図面も同じ権限・同じ状態条件**)。`itemId` は `side=prime` と `kind=drawing` で空、それ以外は必須(記録の項目に存在し `audience` が合うこと)。
 - エラー: `NOT_FOUND`/`FORBIDDEN_*`/`RECORD_LOCKED`/`NOT_CLAIMER`/`STATE_CONFLICT`(side=primeでqa_okでない)/`VALIDATION_FAILED`(`FIELD_INVALID`)/`PHOTO_*`/`CHUNK_MISSING`(分割のみ)/`LOCK_TIMEOUT`/`DRIVE_ERROR`。
 
 **deletePhoto** ★ Q `{ "photoId" }` → `{ "photoId", "deleted":true }`(論理削除。撮影者本人・`photo.round == record.round`・そのsideが編集可能な間のみ。他ラウンドの写真は消せない)。**削除済みの写真は `NOT_FOUND`**(存在しない `photoId` と同じ扱い。権限判定より先に評価し、削除済みかどうかを他人に知らせない)。エラー: `NOT_FOUND` / `FORBIDDEN_TEAM` / `RECORD_LOCKED`。
@@ -1192,6 +1205,7 @@ PDF: `generateReport` `listReports`
 - `navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })` で全画面カメラ(M2)を表示し、シャッターで `<video>` のフレームを `<canvas>` に描画して撮影する。**`<input type="file">` や `capture` 属性は使わない**(端末ギャラリーの流用・加工を防ぐ)。
 - カメラが使えない/権限拒否のときは撮影不可の案内(`err.camera_denied`)を表示。**代替としてギャラリー選択は提供しない**。ただし自動テスト用に、`frontend/config.js` の `ALLOW_FILE_PHOTO`(既定 `false`)が `true` のビルドでのみファイル選択を許す。E2EテストはChromiumの `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` を使いカメラ経路を通す。
 - 撮影枚数: 項目×side あたり `photoMaxPerItem`(5)枚まで。
+- **例外(版1.6): 図面(§7.7)は参考資料のため、ファイル選択 `<input type="file" accept="image/*">` での取り込み(撮影・アルバム・スクリーンショット)を常に許す**(`ALLOW_FILE_PHOTO` に依らない)。この例外は図面だけで、検査写真(`kind=photo`)は従来どおりアプリ内カメラのみ。
 
 ### 7.2 スタンプ(画素に焼き込み)
 - 内容(**`stampText` と完全に同じ文字列**): `{現場名} {階}{工区があれば「・」+工区} ・ {検査者名} ・ {YYYY-MM-DD HH:mm}`
@@ -1230,6 +1244,34 @@ PDF: `generateReport` `listReports`
 - 一覧・詳細のサムネは `getPhotoThumbs`(1回20枚まで)で取得し、IndexedDB `photoCache` に保存(LRU 300枚)。未送信の写真は `photoBlobs` のローカルサムネを使う。
 - 拡大表示は `getPhoto`(本体)を都度取得し、`photoCache` に最大30枚保持。拡大画面にスタンプ文字列(`stampText`)を文字としても表示する。
 - 写真ルール: 職長の提出(S06/S07)では、NG項目は写真と備考が必須、重点項目(`key`)は `ok` でも写真必須(§5.3.1)。**QA側(S10)は写真任意**(NGは備考と重さが必須。写真が無くても判定できる)。**送信前チェックはクライアントも同じ `rule` 名で行う**(提出ボタンの前に赤枠表示)。
+
+### 7.7 図面(確認箇所の書き込み)(版1.6。ユーザー決定)
+**目的**: どこを確認したかを、管理者・元請に図面上で示す。職長・管理者が図面の画像を取り込み、確認した項目の番号を任意の位置に書き込む。元請提出PDFの2ページ目に付ける(§10.2c)。
+
+**1. 取り込み(登録方法)**
+- A: 図面を撮影する、またはアルバムから選ぶ。A': PDF図面を画面に出して撮ったスクリーンショットをアルバムから選ぶ。どちらも `<input type="file" accept="image/*">` の1つのボタン「図面を追加」で行う(端末が撮影/アルバムの選択肢を出す)。
+- **PDFファイルの直接取り込みは v1 対象外**(pdf.js等の追加が必要なため。P-40)。HEIC等はブラウザが読めない場合 `err.drawing_unreadable` を表示し、「スクリーンショットかカメラで撮り直す」旨を案内する。
+- 1つの記録(×side)に **最大5枚**(基本は1枚)。登録できるのは、その side の写真を追加できる状態のとき(§4.1 `uploadPhotoChunk`)。
+
+**2. 書き込みエディタ(M10。全画面)**
+- 図面を画面幅に合わせて表示。倍率ボタン(×1/×2/×3)で拡大し、拡大中は指でスクロールして移動する(ピンチ操作は要求しない)。「回転」(90度)ボタンで向きを直せる。
+- 上部に **項目の番号ボタンの列**(その side の項目。番号は画面の項目番号と同じ。§下の「番号」)。番号ボタンを選ぶと「その項目を置くモード」になり、図面をタップした位置に **印(番号の文字)** が置かれる。何度でも置ける。
+- **印の文字(label)**: 項目番号 N について、その項目の印の数 c と、置いた順の通し番号 k(1始まり)から
+  - `measure ≠ none`(測定点を追加できる項目)は **常に `N-k`**(例 `④-1`、`④-2`。測定点が増えるごとに枝番)。
+  - `measure = none` の項目は、c=1 のとき `N`、c≥2 のときは `N-k`(2個目を置いた時点で1個目も `N-1` に自動で付け替える)。
+  - 印を削除したときは同じ規則で付け直す(枝番は常に1から連続)。
+  - 表示は N が 1〜20 のとき丸数字(①〜⑳)、21以上は通常の数字。枝番は `-k` を後ろに付ける(例 `④-1`、`21-2`)。**保存する `label` も同じ文字列**。
+- **印の見た目**: 番号の文字だけを大きめの太字で描く。**番号を囲む枠(楕円・四角・白い塗り)は描かない**。可読性のため文字の縁に細い白の縁取りを付けてよい(枠ではない)。色は side で固定: 職長=濃いピンク `#d6249f`、管理者=青 `#1565c0`。大きさは画像の長辺の約3%(最小24px)。
+- 印をタップすると選択でき、「この印を削除」で消せる。「ひとつ戻す」で直前に置いた印を取り消す。印を置いていなくても登録できる(`markers=[]`)。
+- 「登録」: 印を **画像に焼き込んだJPEG** を作り、検査写真と同じ経路(outbox の `uploadPhotoChunk`。§8)で送る。`markers` も同時に送る(再編集の元データ・PDFの凡例用)。元の画像(印なし)は保存しない(**編集のやり直しは「図面を削除して取り込み直す」**)。
+
+**3. 画質と容量**
+- 取り込んだ画像を長辺 **1800px 以下**に縮小(小さければそのまま)。JPEG品質 0.8 から、`photoMaxBytes`(600,000)を超える間は 0.7 → 0.6 → 0.5 と下げ、それでも超えるなら寸法を0.85倍にして再試行(最大4回)。最終的に超えたら `err.photo_too_large`。**再試行の順序(確定)**: ①寸法×1で品質 0.8 → 0.7 → 0.6 → 0.5 の順に試す。②すべて超えたら寸法を 0.85 倍ずつ縮め(最大4回)、各回は品質 0.6 で試す。合計最大8回。スタンプ帯は **焼き込まない**(図面を隠さないため。`stampText` は文字としてのみ保存し表示する)。
+- サムネは §7.3 の4と同じ(長辺320px)。`sha256`・単発送信(`total=1`)も §7.3 と同じ。
+
+**4. 表示**
+- S06/S10/S08 の「図面」欄にサムネを並べ、タップで M3(拡大。印が焼き込まれているのでそのまま見える)。自分が登録した図面は、編集可能な間だけ削除できる(§5.4.4 `deletePhoto`。送信中は削除×を無効にする点も検査写真と同じ)。
+- **番号**: 画面の項目番号(S06/S10/S08 の「番号」)=項目を `seq` 昇順に並べた1始まりの添字。現行の項目マスタは全項目が `audience=both` のため職長・管理者・PDFで同じ番号になる。将来 `audience` が分かれる場合は SPEC変更要望とする(P-40)。
 
 ---
 
@@ -1361,11 +1403,11 @@ PDF: `generateReport` `listReports`
 | S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
 | S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
 | S05 | `#/site/:siteId/new` | 職長 | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(v1は「打設前」固定表示)、打設予定日時(`datetime-local`、提出時必須)、再検査のとき元記録の表示 | 「作成して入力へ」→`createRecord`(Q)→S06。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
-| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目をグループ見出し付きで列挙。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
+| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目をグループ見出し付きで列挙。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「図面を追加」ボタン・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
 | S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階・打設予定日時** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
 | S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5、「打設を止める」(`stopPour`)→M4、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
 | S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
-| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
+| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「図面を追加」・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
 | S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
 | S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17 |
 | S13 | `#/join?site=&k=&n=` | 職長 | `requestJoin` | 「『{n}』に参加申請しますか」。承認後に有効になる旨 | 「申請する」→`requestJoin`→「承認待ち」表示。未登録端末は `pendingJoin` を保存しS01→登録後ここへ戻る。アプリ内読み取り(`BarcodeDetector`対応端末)と、URL/合言葉の貼り付け入力の両方を用意。標準カメラでQRを読んでURLを開く方法も案内(P-27) |
@@ -1389,6 +1431,7 @@ PDF: `generateReport` `listReports`
 | M7 | 汎用確認ダイアログ |
 | M8 | 招待コード表示(コード・有効期限・「再表示できません」) |
 | M9 | 参加承認(班名の入力=必須・既定は「{氏名}班」、役=職長/副職長) |
+| M10 | 図面の書き込みエディタ(版1.6。全画面。画像の選択→番号ボタン列・倍率・回転・印の置換/削除・ひとつ戻す・「登録」。§7.7) |
 
 ### 9.3 画面ごとの空状態・エラー表示
 - 一覧が空: `scr.<ID>.empty` の文言。通信エラー: 画面上部にバナー(`err.network`)+キャッシュ表示。サーバーエラー: `err.<CODE>`(§5.3の全コードに辞書キー必須)。`VALIDATION_FAILED` は `rule.<RULE>` を該当項目の下に表示。
@@ -1418,6 +1461,7 @@ PDF: `generateReport` `listReports`
 | `err.<CODE>` | §5.3の全エラーコード+`err.network`,`err.camera_denied`,`err.photo_too_large` | |
 | `rule.<RULE>` | §5.3.1の全rule | `rule.PHOTO_REQUIRED` |
 | `photo.*` `outbox.*` `admin.*` `pin.*` `time.*` | 各機能の文言 | `time.min_ago`=「{n}分前」 |
+| `drawing.*` | 図面(§7.7)の文言(版1.6) | `drawing.add`=図面を追加、`drawing.title`=図面、`drawing.pick_item`=番号を選んでタップ、`drawing.delete_mark`、`drawing.undo`、`drawing.save`、`drawing.zoom`、`drawing.rotate`、`drawing.hint`(=確認した箇所の番号を図面に書き込みます)。`err.drawing_unreadable` も追加 |
 
 - 項目マスタ・グループ名は辞書ではなくマスタ列を使う: `lang==='id' ? textId : textJa`、`groupJa/groupId`。
 - 言語の決定: ログイン後は `Me.lang`、未ログインは `kv.lang`、なければ `navigator.language` が `id` で始まれば `id`、それ以外 `ja`。ヘッダの言語ボタンで即時切替(再描画)し、`kv.lang` に保存、オンラインなら `setLang`(失敗しても無視)。
@@ -1442,6 +1486,7 @@ PDF: `generateReport` `listReports`
 3. **3者サイン欄**: 職長(氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。折り返し・行の高さ・列幅は §10.2b-A(版1.5.3)。
+5a. **確認箇所(図面)**(版1.6。§10.2c): 項目表の直後、NG・是正の経過の前。登録された図面を1枚=1ページで載せる(概ね2ページ目)。無ければこの節ごと出さない。
 6. NG・是正の経過: 判定イベント(`verdict_*`)を時系列に(日時・判定者・判定・総合コメント・NG項目)、提出回数、停止の理由・日時。
 7. 写真: **1ページ最大4枚**、1枚=1行ブロック(左に写真、右に情報欄)。レイアウトは §10.2b-B(版1.5.3。従来の「1行4枚のサムネ格子」は廃止)。並びは項目順、最大60枚(超える場合はNG項目の写真を優先し、残りは「他N枚は電子記録で閲覧可」と注記)。
 8. フッタ(全ページ): 記録ID・ページ番号・「電子記録ハッシュ(SHA-256): {64桁}」。ハッシュ = 記録スナップショット(`recordId`,`round`,項目結果一式,署名3者の氏名・日時,判定イベント一覧)の canonicalJSON のSHA-256。
@@ -1478,10 +1523,20 @@ PDF: `generateReport` `listReports`
 - 写真の並び順・最大60枚・NG項目優先・「他N枚は電子記録で閲覧可」の注記は従来どおり(変更なし)。
 - **画質の注意**: 写真は `photoThumb`(長辺 `photoThumbEdge`=320px、§7.3)を拡大して表示するため、**拡大すると粗くなる**。v1は容量(Drive取得量・PDFサイズ・タイムアウト120秒)を優先して許容する。改善が必要なら将来 `Config.photoThumbEdge` を上げる(例 480〜640。`photoThumbMaxChars` とサムネ目安も併せて見直す)。本版では値を変えない。
 
+### 10.2c 確認箇所(図面)ページ(版1.6。ユーザー決定: 元請提出用PDFの2枚目に付ける)
+- **対象**: `kind=drawing` の未削除の図面。`takenAt` 昇順、最大6枚(超える分は「他N枚は電子記録で閲覧可」の注記)。0枚ならこの節を出さない(見出しも出さない)。
+- **1枚につき1ページ**。各図面の先頭に `page-break-before:always`(**図面ごとに必ず改ページ**。つまり1枚目は項目表の次のページ=概ね2ページ目から始まる)。
+- 構成(上から。レイアウトは table と固定mmのみ。§10.2b 共通):
+  1. 見出し「確認箇所(図面)」+ 登録者区分と氏名(`職長: {氏名}` / `管理者: {氏名}`)・登録日時・`stampText` は出さず氏名と日時のみ。
+  2. **図面画像**: **本体(`driveFileId`)** を `data:image/jpeg;base64,…` で埋め込む(サムネは粗いので使わない)。縦横比を保つ(引き伸ばさない): 横長(幅≧高さ)は `width:186mm`、縦長は `height:170mm`。ただし横長で高さが170mmを超える場合は `height:170mm`。`width`/`height` は `Photos.width/height` から決める。画像を読めない場合は画像の代わりに「画像を読み込めませんでした」。
+  3. **凡例の表**(固定高さ・折り返しなし・§10.2b-A と同じ流儀): 列 `番号`(その図面の `markers` の `label` をその項目について並べる。例 `④-1, ④-2`)| `項目`(`No.{N} ` + 項目文。重点は★)| `職長`(結果。NGは赤)| `管理者`(結果)。行は項目番号の昇順。印が0個なら凡例の代わりに「印の書き込みなし」。
+- 図面の画素には、すでに印が焼き込まれている(§7.7)。PDF生成側で印を描き足さない。
+- `Report` 応答・API契約・列名は変更なし。ハッシュ(§10.2 の8)の元データにも図面は含めない(従来どおり)。
+
 ### 10.3 生成方法(GAS)
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
 2. インラインCSSのみのHTML文字列を組み立てる(**レイアウトは table と固定サイズのみ。§10.2b**。`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
-3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む。
+3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む(`kind=photo` のみ。図面は §10.2c で本体を埋め込む。写真ページの60枚上限・並びに図面を含めない)。
 4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
 5. `reports/{siteId}_{現場名}/` に保存。`Config.pdfShareMode=anyone_with_link` なら `file.setSharing(ANYONE_WITH_LINK, VIEW)`、`private` なら共有しない(P-32)。`url = file.getUrl()`。
 6. PDF本体の SHA-256 を計算し `Reports` に追記(`version` = その記録の既存最大+1)。Events `report_generated`。応答 `Report`(§5.1)。
@@ -1700,6 +1755,12 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-CACHE-01(キャッシュが権限を跨がない): 事前に `getBootstrap` などで参照キャッシュを温めた状態で、`/__mock/patch`(`keepCache:true`)により ①田中の `Users.status=disabled` → **直後の** 田中のtokenでの任意のaction(`me` 以外)が `USER_DISABLED` ②田中の s_a の `Assignments` を `active=FALSE` → **直後の** `listRecords(siteId=s_a)` が `FORBIDDEN_SITE`、`getBootstrap.sites` から s_a が消える ③佐藤の `Absences` を挿入 → **直後の** `listAssignments.absentToday=true`、鈴木が主担当の代行として `decideJoin` 可 ④`adminRevokeDevice` 直後に当該端末が `DEVICE_REVOKED` いずれも遅延が許されない。(mock/harness共通。モックは常に最新なので自明に通る)
 - C-CACHE-02: (harness-only。`/__mock/cacheStats.enabled=true` のときだけ実行)①温めた後 `Config.photoMaxPerItem` を `keepCache:true` で変更 → 直後の `getBootstrap.config.photoMaxPerItem` は旧値(`hits` が増える)、`/__mock/clock` で+61秒後は新値 ②`keepCache` 無しの `patch` は直後に新値 ③`adminRotateJoinKey` の直後に旧 `joinKey` の `requestJoin` が `JOIN_KEY_INVALID`(`Sites` 破棄+`joinKey` 照合はキャッシュを使わない) ④`Config` に1行120,000文字の `description` を持つ行を `patch` で追加し、キャッシュ値が100KB(102,400バイト)を超える状態で `getBootstrap` が正常応答・`skippedTooLarge` が増え、`Items`/`Sites` のキャッシュは影響を受けない ⑤`Sites` を `keepCache:true` で `status=closed` に変更 → +61秒後は `createRecord` が `SITE_CLOSED`(60秒以内は成功/`SITE_CLOSED` のどちらも許す=assertしない)。
 - C-ROSTER-01: `adminValidateRoster` はシードで `problems` にerrorなし。(mock-only)`patch` で `qa_sub` を外す→`SITE_NO_QA_SUB`、`qa_main==qa_sub`→`QA_MAIN_EQ_SUB`、職長のUserにQA担当→`ROLE_MISMATCH`。
+- C-DRAW-01(登録): `self` の職長が `kind=drawing`・`itemId` 空・`markers`(2件)・`total=1` で `uploadPhotoChunk` → 成功。`PhotoMeta.kind="drawing"`・`markers` が往復で一致。`getRecord` の `drawings` に1件出て、どの項目の `photos`・`primePhotos` にも出ない。`itemId` に値あり/`side=prime`/`markers` が配列でない/要素の `x` が1.5/`label` が空/存在しない `itemId` → `VALIDATION_FAILED`(`FIELD_INVALID`、path=`markers`/`itemId`/`side`)。`kind="photo"` で `markers` に配列 → `FIELD_INVALID`。`kind` 省略は従来どおり検査写真(`itemId` 必須)。
+- C-DRAW-02(上限・数え方): 同じ記録×sideに別 `photoId` で5枚まで成功、6枚目は `PHOTO_LIMIT`(`max=5`)。図面5枚でも項目の検査写真は `photoMaxPerItem`(5)枚まで別に登録できる。図面を1枚 `deletePhoto` すると再度1枚追加できる。同じ `photoId` の再送は冪等成功(行は増えない)。
+- C-DRAW-03(権限・可視): 提出後(`submitted`)の職長の図面追加・削除は `RECORD_LOCKED`、`fix` では成功。QAは claim者(`submitted`)のときだけ `side=qa` の図面を追加でき、claim者でない・`qa_ok` 以降は拒否。職長の `getRecord`(`draft`/`submitted`)には `side=qa` の図面が含まれない(`fix`/`qa_ok`/`approved` では含まれる)。他班の職長の図面追加は `FORBIDDEN_TEAM`。
+- C-DRAW-04(提出検査への影響なし): 図面だけがあり項目の写真が無い記録の `submitRecord` は従来どおり `PHOTO_REQUIRED`(図面は項目の写真に数えない)。図面が0枚でも提出・判定できる。
+- C-DRAW-05(PDF): 図面を2枚(職長1・管理者1)登録した記録の `generateReport` の中身(ハーネスの `lastReportHtml`)に、図面ごとの `page-break-before:always`・見出し「確認箇所(図面)」・凡例の `④-1` 等の `label`・`No.` と項目文・横長画像の `width:186mm` が含まれ、`flex`/`grid`/`calc` を含まない。写真ページの枚数・並びに図面が含まれない。図面0枚のPDFには「確認箇所(図面)」が出ない。図面は項目表の後・「NG・是正の経過」の前。
+- C-DRAW-06(列追加の移行): 旧形式のシート(`Photos` が `kind`,`markers` なし)に対し `setupSheets()` が不足列を末尾に補い、既存行(`kind` 空)は `photo` として扱われる。順序違い・余分な列はエラー(ハーネス単体)。
 - C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。**(版1.5.2)PDFファイル名は `{subject}_v{n}_{YYYYMMDD-HHmm}.pdf`**: 工区なし(例 `奥沢中学校 基礎 L2`)・工区あり(例 `Jビル赤坂 1F 東工区 L1`)で subject が §10.2a 通り(半角スペース区切り・工区が空なら詰める)、`url`(復号後)の名前に `recordId` が含まれない、禁止文字(例 現場名に `/`)は `_` に置換される。GAS互換ハーネスでは生成HTMLの `<title>` が subject と一致する。 **(版1.5.3)GAS互換ハーネスで生成したHTMLの確認(§10.2b)**: ①写真ブロック(`table`、固定高さ約62mm、`page-break-inside:avoid`)が4枚ごとに `page-break-after`(5枚以上の記録で、4・8枚目に付き、最後のブロックには付かない)、写真が4枚以下なら改ページなし。②項目表に `table-layout:fixed` と `white-space:nowrap` があり、**折り返しが許されるのは「職長コメント」列のみ**(管理者コメント列は nowrap・固定高さ)。③HTMLに `display:flex` / `display:grid` が含まれない。④項目に紐づかない写真(`side=prime`)のブロックは区分とスタンプのみ。⑤NGの結果が赤で出る。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
@@ -1730,6 +1791,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-10 参加: 職長がQR(URL)から参加申請→「承認待ち」→主担当QAが承認(班名入力)→職長の現場一覧に出る。旧QR(合言葉更新後)では申請できない。
 - E-11 打設停止: `approved` の記録で職長が「打設を止める」(理由)→`fix`・停止バナー・責任者のボードに表示。
 - E-12 管理: 責任者が招待コード発行(コードは1回だけ表示)・端末登録解除(解除された端末はS01へ)・不在登録・QR表示/合言葉更新。
+- E-14 図面の書き込み(版1.6): 職長でS06を開き「図面を追加」→ファイル選択(テスト用の図面画像)→M10で項目番号④(測定項目)を選び図面上を2回タップ → 印が `④-1`・`④-2`、番号①(測定なし)を1回置くと `①`、2回置くと `①-1`・`①-2` に付け替わる。「ひとつ戻す」「この印を削除」で枝番が連番に戻る。印の周りに枠(楕円・白い塗り)の要素・描画が無いことを確認(試作用に `data-testid` を持つ印要素、またはエクスポートした画像の画素検査で、印の周囲が元画像のまま=白い塗りが無い)。「登録」→outboxバッジ→S06の「図面」欄にサムネ→mockの `getRecord.drawings` が1件・`markers` が2件以上。提出済みにすると「図面を追加」「削除×」が無効。管理者(S10)でも追加でき、職長のS06(`submitted`)には出ない。ja/id両方で表示が崩れない(文言は辞書経由)。
 - E-13 写真の単発・並行送信(mockを `--latency 300` で起動): オンラインで5枚を続けて撮影(別項目)→ Playwright のリクエスト監視で ①各 `photoId` につき `uploadPhotoChunk` が **ちょうど1回**(`total=1`) ②同時に進行する `uploadPhotoChunk` の最大が 2 以上かつ `photoParallel`(3)以下 ③全て完了後にoutboxバッジ0、サーバーの `Photos` が5行・仮想Driveの有効ファイルが本体5+サムネ5。さらに写真送信中は「提出する」が無効で「送信中(残りN件)」が出て、全完了後に提出でき `PHOTO_REQUIRED` にならない(§8.6)。写真の1枚が確定失敗(`/__mock/fail` の `mode:"error",code:"PHOTO_INVALID",match:"uploadPhotoChunk"`)しても他の4枚は送られ、S20 に失敗1件が出る。
 
 ### 12.6 性能の受け入れ基準(版1.5。実GASでの目標。手動確認項目)
@@ -1786,7 +1848,8 @@ katawaku-inspection/
 │       ├─ outbox.js    キュー操作(統合・優先度・バックオフ・ブロック)
 │       ├─ sync.js      送信ループ・ポーリング・キャッシュ更新(§8.4,§8.9)
 │       ├─ validate.js  提出検査・判定検査の事前検証(§5.3.1と同rule)
-│       ├─ photo.js     カメラ・スタンプ・圧縮・分割(§7)
+│       ├─ photo.js     カメラ・スタンプ・圧縮・分割(§7)・図面の取り込みと縮小/再圧縮(§7.7。純関数 `fitDrawing`/`drawingLabels` もここ)
+│       ├─ drawing.js   図面エディタ M10 の描画・印の操作(§7.7。DOM部分。`ui/` ではなく `js/` 直下でも `ui/` でもよいが1ファイルに分ける)
 │       ├─ time.js      JST固定整形・skew補正・経過表示
 │       └─ ui/          画面(s01.js … s20.js)・modals.js・components.js
 ├─ mock/                                        … 【モック担当】
@@ -1873,6 +1936,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-37 | 写真送信の高速化パラメータ(版1.4。孤児ファイルの扱いは1.4.1で確定) | 単発モード上限 `photoSingleMaxChars=1,200,000`、並行数 `photoParallel=3`【確定】(実測: 1リクエストの固定処理が約6秒、サーバーは並行可、ロック直列化が律速)。Drive保存後にサーバー実行が強制終了(6分超など)した場合の孤児ファイルは救済しない(**自動掃除しない**=確定。ファイル名に `photoId` を含むので手動で特定できる)。**版1.5**: `photoChunkChars` は 90000 のまま(700000 等へは上げない。分割モードのCacheService 100KB制限のため。§2.14)。単発に寄せる効果は `photoSingleMaxChars`(≥ `photoMaxBytes` のbase64長)で実現済み |
 | P-38 | 参照シートの読み取りキャッシュ(版1.4。1.5でTTL上限60秒固定を明記) | `Config`/`Items`/`Sites` のみ最大60秒。直接編集の反映は最大60秒遅れる(§2.15。**確定**)。権限判定に使うシートはキャッシュしない |
 | P-39 | 性能の目標値と手動確認(版1.5) | ping 約1.5秒以内 / 写真1枚(約300KB)約10秒以内 / 写真10枚約40秒以内(3並列)。手動確認で自動テストにしない(§12.6)。1リクエスト内の読み込み最小化(§2.16)は設計担当の追加判断で、結果が素朴な実装と同じであることを条件に実装裁量。目標値は本番実測(1往復1.3〜2.8秒、写真1枚6秒/リクエスト)からの推定で、実機測定後に見直す可能性あり |
+| P-40 | 図面(版1.6) | PDFファイルの直接取り込みは対象外(pdf.js追加が必要=CLAUDE.md §4の例外。ユーザー判断待ち)。元画像(印なし)は保存せず、やり直しは削除→取り込み直し。上限は記録×sideあたり5枚(固定)。項目番号は `seq` 昇順の添字(現行は全項目 both のため役割間で一致。将来分かれたらSPEC変更要望)。印の色は職長ピンク/管理者青(仮)。iPhoneのHEIC画像はブラウザが読めた場合のみ対応(未確認) |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -1912,3 +1976,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.5.1 | ユーザー決定: 管理者(QA)側の確認では写真は不要(任意)。写真必須は職長の自己点検(`submitRecord`)のみ。既存の列名・action名・エラーコード・action数(43)は変更なし。①§5.3.1: `PHOTO_REQUIRED` を職長提出時のみ(`selfResult=ng`、または `key` の `ok`)に限定し、`submitVerdict` では出さない(`NOTE_REQUIRED`/`SEVERITY_REQUIRED` は従来どおり必須)。QA側の写真の撮影・添付・削除は任意で可能。②§9.1(写真ルール)・§9.2 S10・§12.2 要件対応表・§12.3 C-STATE-05/C-STATE-06・§12 E-03: 整合。 |
 | 2026-10-10 | 1.5.2 | ユーザー決定: 元請提出用PDFの件名を「現場名 階 工区 打設箇所」にする。既存の列名・action名・エラーコード・action数(43)・API契約は変更なし。§10.2a 新設(`subject`=`{現場名} {階}[ {工区}] {lot}`、PDF名=`{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`、`{recordId}_v...` は廃止)、§10.2(件名を表示)・§10.3(`<title>`・ファイル名)・§7.4(reports のパス)・§11.3(モックのPDF名)・§12.3 C-REP-01 に整合。 |
 | 2026-10-10 | 1.5.3 | ユーザー決定: 元請提出PDFのレイアウト。項目表は折り返しなし・行高さ固定(職長コメント列のみ折り返し可、管理者コメントは固定高さで全文は写真ページ・電子記録)、写真は1ページ最大4枚の「左=写真/右=情報欄」ブロック(約62mm、4枚ごと改ページ)に変更(サムネ格子は廃止)。GAS変換のためtable+固定サイズのみで組む。拡大による粗さを注意書き(将来 `photoThumbEdge` を上げる余地)。API契約・列名・action数(43)は変更なし。§10.2・§10.2b新設・§10.3・§12.3 C-REP-01。 |
+| 2026-10-10 | 1.6.0 | ユーザー決定: 図面(確認箇所の書き込み)機能。職長・管理者が図面画像(撮影/アルバム/PDFのスクリーンショット)を取り込み、確認した項目番号を任意の位置に書き込み(測定項目は `④-1`,`④-2` と枝番)、元請提出PDFの2ページ目に付ける。番号を囲む枠は描かない。PDFファイルの直接取り込みは対象外(P-40)。①§0.2 `photoKind` 追加。②§2.9 `Photos` に `kind`,`markers` 列(末尾追加)、§2.9a 既存シートへの列追加(`setupSheets` が不足列を補う)。③§5.1 `PhotoMeta` に `kind`,`markers`、`RecordDetail.drawings`(職長の `draft`/`submitted` では `side=qa` を含めない)。④§5.4.4 `uploadPhotoChunk` に `kind`,`markers`(検証・上限=記録×sideあたり5枚・検査写真の枚数と別勘定)。action数(43)・エラーコードは変更なし。⑤§7.1 図面だけファイル選択を常に許可、§7.7 新設(登録方法・M10・印の規則・画質・表示)。⑥§9.2 S06/S10 に図面欄、M10 追加、§9.4 `drawing.*`。⑦§10.2 項目5a・§10.2c 新設・§10.3。⑧§12.3 C-DRAW-01〜06、§12.5 E-14、§13.1、§14.1 P-40。⑨実装担当の指摘への確定: 画像の再圧縮順序(§7.7-3)、`markers` 非配列は `FIELD_INVALID`・`authorize` が先(§5.4.4)。 |
