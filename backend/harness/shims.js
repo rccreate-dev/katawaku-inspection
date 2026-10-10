@@ -342,6 +342,7 @@ function createShims(state) {
   };
   const HtmlService = {
     createHtmlOutput(html) {
+      state.lastHtml = html; // テスト用(C-REP-01 がレイアウトを検査する)
       return { getBlob() { return new HtmlBlob(Buffer.from(html, 'utf8'), 'text/html', 'report.html'); }, getContent: () => html };
     },
   };

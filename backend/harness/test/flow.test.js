@@ -293,3 +293,31 @@ test('C-PERM-08/10 班スコープと無効な担当', () => {
   h.control('patch', { sheet: 'Assignments', key: row.assignId, set: { active: false } });
   assert.equal(tanaka('listRecords', { siteId: 's_a' }).error.code, 'FORBIDDEN_SITE');
 });
+
+test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表nowrap・写真ブロック(4枚ごと改ページ)', () => {
+  const id = newRecord(tanaka, 's_a', '1F', { lot: 'F9' });
+  fillAll(h, tanaka, id, 'self');
+  assert.equal(tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' }).ok, true);
+  assert.equal(sato('claimReview', { recordId: id, round: 1 }).ok, true);
+  fillAll(h, sato, id, 'qa');
+  assert.equal(sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' }).ok, true);
+  const g = sato('generateReport', { recordId: id });
+  assert.equal(g.ok, true, JSON.stringify(g));
+  const html = h.state.lastHtml;
+  assert.ok(html && html.length > 500, 'HTMLが取得できる');
+  const title = /<title>(.*?)<\/title>/.exec(html)[1];
+  assert.match(title, /^\S+ 1F F9$/, '件名=現場名 階 打設箇所: ' + title);
+  assert.ok(/table class="items"/.test(html) && /table-layout:fixed/.test(html) && /white-space:nowrap/.test(html), '項目表は固定レイアウト・nowrap');
+  const itemsTbl = /<table class="items">[\s\S]*?<\/table>/.exec(html)[0];
+  const itemRows = (itemsTbl.match(/<tr/g) || []).length - 1; // 見出し行を除く
+  assert.ok(itemRows > 0);
+  assert.equal((itemsTbl.match(/<td class="wrap">/g) || []).length, itemRows, '折り返しは職長コメント列のみ(行ごとに1つ)');
+  assert.ok(!/display:\s*(flex|grid)|calc\(/.test(html), 'flex/grid/calc を使わない');
+  const blocks = html.match(/<table class="pb"[^>]*>/g) || [];
+  assert.ok(blocks.length >= 1, '写真ブロックがある');
+  blocks.forEach((b, i) => {
+    const brk = /page-break-after:always/.test(b);
+    const last = i === blocks.length - 1;
+    assert.equal(brk, (i + 1) % 4 === 0 && !last, `ブロック${i + 1}の改ページ`);
+  });
+});

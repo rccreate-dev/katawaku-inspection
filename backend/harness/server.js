@@ -119,6 +119,7 @@ function createHarness(opts) {
         else if (typeof body.advanceMin === 'number') h.offsetMs += body.advanceMin * 60000;
         else return { ok: false, error: { code: 'BAD_REQUEST', message: 'set か advanceMin が必要です' } };
         return { ok: true, data: { now: h.nowIso() } };
+      case 'lastReportHtml': return { ok: true, data: { html: h.state.lastHtml || '' } };
       case 'tick': return { ok: true, data: { notified: h.ctx.escalationTick() } };
       case 'issueDevice': {
         Repo.resetCache();
