@@ -178,10 +178,12 @@
       var fileIn = null;
       var shutter = h('button', { type: 'button', class: 'shutter', 'aria-label': t('photo.shutter'), disabled: true });
       var retake = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.retake'));
+      var rotate = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.rotate'));
+      var lastSrc = null; // 回転の元(直近に処理した画像: {source,w,h})
       var use = h('button', { type: 'button', class: 'cambtn primary', hidden: true }, t('photo.use'));
       var cancel = h('button', { type: 'button', class: 'cambtn' }, t('act.cancel'));
       var count = h('span', null, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
-      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, use);
+      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, use);
       var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, bar);
       layer.appendChild(box);
 
@@ -200,13 +202,14 @@
       }
       function processSource(source, w, hgt) {
         var ms = KW.time.nowMs(KW.state.skewMs);
+        lastSrc = { source: source, w: w, h: hgt };
         shutter.disabled = true;
         return KW.photo.process({ source: source, width: w, height: hgt }, stampCtx(ms)).then(function (p) {
           p.takenAt = KW.time.toIso(ms);
           result = p;
           prev.src = C.blobUrl(p.full);
           prev.hidden = false; video.hidden = true;
-          shutter.hidden = true; retake.hidden = false; use.hidden = false;
+          shutter.hidden = true; retake.hidden = false; rotate.hidden = false; use.hidden = false;
           KW.clear(info).appendChild(document.createTextNode(p.stampText));
           msg.hidden = true;
         }, function (e) {
@@ -223,7 +226,17 @@
       });
       retake.addEventListener('click', function () {
         result = null; prev.hidden = true; video.hidden = false; shutter.hidden = false; shutter.disabled = false;
-        retake.hidden = true; use.hidden = true; KW.clear(info);
+        retake.hidden = true; rotate.hidden = true; use.hidden = true; KW.clear(info);
+      });
+      /* 向きが違って写ったとき(端末の画面回転ロック等)に、右へ90°回してスタンプを入れ直す */
+      rotate.addEventListener('click', function () {
+        if (!lastSrc) return;
+        var rc = document.createElement('canvas');
+        rc.width = lastSrc.h; rc.height = lastSrc.w;
+        var g = rc.getContext('2d');
+        g.translate(rc.width, 0); g.rotate(Math.PI / 2);
+        g.drawImage(lastSrc.source, 0, 0, lastSrc.w, lastSrc.h);
+        processSource(rc, rc.width, rc.height);
       });
       use.addEventListener('click', function () { finish(result); });
       cancel.addEventListener('click', function () { finish(null); });
