@@ -188,29 +188,30 @@
   }
 
   /*
-   * 印の文字(§7.7-2)。no=画面の項目番号、k=置いた順の通し番号(1始まり)、c=その項目の印の数、measure=項目の測定区分。
-   * ・measure≠none は常に「N-k」 ・measure=none は c=1 のとき「N」、c>=2 のとき「N-k」
+   * 印の文字(§7.7-2。版1.6.1)。no=画面の項目番号、k=測定点の番号(1始まり)、measure=項目の測定区分。
+   * ・measure=none は何個置いても N(枝番なし) ・measure≠none は N-k(k=その項目の測定点の番号)
    */
-  function drawingLabel(no, k, c, measure) {
+  function drawingLabel(no, k, measure) {
     var base = drawingNo(no);
-    return (measure !== 'none' || c >= 2) ? base + '-' + k : base;
+    return measure === 'none' ? base : base + '-' + k;
   }
 
   /*
-   * 印の並び(置いた順)から label の配列を決め直す。削除後の付け直しにも使う(枝番は常に1から連続)。
-   * markers: [{itemId}]、items: [{itemId, no, measure}]。items に無い itemId の label は '' になる。
+   * 印の並びから label の配列を決める。markers: [{itemId, k}](k=測定点の番号。measure=none では無視)、
+   * items: [{itemId, no, measure}]。items に無い itemId は ''。印を削除しても他の label は変わらない(k に固定)。
    */
   function drawingLabels(markers, items) {
-    var info = {}, count = {}, seen = {};
+    var info = {};
     (items || []).forEach(function (it) { info[it.itemId] = it; });
-    (markers || []).forEach(function (m) { count[m.itemId] = (count[m.itemId] || 0) + 1; });
     return (markers || []).map(function (m) {
       var it = info[m.itemId];
       if (!it) return '';
-      seen[m.itemId] = (seen[m.itemId] || 0) + 1;
-      return drawingLabel(it.no, seen[m.itemId], count[m.itemId], it.measure);
+      return drawingLabel(it.no, m.k, it.measure);
     });
   }
+
+  /* 測定値チップの番号(丸数字1〜20、21以上は通常数字。図面の枝番 k と同じ) */
+  function pointNo(k) { return drawingNo(k); }
 
   /*
    * 図面の縮小・再圧縮の計画(§7.7-3)。長辺1800px以下に縮小し、
@@ -245,7 +246,7 @@
   }
 
   var api = {
-    drawingNo: drawingNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, encodeDrawing: encodeDrawing,
+    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, encodeDrawing: encodeDrawing,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,

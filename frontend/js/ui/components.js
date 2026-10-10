@@ -169,7 +169,7 @@
   C.roleName = function (r) { return t('role.' + r); };
 
   /* 数値配列の表示 */
-  C.valuesText = function (v, unit) { return (v || []).map(function (x) { return (x > 0 ? '+' : '') + x; }).join(', ') + (v && v.length ? ' ' + (unit || 'mm') : ''); };
+  C.valuesText = function (v, unit) { return (v || []).map(function (x, i) { return KW.photo.pointNo(i + 1) + (x > 0 ? '+' : '') + x; }).join(', ') + (v && v.length ? ' ' + (unit || 'mm') : ''); };
 
   /* 現場の階順ソート用: floors の並びに従う */
   C.floorIndex = function (siteId, floor) {

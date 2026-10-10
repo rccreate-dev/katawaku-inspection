@@ -267,3 +267,8 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .dmark-self{color:#d6249f}
 .dmark-qa{color:#1565c0}
 .dmark.sel{text-decoration:underline;text-decoration-thickness:3px;text-underline-offset:4px}
+.dedit .ditem{font-size:14px;font-weight:700;padding:6px 8px;background:var(--accent-soft);border-radius:8px;overflow-wrap:anywhere}
+.dpoints{display:flex;flex-wrap:wrap;gap:6px}
+.dpoint{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:15px;font-weight:700;padding:0 10px;cursor:pointer}
+.dpoint.placed{background:var(--accent-soft)}
+.dpoint[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}

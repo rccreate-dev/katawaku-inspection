@@ -61,6 +61,13 @@ describe('E-14 図面の書き込み', () => {
     await newReadyRecord(s, 'DR1', { submit: true });
     const rid = (await E.stateRows('Records')).find((r) => r.lot === 'DR1').recordId;
 
+    // 項目④(測定項目)に測定値 +2, -3 を入力 → チップに測定点の番号が付く
+    for (const v of ['2', '-3']) {
+      await page.locator('#it-i4 input.inp').fill(v);
+      await page.locator('#it-i4').getByRole('button', { name: s.t('scr.S06.add_point') }).click();
+    }
+    assert.deepEqual(await page.locator('#it-i4 .val').evaluateAll((els) => els.map((e) => e.textContent.replace('×', '').trim())), ['①+2', '②-3']);
+
     // --- 取り込み → M10 ---
     assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), false);
     await pickDrawing(s, { name: 'zumen.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(page) });
@@ -77,32 +84,46 @@ describe('E-14 図面の書き込み', () => {
     await tapAt(s, 60, 60);
     assert.equal(await marks(s).count(), 0);
 
-    // ④(測定項目 measure≠none): 常に N-k
+    // 番号を選ぶと項目内容(No.N・項目文・★)が出る。測定値が無い測定項目(⑤)は置けない
+    await numBtn(s, 5).click();
+    assert.match(await page.locator('.dedit .ditem').innerText(), /^No\.5 /);
+    await tapAt(s, 60, 60);
+    assert.equal(await marks(s).count(), 0, '測定点が未入力の項目は置けない');
+    assert.match(await page.locator('.dedit .dhint').innerText(), new RegExp(s.t('drawing.no_points').slice(0, 8)));
+    await numBtn(s, 2).click(); // 重点項目
+    assert.match(await page.locator('.dedit .ditem').innerText(), /^No\.2 .*★/);
+
+    // ④: 測定点チップ ④-1 +2mm / ④-2 -3mm。チップを選んで配置(1測定点につき印1つ)
     await numBtn(s, 4).click();
+    assert.match(await page.locator('.dedit .ditem').innerText(), /^No\.4 /);
+    assert.deepEqual(await page.locator('.dedit .dpoint').evaluateAll((els) => els.map((e) => e.textContent.trim())), ['④-1 +2mm', '④-2 -3mm']);
     await tapAt(s, 60, 50);
     assert.deepEqual(await labels(s), ['④-1']);
     await tapAt(s, 250, 150);
     assert.deepEqual(await labels(s), ['④-1', '④-2']);
+    assert.equal(await page.locator('.dedit .dpoint.placed').count(), 2, '置き済みの点は印付き');
+    // 置き済みの ④-1 を選んで別の場所をタップ → 移動(印は増えない)
+    const before = await marks(s).filter({ hasText: '④-1' }).evaluate((e) => e.style.left);
+    await page.locator('.dedit .dpoint[data-k="1"]').click();
+    await tapAt(s, 200, 60);
+    assert.deepEqual(await labels(s), ['④-1', '④-2']);
+    assert.notEqual(await marks(s).filter({ hasText: '④-1' }).evaluate((e) => e.style.left), before, '④-1 が移動した');
 
-    // ①(measure=none): 1個目は ①、2個目で ①-1・①-2 に付け替わる
+    // ①(measure=none): 何個置いても ①
     await numBtn(s, 1).click();
     await tapAt(s, 130, 200);
-    assert.deepEqual(await labels(s), ['④-1', '④-2', '①']);
-    await tapAt(s, 300, 60);
-    assert.deepEqual(await labels(s), ['④-1', '④-2', '①-1', '①-2']);
+    await tapAt(s, 300, 200);
+    await tapAt(s, 40, 200);
+    assert.deepEqual(await labels(s), ['④-1', '④-2', '①', '①', '①']);
 
-    // ひとつ戻す: ①-2 が消え、①-1 は ① に戻る
+    // ひとつ戻す: 最後の ① が消える
     await page.locator('.dedit [data-act=undo]').click();
-    assert.deepEqual(await labels(s), ['④-1', '④-2', '①']);
-    // 印を選んで削除: ④-1 を消すと ④-2 が ④-1 に連番化
+    assert.deepEqual(await labels(s), ['④-1', '④-2', '①', '①']);
+    // 印を選んで削除: ④-1 を消しても ④-2 は付け替わらない
     assert.equal(await page.locator('.dedit [data-act=delete-mark]').isDisabled(), true, '印を選ぶまで削除は無効');
     await marks(s).filter({ hasText: '④-1' }).click();
     await page.locator('.dedit [data-act=delete-mark]').click();
-    assert.deepEqual(await labels(s), ['④-1', '①']);
-    // もう一度 ④ を置いて ④-1・④-2 を作る(登録するのは 2 点以上)
-    await numBtn(s, 4).click();
-    await tapAt(s, 200, 100);
-    assert.deepEqual((await labels(s)).sort(), ['①', '④-1', '④-2'].sort());
+    assert.deepEqual(await labels(s), ['④-2', '①', '①']);
 
     // 印は番号の文字だけ: 枠・塗り(背景・罫線・角丸)の要素が無い
     const style = await marks(s).first().evaluate((e) => { const c = getComputedStyle(e); return { bg: c.backgroundColor, bw: c.borderTopWidth, br: c.borderTopLeftRadius, bs: c.borderTopStyle, color: c.color }; });
@@ -151,7 +172,7 @@ describe('E-14 図面の書き込み', () => {
     assert.equal(rows[0].side, 'self'); assert.ok(!rows[0].itemId, 'itemId なし');
     const mk = typeof rows[0].markers === 'string' ? JSON.parse(rows[0].markers) : rows[0].markers;
     assert.ok(mk.length >= 2, 'markers が2件以上');
-    assert.deepEqual(mk.map((m) => m.label).sort(), ['①', '④-1', '④-2'].sort());
+    assert.deepEqual(mk.map((m) => m.label).sort(), ['①', '①', '④-2'].sort());
     mk.forEach((m) => { assert.ok(m.x >= 0 && m.x <= 1 && m.y >= 0 && m.y <= 1); assert.ok(m.itemId); });
     const det = await E.api('getRecord', { recordId: rid }, { userId: 'u_tanaka' });
     assert.equal(det.ok, true, JSON.stringify(det));
@@ -254,9 +275,9 @@ describe('E-14 図面の書き込み', () => {
     await pickDrawing(s, { name: 'z.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(page, 1000, 700) });
     await page.locator('.dedit').waitFor();
     assert.equal(await E.noHScroll(s), true);
-    await numBtn(s, 4).click();
+    await numBtn(s, 1).click();
     await tapAt(s, 80, 80);
-    assert.deepEqual(await labels(s), ['④-1']);
+    assert.deepEqual(await labels(s), ['①']);
     await page.locator('.dedit [data-act=save]').click();
     await page.locator('.dedit').waitFor({ state: 'detached' });
     await page.locator('#drawings .thumb .up').waitFor(); // 送信待ちのバッジ

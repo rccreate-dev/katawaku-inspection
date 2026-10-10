@@ -13,7 +13,6 @@ const ITEMS = [
   { itemId: 'i21', no: 21, measure: 'optional' },
   { itemId: 'i22', no: 22, measure: 'none' }
 ];
-const labelsOf = (ids) => photo.drawingLabels(ids.map((itemId) => ({ itemId })), ITEMS);
 
 describe('U-DRAW-01 項目番号の表示', () => {
   it('1〜20 は丸数字、21以上は通常の数字', () => {
@@ -26,36 +25,31 @@ describe('U-DRAW-01 項目番号の表示', () => {
   });
 });
 
-describe('U-DRAW-02 印の文字(§7.7-2)', () => {
-  it('measure≠none は常に N-k(1個だけでも ④-1)', () => {
-    assert.deepEqual(labelsOf(['i4']), ['④-1']);
-    assert.deepEqual(labelsOf(['i4', 'i4']), ['④-1', '④-2']);
-    assert.deepEqual(labelsOf(['i5']), ['⑤-1']);
-    assert.deepEqual(labelsOf(['i21']), ['21-1']);
+describe('U-DRAW-02 印の文字(§7.7-2。版1.6.1)', () => {
+  const L = (list) => photo.drawingLabels(list.map(([itemId, k]) => ({ itemId, k })), ITEMS);
+  it('measure=none は何個置いても N(枝番なし)', () => {
+    assert.deepEqual(L([['i1', null]]), ['①']);
+    assert.deepEqual(L([['i1', null], ['i1', null], ['i1', null]]), ['①', '①', '①']);
+    assert.deepEqual(L([['i22', null], ['i22', null]]), ['22', '22']);
   });
-  it('measure=none は c=1 のとき N、c>=2 のとき N-k(2個目を置くと1個目も付け替わる)', () => {
-    assert.deepEqual(labelsOf(['i1']), ['①']);
-    assert.deepEqual(labelsOf(['i1', 'i1']), ['①-1', '①-2']);
-    assert.deepEqual(labelsOf(['i1', 'i1', 'i1']), ['①-1', '①-2', '①-3']);
-    assert.deepEqual(labelsOf(['i22']), ['22']);
-    assert.deepEqual(labelsOf(['i22', 'i22']), ['22-1', '22-2']);
+  it('measure≠none は測定点の番号 k で N-k(k はそのまま。1個でも ④-1、2番目だけでも ④-2)', () => {
+    assert.deepEqual(L([['i4', 1]]), ['④-1']);
+    assert.deepEqual(L([['i4', 1], ['i4', 2]]), ['④-1', '④-2']);
+    assert.deepEqual(L([['i4', 2]]), ['④-2']);
+    assert.deepEqual(L([['i5', 3]]), ['⑤-3']);
+    assert.deepEqual(L([['i21', 2]]), ['21-2']);
   });
-  it('項目が混ざっても通し番号 k は項目ごとに置いた順', () => {
-    assert.deepEqual(labelsOf(['i4', 'i1', 'i4', 'i1', 'i5']), ['④-1', '①-1', '④-2', '①-2', '⑤-1']);
+  it('印を削除しても他の label は付け替わらない(k に固定)', () => {
+    assert.deepEqual(L([['i4', 1], ['i4', 2], ['i1', null]]), ['④-1', '④-2', '①']);
+    assert.deepEqual(L([['i4', 2], ['i1', null]]), ['④-2', '①']); // ④-1 を削除
   });
-  it('削除後の付け直し: 枝番は常に1から連続し、残りが1個の measure=none は枝番が消える', () => {
-    const ids = ['i4', 'i4', 'i4', 'i1', 'i1'];
-    assert.deepEqual(labelsOf(ids), ['④-1', '④-2', '④-3', '①-1', '①-2']);
-    assert.deepEqual(labelsOf(['i4', 'i4', 'i1', 'i1']), ['④-1', '④-2', '①-1', '①-2']); // ④の3個目を削除
-    assert.deepEqual(labelsOf(['i4', 'i4', 'i1']), ['④-1', '④-2', '①']);                 // ①の2個目を削除 → ①(枝番なし)
-    assert.deepEqual(labelsOf(['i4']), ['④-1']);                                          // ④-2 を削除 → ④-1 のまま
-  });
-  it('drawingLabel 単体と、空配列・未知の項目', () => {
-    assert.equal(photo.drawingLabel(4, 2, 2, 'optional'), '④-2');
-    assert.equal(photo.drawingLabel(1, 1, 1, 'none'), '①');
-    assert.equal(photo.drawingLabel(1, 2, 2, 'none'), '①-2');
-    assert.deepEqual(labelsOf([]), []);
-    assert.deepEqual(labelsOf(['nope']), ['']);
+  it('drawingLabel 単体・測定点チップの番号(pointNo)・空配列・未知の項目', () => {
+    assert.equal(photo.drawingLabel(4, 2, 'optional'), '④-2');
+    assert.equal(photo.drawingLabel(1, null, 'none'), '①');
+    assert.equal(photo.drawingLabel(21, 2, 'required'), '21-2');
+    assert.equal(photo.pointNo(1), '①'); assert.equal(photo.pointNo(20), '⑳'); assert.equal(photo.pointNo(21), '21');
+    assert.deepEqual(L([]), []);
+    assert.deepEqual(L([['nope', 1]]), ['']);
   });
 });
 
@@ -105,7 +99,7 @@ describe('U-DRAW-03 縮小・再圧縮の計画(§7.7-3)', () => {
 describe('U-DRAW-04 辞書', () => {
   it('drawing.* と err.drawing_unreadable が ja / id の両方にある', () => {
     const keys = Object.keys(dict.ja).filter((k) => k.startsWith('drawing.')).concat(['err.drawing_unreadable']);
-    for (const k of ['drawing.add', 'drawing.title', 'drawing.pick_item', 'drawing.delete_mark', 'drawing.undo', 'drawing.save', 'drawing.zoom', 'drawing.rotate', 'drawing.hint', 'err.drawing_unreadable']) assert.ok(keys.includes(k), k);
+    for (const k of ['drawing.add', 'drawing.title', 'drawing.pick_item', 'drawing.delete_mark', 'drawing.undo', 'drawing.save', 'drawing.zoom', 'drawing.rotate', 'drawing.hint', 'drawing.no_points', 'err.drawing_unreadable']) assert.ok(keys.includes(k), k);
     for (const k of keys) { assert.ok(dict.ja[k], 'ja ' + k); assert.ok(dict.id[k], 'id ' + k); }
     assert.deepEqual(Object.keys(dict.ja).sort(), Object.keys(dict.id).sort());
   });
