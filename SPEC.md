@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.5.1 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
+- 版: 1.5.2 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -1217,7 +1217,7 @@ PDF: `generateReport` `listReports`
 {ルート}/
   photos/{siteId}_{現場名}/{階}/{YYYY-MM-DD}/{recordId}_{itemId|prime}_{side}_{photoId}.jpg
   thumbs/{photoId}.jpg
-  reports/{siteId}_{現場名}/{recordId}_v{version}_{YYYYMMDD-HHmm}.pdf
+  reports/{siteId}_{現場名}/{subject}_v{version}_{YYYYMMDD-HHmm}.pdf   (subject は §10.2a。禁止文字は Util.sanitizeName で置換)
 ```
 - フォルダ名は `\ / : * ? " < > |` を `_` に置換し前後空白を除き最大60文字。現場名が後で変わっても `siteId` 接頭辞でフォルダを特定する(`Sites.driveFolderId` に現場フォルダIDを保存。階・日付フォルダは「名前で探して無ければ作る」)。
 - 日付フォルダ = `takenAt`(検証後)のJST日付。工区はフォルダに含めない(ファイル名の `recordId` で特定)。
@@ -1436,8 +1436,9 @@ PDF: `generateReport` `listReports`
 - 生成可能: status∈{`qa_ok`(元請の確認・サイン待ち。署名欄は空欄を印刷)、`approved`(3者サイン済み)}。`qa_ok` で渡したPDFに元請が署名(紙/PDF)→QAが `recordPrimeSign` で記録(`method`・担当者名・任意で署名済み書類の写真を `side=prime` で保存)→`approved`。承認後に最終版PDFを再生成して保管する(版が増える。**自動生成はしない**。S08/S09の導線で促す)。
 
 ### 10.2 内容(日本語のみ。A4縦、余白12mm)
+0. **件名 `subject`**(§10.2a)。PDFの1ページ目の見出し(タイトルの直下)に大きく表示し、HTMLの `<title>` にも同じ文字列を入れる。
 1. タイトル「型枠工事 {段階名}検査記録」。
-2. 基本情報: 現場名、元請会社名(`primeContractor`)、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
+2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
 3. **3者サイン欄**: 職長(氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。
@@ -1445,11 +1446,17 @@ PDF: `generateReport` `listReports`
 7. 写真: 項目ごとにサムネ(長辺320px)をグリッド表示。キャプション=項目No.・撮影者区分(職長/管理者/元請サイン証跡)・`stampText`。最大60枚(超える場合はNG項目の写真を優先し、残りは「他N枚は電子記録で閲覧可」と注記)。
 8. フッタ(全ページ): 記録ID・ページ番号・「電子記録ハッシュ(SHA-256): {64桁}」。ハッシュ = 記録スナップショット(`recordId`,`round`,項目結果一式,署名3者の氏名・日時,判定イベント一覧)の canonicalJSON のSHA-256。
 
+### 10.2a 件名(subject)とファイル名(版1.5.2。ユーザー決定)
+- `subject = {現場名} {階}` + (`zone` が空でなければ ` {工区}`) + ` {打設箇所(lot)}`。**半角スペース1つ区切り**。各要素は記録の値をそのまま使う(前後空白は除く)。
+  - 例: 現場「奥沢中学校」・階「基礎」・工区なし・lot「L2」→ `奥沢中学校 基礎 L2` / 現場「Jビル赤坂」・階「1F」・工区「東工区」・lot「L1」→ `Jビル赤坂 1F 東工区 L1`。
+- **PDFファイル名** = `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(日時はJST・生成時刻)。`subject` 部分に `Util.sanitizeName`(§7.4 のフォルダ名と同じ置換: `\ / : * ? " < > |` を `_`、前後空白除去、最大60文字)を適用する。従来の `{recordId}_v...` 形式は廃止(`recordId` はPDF本文・フッタに残る)。同名ファイルがあっても別ファイルとして保存する(`version` と生成時刻で通常は重ならない)。保存先フォルダは変更なし。
+- `Reports` の列・`Report` 応答(§5.1)・API契約は変更なし(`subject` は応答に含めない。PDF名とPDF本文のみ)。
+
 ### 10.3 生成方法(GAS)
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
-2. インラインCSSのみのHTML文字列を組み立てる(外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
+2. インラインCSSのみのHTML文字列を組み立てる(`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
 3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む。
-4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{recordId}_v{version}_{YYYYMMDD-HHmm}.pdf`。
+4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
 5. `reports/{siteId}_{現場名}/` に保存。`Config.pdfShareMode=anyone_with_link` なら `file.setSharing(ANYONE_WITH_LINK, VIEW)`、`private` なら共有しない(P-32)。`url = file.getUrl()`。
 6. PDF本体の SHA-256 を計算し `Reports` に追記(`version` = その記録の既存最大+1)。Events `report_generated`。応答 `Report`(§5.1)。
 7. タイムアウト目安120秒。写真が多い場合は上記60枚上限で抑える。
@@ -1481,7 +1488,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - **時計**: すべての時刻・期限・エスカレーションはモックの仮想時計 `now()` を使う(初期値=起動時の実時刻。`/__mock/clock` で変更)。`meta.serverTime` も仮想時計。
 - **エスカレーション**: `escalationTick` を **各リクエスト処理の直前に遅延実行**し、`/__mock/tick` でも実行可。送信メールは送らず記録だけ(`/__mock/mails`)。
 - **写真**: 単発(`total=1`)はキャッシュを使わず、1リクエストで §5.4.4 の検証→「仮想Drive」(メモリのMap。パスは§7.4の構造)に保存→ロック内で Photos 追記。分割は、チャンクをメモリのキャッシュ(仮想時計で6時間TTL。`/__mock/evictChunks` で全消去)に保存し、最終チャンクで検証→仮想Driveに保存。仮想Driveの作成・削除は `lockHeld` 付きで履歴に残す(`/__mock/driveLog`)。`/__mock/drive` は **削除(ゴミ箱)されていない** ファイルの一覧。`getPhotoThumbs`/`getPhoto` は保存したバイト列を `data:` URLで返す。参照シートのキャッシュ(§2.15)はモックでは実装しなくてよい(常に最新を返すのは契約に適合する)。
-- **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status}` の行を含む、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
+- **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status}` の行を含む、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信(`{名前}` は §10.2a のファイル名。日本語を含むので `url` は `encodeURIComponent` した形、配信側は復号して照合)、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
 - **メール**: 送らず `mails` 配列に `{to,subject,body,at}` を追記(§6.6の宛先規則通り)。
 - **Idem/Events/Notes**: 追記専用の挙動(更新・削除しない)を本物と同じに。
 
@@ -1667,7 +1674,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-CACHE-01(キャッシュが権限を跨がない): 事前に `getBootstrap` などで参照キャッシュを温めた状態で、`/__mock/patch`(`keepCache:true`)により ①田中の `Users.status=disabled` → **直後の** 田中のtokenでの任意のaction(`me` 以外)が `USER_DISABLED` ②田中の s_a の `Assignments` を `active=FALSE` → **直後の** `listRecords(siteId=s_a)` が `FORBIDDEN_SITE`、`getBootstrap.sites` から s_a が消える ③佐藤の `Absences` を挿入 → **直後の** `listAssignments.absentToday=true`、鈴木が主担当の代行として `decideJoin` 可 ④`adminRevokeDevice` 直後に当該端末が `DEVICE_REVOKED` いずれも遅延が許されない。(mock/harness共通。モックは常に最新なので自明に通る)
 - C-CACHE-02: (harness-only。`/__mock/cacheStats.enabled=true` のときだけ実行)①温めた後 `Config.photoMaxPerItem` を `keepCache:true` で変更 → 直後の `getBootstrap.config.photoMaxPerItem` は旧値(`hits` が増える)、`/__mock/clock` で+61秒後は新値 ②`keepCache` 無しの `patch` は直後に新値 ③`adminRotateJoinKey` の直後に旧 `joinKey` の `requestJoin` が `JOIN_KEY_INVALID`(`Sites` 破棄+`joinKey` 照合はキャッシュを使わない) ④`Config` に1行120,000文字の `description` を持つ行を `patch` で追加し、キャッシュ値が100KB(102,400バイト)を超える状態で `getBootstrap` が正常応答・`skippedTooLarge` が増え、`Items`/`Sites` のキャッシュは影響を受けない ⑤`Sites` を `keepCache:true` で `status=closed` に変更 → +61秒後は `createRecord` が `SITE_CLOSED`(60秒以内は成功/`SITE_CLOSED` のどちらも許す=assertしない)。
 - C-ROSTER-01: `adminValidateRoster` はシードで `problems` にerrorなし。(mock-only)`patch` で `qa_sub` を外す→`SITE_NO_QA_SUB`、`qa_main==qa_sub`→`QA_MAIN_EQ_SUB`、職長のUserにQA担当→`ROLE_MISMATCH`。
-- C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。
+- C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。**(版1.5.2)PDFファイル名は `{subject}_v{n}_{YYYYMMDD-HHmm}.pdf`**: 工区なし(例 `奥沢中学校 基礎 L2`)・工区あり(例 `Jビル赤坂 1F 東工区 L1`)で subject が §10.2a 通り(半角スペース区切り・工区が空なら詰める)、`url`(復号後)の名前に `recordId` が含まれない、禁止文字(例 現場名に `/`)は `_` に置換される。GAS互換ハーネスでは生成HTMLの `<title>` が subject と一致する。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
 ### 12.4 ユニットテスト(U-)
@@ -1877,3 +1884,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-08 | 1.4.3 | §11.4: `/__mock/patch` の許可シートに `Devices` を追加(`tokenHash` は指定不可)。`/__mock/interleave` の許可シートを `Records`/`Photos`/`Users`/`Assignments`/`Devices` と明記(ロック内の再認証 `DEVICE_REVOKED` のテスト用)。 |
 | 2026-10-10 | 1.5.0 | 写真送信のさらなる高速化の確認と固定処理の削減(本番実測: 1往復≒1.3〜2.8秒、本文400KBでも約1.6秒、4件同時でも全体約3.2秒、写真300KBを90KB×5分割で約35秒=1回約6秒)。既存の列名・action名・エラーコード・action数(43)・Config キーは変更なし。**依頼のうち単発送信(`total=1`)、`uploadPhotoChunk` の最大3並列(`photoParallel`)、ロック範囲の縮小(Drive書込みはロック外)、`Config`/`Items`/`Sites` の60秒キャッシュは、版1.4〜1.4.3で既に記載済みのため再記述せず整合のみ確認**(本番が旧実装のまま分割送信になっている可能性が高い。実装の反映状況の確認が必要)。①§2.14: `photoChunkChars` は 90000 のまま(700000 へ上げない。分割モードは CacheService の1値100KB制限があるため。単発の上限 `photoSingleMaxChars=1200000` は `photoMaxBytes` のbase64長800,000以上で整合済みと明記)。②§2.16 新設・§1.4・§13.2: 1リクエスト内の同一シート再読込禁止(リクエスト内メモ)、ロック取得後は読み直し、端末認証などで必要な行/列だけ読む、可変データのリクエストまたぎキャッシュ禁止(結果は素朴な実装と同一)。③§2.15-10: キャッシュTTL上限を60秒固定と明記(5分は採らない)。④§12.6 新設・§12.2: 性能の受け入れ基準 PERF-01〜03(ping 約1.5秒、写真1枚約10秒、10枚約40秒・3並列)を手動確認項目として追加。⑤§7.3・§14 P-37/P-38/P-39・§14.2 の12: 整合。 |
 | 2026-10-10 | 1.5.1 | ユーザー決定: 管理者(QA)側の確認では写真は不要(任意)。写真必須は職長の自己点検(`submitRecord`)のみ。既存の列名・action名・エラーコード・action数(43)は変更なし。①§5.3.1: `PHOTO_REQUIRED` を職長提出時のみ(`selfResult=ng`、または `key` の `ok`)に限定し、`submitVerdict` では出さない(`NOTE_REQUIRED`/`SEVERITY_REQUIRED` は従来どおり必須)。QA側の写真の撮影・添付・削除は任意で可能。②§9.1(写真ルール)・§9.2 S10・§12.2 要件対応表・§12.3 C-STATE-05/C-STATE-06・§12 E-03: 整合。 |
+| 2026-10-10 | 1.5.2 | ユーザー決定: 元請提出用PDFの件名を「現場名 階 工区 打設箇所」にする。既存の列名・action名・エラーコード・action数(43)・API契約は変更なし。§10.2a 新設(`subject`=`{現場名} {階}[ {工区}] {lot}`、PDF名=`{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`、`{recordId}_v...` は廃止)、§10.2(件名を表示)・§10.3(`<title>`・ファイル名)・§7.4(reports のパス)・§11.3(モックのPDF名)・§12.3 C-REP-01 に整合。 |
