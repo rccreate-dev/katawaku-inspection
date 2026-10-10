@@ -173,6 +173,7 @@
       video.muted = true;
       var prev = h('img', { class: 'prev', alt: '', hidden: true });
       var info = h('div', { class: 'stamp' });
+      var hint = h('div', { class: 'stamp camhint' }, t('photo.landscape_hint'));
       var msg = h('div', { class: 'stamp', hidden: true });
       var fileIn = null;
       var shutter = h('button', { type: 'button', class: 'shutter', 'aria-label': t('photo.shutter'), disabled: true });
@@ -181,7 +182,7 @@
       var cancel = h('button', { type: 'button', class: 'cambtn' }, t('act.cancel'));
       var count = h('span', null, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
       var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, use);
-      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, msg, bar);
+      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, bar);
       layer.appendChild(box);
 
       function finish(v) {
