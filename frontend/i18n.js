@@ -230,7 +230,6 @@
     ['drawing.by_self', '職長の図面', 'Gambar mandor'],
     ['drawing.by_qa', '管理者の図面', 'Gambar pengawas'],
     ['drawing.empty', '図面はまだありません', 'Belum ada gambar kerja'],
-    ['drawing.no_points', '測定値がまだ入力されていません。先に測定値を入力してください', 'Nilai ukur belum diisi. Isi nilai ukur terlebih dahulu'],
     ['drawing.pick_point', '測定点を選んでから図面をタップ', 'Pilih titik ukur lalu ketuk gambar'],
     ['drawing.placing_point', '{label} {value}: 置く位置をタップ(置き済みなら移動)', '{label} {value}: ketuk posisi (jika sudah ada, dipindahkan)'],
     ['drawing.points', '測定点', 'Titik ukur'],

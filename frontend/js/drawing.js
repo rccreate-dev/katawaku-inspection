@@ -120,7 +120,7 @@
         b.addEventListener('click', function () {
           activeId = (activeId === it.itemId) ? null : it.itemId;
           activeK = null; selected = null;
-          if (activeId && it.measure !== 'none') { // 未配置の最初の測定点を選んでおく
+          if (activeId && hasPoints(it)) { // 未配置の最初の測定点を選んでおく
             for (var k = 1; k <= (it.values || []).length; k++) { if (!findMark(it.itemId, k)) { activeK = k; break; } }
             if (activeK == null && (it.values || []).length) activeK = 1;
           }
@@ -145,6 +145,7 @@
       layer.appendChild(box);
 
       function findMark(itemId, k) { return markers.filter(function (m) { return m.itemId === itemId && m.k === k; })[0] || null; }
+      function hasPoints(it) { return it.measure !== 'none' && (it.values || []).length > 0; }
       function itemOf(id) { return o.items.filter(function (i) { return i.itemId === id; })[0] || null; }
       function valText(v, unit) { return (v > 0 ? '+' : '') + v + (unit || 'mm'); }
       function showMsg(text) { msg.hidden = !text; KW.clear(msg); if (text) msg.appendChild(document.createTextNode(text)); }
@@ -191,15 +192,14 @@
         delBtn.disabled = busy || !selected;
         rotateBtn.disabled = busy; save.disabled = busy;
         var act = itemOf(activeId);
-        var measured = !!act && act.measure !== 'none';
+        var measured = !!act && hasPoints(act);
         var vals = (act && act.values) || [];
         var hintText = t('drawing.pick_item');
         itemBox.hidden = !act; KW.clear(itemBox);
         pointsBox.hidden = !measured; KW.clear(pointsBox);
         if (act) {
           itemBox.appendChild(document.createTextNode('No.' + act.no + ' ' + (act.text || '') + (act.key ? ' ★' : '')));
-          if (!measured) hintText = t('drawing.placing', { no: P.drawingNo(act.no), text: act.text || '' });
-          else if (!vals.length) { hintText = t('drawing.no_points'); }
+          if (!measured) hintText = t('drawing.placing', { no: P.drawingNo(act.no), text: act.text || '' }); // 測定なし/測定点ゼロ: 通常項目と同じ(N を何個でも)
           else {
             hintText = activeK ? t('drawing.placing_point', { label: P.drawingLabel(act.no, activeK, act.measure), value: valText(vals[activeK - 1], act.unit) }) : t('drawing.pick_point');
             vals.forEach(function (v, i) {
@@ -224,10 +224,10 @@
         if (!it || !r.width || !r.height) return;
         var x = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
         selected = null;
-        if (it.measure === 'none') {
+        if (!hasPoints(it)) {
           markers.push({ itemId: activeId, k: null, x: x, y: y, label: '' }); // 測定なしの項目は何個でも N
         } else {
-          if (!activeK) { refresh(); return; } // 測定点が未入力/未選択: 置けない
+          if (!activeK) { refresh(); return; } // 測定点が未選択: 置けない
           var ex = findMark(activeId, activeK);
           if (ex) { ex.x = x; ex.y = y; } // 1測定点につき印は1つ: 置き済みなら移動
           else {

@@ -84,12 +84,17 @@ describe('E-14 図面の書き込み', () => {
     await tapAt(s, 60, 60);
     assert.equal(await marks(s).count(), 0);
 
-    // 番号を選ぶと項目内容(No.N・項目文・★)が出る。測定値が無い測定項目(⑤)は置けない
+    // 番号を選ぶと項目内容(No.N・項目文・★)が出る。測定点が未入力の測定項目(⑤)は通常項目と同じく N を何個でも置ける
     await numBtn(s, 5).click();
     assert.match(await page.locator('.dedit .ditem').innerText(), /^No\.5 /);
+    assert.equal(await page.locator('.dedit .dpoint').count(), 0, '測定点ゼロはチップなし');
     await tapAt(s, 60, 60);
-    assert.equal(await marks(s).count(), 0, '測定点が未入力の項目は置けない');
-    assert.match(await page.locator('.dedit .dhint').innerText(), new RegExp(s.t('drawing.no_points').slice(0, 8)));
+    await tapAt(s, 60, 120);
+    assert.deepEqual(await labels(s), ['⑤', '⑤']);
+    await marks(s).first().click();
+    await page.locator('.dedit [data-act=delete-mark]').click();
+    await page.locator('.dedit [data-act=undo]').click();
+    assert.equal(await marks(s).count(), 0);
     await numBtn(s, 2).click(); // 重点項目
     assert.match(await page.locator('.dedit .ditem').innerText(), /^No\.2 .*★/);
 

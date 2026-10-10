@@ -189,11 +189,11 @@
 
   /*
    * 印の文字(§7.7-2。版1.6.1)。no=画面の項目番号、k=測定点の番号(1始まり)、measure=項目の測定区分。
-   * ・measure=none は何個置いても N(枝番なし) ・measure≠none は N-k(k=その項目の測定点の番号)
+   * ・measure=none、または測定点が未入力(k が null)なら何個置いても N(枝番なし) ・それ以外は N-k(k=その項目の測定点の番号)
    */
   function drawingLabel(no, k, measure) {
     var base = drawingNo(no);
-    return measure === 'none' ? base : base + '-' + k;
+    return (measure === 'none' || k == null) ? base : base + '-' + k;
   }
 
   /*

@@ -32,6 +32,12 @@ describe('U-DRAW-02 印の文字(§7.7-2。版1.6.1)', () => {
     assert.deepEqual(L([['i1', null], ['i1', null], ['i1', null]]), ['①', '①', '①']);
     assert.deepEqual(L([['i22', null], ['i22', null]]), ['22', '22']);
   });
+  it('measure≠none でも測定点が未入力(k=null)なら何個でも N(枝番なし)', () => {
+    assert.deepEqual(L([['i4', null], ['i4', null]]), ['④', '④']);
+    assert.deepEqual(L([['i5', null]]), ['⑤']);
+    assert.deepEqual(L([['i21', null], ['i21', null]]), ['21', '21']);
+    assert.equal(photo.drawingLabel(4, null, 'optional'), '④');
+  });
   it('measure≠none は測定点の番号 k で N-k(k はそのまま。1個でも ④-1、2番目だけでも ④-2)', () => {
     assert.deepEqual(L([['i4', 1]]), ['④-1']);
     assert.deepEqual(L([['i4', 1], ['i4', 2]]), ['④-1', '④-2']);
@@ -50,6 +56,7 @@ describe('U-DRAW-02 印の文字(§7.7-2。版1.6.1)', () => {
     assert.equal(photo.pointNo(1), '①'); assert.equal(photo.pointNo(20), '⑳'); assert.equal(photo.pointNo(21), '21');
     assert.deepEqual(L([]), []);
     assert.deepEqual(L([['nope', 1]]), ['']);
+    assert.equal(require(path.join(__dirname, '..', '..', 'frontend', 'i18n.js')).ja['drawing.no_points'], undefined, 'drawing.no_points は廃止');
   });
 });
 
@@ -99,7 +106,7 @@ describe('U-DRAW-03 縮小・再圧縮の計画(§7.7-3)', () => {
 describe('U-DRAW-04 辞書', () => {
   it('drawing.* と err.drawing_unreadable が ja / id の両方にある', () => {
     const keys = Object.keys(dict.ja).filter((k) => k.startsWith('drawing.')).concat(['err.drawing_unreadable']);
-    for (const k of ['drawing.add', 'drawing.title', 'drawing.pick_item', 'drawing.delete_mark', 'drawing.undo', 'drawing.save', 'drawing.zoom', 'drawing.rotate', 'drawing.hint', 'drawing.no_points', 'err.drawing_unreadable']) assert.ok(keys.includes(k), k);
+    for (const k of ['drawing.add', 'drawing.title', 'drawing.pick_item', 'drawing.delete_mark', 'drawing.undo', 'drawing.save', 'drawing.zoom', 'drawing.rotate', 'drawing.hint', 'err.drawing_unreadable']) assert.ok(keys.includes(k), k);
     for (const k of keys) { assert.ok(dict.ja[k], 'ja ' + k); assert.ok(dict.id[k], 'id ' + k); }
     assert.deepEqual(Object.keys(dict.ja).sort(), Object.keys(dict.id).sort());
   });
