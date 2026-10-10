@@ -335,6 +335,7 @@
     ['scr.S06.problems', '入力を確認してください(赤枠の項目)', 'Periksa isian (kotak merah)'],
     ['scr.S06.readonly', '提出済みのため編集できません(閲覧のみ)', 'Sudah dikirim, tidak bisa diedit (hanya lihat)'],
     ['scr.S06.status_changed', '記録の状態が変わりました。更新してください', 'Status catatan berubah. Muat ulang'],
+    ['scr.S06.fix_items', '是正する項目({n}件)', 'Item yang diperbaiki ({n})'],
     ['scr.S06.fix_banner', '差し戻されました。管理者のコメントを確認して是正してください', 'Dikembalikan. Periksa komentar pengawas dan perbaiki'],
     ['scr.S06.to_confirm', '確認へ進む', 'Lanjut ke konfirmasi'],
     ['scr.S07.title', '提出前の確認', 'Konfirmasi sebelum kirim'],

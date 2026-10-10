@@ -278,6 +278,19 @@
           var fixes = [];
           if (detail.qaComment) fixes.push(h('div', { class: 'cmt mgr' }, h('b', null, t('lbl.qa_comment')), detail.qaComment));
           if (detail.stopInfo) fixes.push(h('div', { class: 'cmt' }, h('b', null, t('badge.stopped')), (detail.stopInfo.byName || '') + ': ' + (detail.stopInfo.reason || '')));
+          // 是正が必要な項目の一覧(管理者がNGにした項目。タップでその項目へ移動)
+          var ngList = visibleItems().map(function (it, idx) { return { it: it, no: idx + 1 }; }).filter(function (o) { return o.it.qa && o.it.qa.result === 'ng'; });
+          if (ngList.length) {
+            var ul = h('div', { class: 'fixlist' }, h('b', null, t('scr.S06.fix_items', { n: ngList.length })));
+            ngList.forEach(function (o) {
+              var q = o.it.qa;
+              var line = h('button', { type: 'button', class: 'btn small ghost fixrow' },
+                o.no + '. ' + KW.itemText(o.it.def) + (q.severity ? '(' + t('sev.' + q.severity) + ')' : '') + (q.note ? ' — ' + q.note : ''));
+              line.addEventListener('click', function () { var n = itemNodes[o.it.itemId]; if (n && n.scrollIntoView) n.scrollIntoView({ block: 'center' }); });
+              ul.appendChild(line);
+            });
+            fixes.push(ul);
+          }
           el.appendChild(C.banner('bad', [h('b', null, t('scr.S06.fix_banner')), fixes]));
         }
         // 打設予定日時
