@@ -531,12 +531,14 @@ module.exports = function install(C) {
     const { buildPdf } = require('./pdfstub');
     const version = table('Reports').filter((r) => r.recordId === rec.recordId).reduce((m, r) => Math.max(m, r.version), 0) + 1;
     const stamp = U.fmtDt(nowMs()).slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
-    const name = `${rec.recordId}_v${version}_${stamp}.pdf`;
+    const site = siteRow(rec.siteId);
+    // 件名: 現場名 階 [工区] 打設箇所(SPEC §10.2a)
+    const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
+    const name = `${String(subject).replace(/[\\\/:*?"<>|]/g, '_').trim().slice(0, 60)}_v${version}_${stamp}.pdf`;
     const buf = buildPdf(rec.recordId, version, rec.status);
     C.S().reports.set(name, buf);
-    const site = siteRow(rec.siteId);
     const driveFileId = C.driveSave(`reports/${rec.siteId}_${site.name}/${name}`, buf);
-    const row = insert('Reports', { reportId: U.newId('f'), recordId: rec.recordId, version, recordStatus: rec.status, driveFileId, url: `${rc.baseUrl || 'http://127.0.0.1:8787'}/files/reports/${name}`, sha256: U.sha256(buf), generatedBy: actor.userId, generatedAt: nowDt() });
+    const row = insert('Reports', { reportId: U.newId('f'), recordId: rec.recordId, version, recordStatus: rec.status, driveFileId, url: `${rc.baseUrl || 'http://127.0.0.1:8787'}/files/reports/${encodeURIComponent(name)}`, sha256: U.sha256(buf), generatedBy: actor.userId, generatedAt: nowDt() });
     ev('report_generated', { siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: { reportId: row.reportId, version } });
     C.touch(rec);
     return { report: C.reportView(row) };

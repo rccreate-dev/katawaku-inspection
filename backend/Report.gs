@@ -51,11 +51,17 @@ function reportSnapshotHash_(rec, rows, verdictEvents) {
   return Util.sha256Hex(Util.canonicalJSON(snap));
 }
 
+/** 元請提出PDFの件名: 現場名 階 [工区] 打設箇所(SPEC §10.2a)。半角スペース区切り */
+function reportSubject_(rec, site) {
+  var parts = [site.name, rec.floor, rec.zone, rec.lot].map(function (x) { return String(x === null || x === undefined ? '' : x).trim(); });
+  return parts.filter(function (x) { return x; }).join(' ');
+}
+
 function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt) {
   var hash = reportSnapshotHash_(rec, rows, events.filter(function (e) { return /^verdict_/.test(e.kind); }));
   var stage = STAGE_LABEL_[rec.stage] || rec.stage;
   var h = [];
-  h.push('<!DOCTYPE html><html><head><meta charset="utf-8"><title>型枠工事検査記録</title><style>');
+  h.push('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc_(reportSubject_(rec, site)) + '</title><style>');
   h.push('@page{size:A4;margin:12mm}body{font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif;font-size:10px;color:#111}');
   h.push('h1{font-size:16px;margin:0 0 6px}h2{font-size:12px;margin:12px 0 4px;border-bottom:1px solid #444}');
   h.push('table{border-collapse:collapse;width:100%}th,td{border:1px solid #666;padding:2px 4px;vertical-align:top}th{background:#eee}');
@@ -63,7 +69,8 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   h.push('.foot{margin-top:10px;font-size:8px;color:#444;word-break:break-all}');
   h.push('</style></head><body>');
   h.push('<!--REPORT ' + esc_(rec.recordId) + ' v' + version + ' ' + esc_(rec.status) + '-->');
-  h.push('<h1>型枠工事 ' + esc_(stage) + '検査記録</h1>');
+  h.push('<h1>' + esc_(reportSubject_(rec, site)) + '</h1>');
+  h.push('<p>型枠工事 ' + esc_(stage) + '検査記録</p>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
   h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
@@ -160,7 +167,7 @@ function act_generateReport(ctx) {
   var version = prev.reduce(function (m, r) { return Math.max(m, r.version); }, 0) + 1;
   var now = Util.now(), nowIso = Util.fmtDt(now);
   var stamp = nowIso.slice(0, 10).replace(/-/g, '') + '-' + nowIso.slice(11, 13) + nowIso.slice(14, 16);
-  var name = rec.recordId + '_v' + version + '_' + stamp + '.pdf';
+  var name = Util.sanitizeName(reportSubject_(rec, site)) + '_v' + version + '_' + stamp + '.pdf';
   var file, bytes;
   try {
     var html = buildReportHtml_(rec, site, rows, photos, notes, events, version, nowIso);

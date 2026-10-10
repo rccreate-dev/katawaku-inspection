@@ -146,6 +146,10 @@ describe('C-REP 元請向けPDF', () => {
     assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
     assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v1 qa_ok`));
     assert.equal(h.sha256(buf), r.report.sha256, 'sha256 は実バイト列のハッシュ');
+    // 件名(SPEC §10.2a): ファイル名は「現場名 階 [工区] 打設箇所」+ _v版_日時。recordId は含まない
+    const fname = decodeURIComponent(r.report.url.split('/').pop());
+    assert.match(fname, /^\S+ \S+( \S+)?( \S+)?_v1_\d{8}-\d{4}\.pdf$/, 'ファイル名=' + fname);
+    assert.ok(!fname.includes(recordId), 'ファイル名に recordId を含まない');
   });
 });
 
