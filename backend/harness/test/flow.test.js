@@ -313,6 +313,7 @@ test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表nowra
   assert.ok(itemRows > 0);
   assert.equal((itemsTbl.match(/<td class="wrap">/g) || []).length, itemRows, '折り返しは職長コメント列のみ(行ごとに1つ)');
   assert.ok(!/display:\s*(flex|grid)|calc\(/.test(html), 'flex/grid/calc を使わない');
+  assert.ok(!/max-height:58mm/.test(html) && (html.match(/<img style="(width:80mm|height:58mm)"/g) || []).length >= 1, '写真は縦横比を保つ(幅か高さの片方だけ指定)');
   const blocks = html.match(/<table class="pb"[^>]*>/g) || [];
   assert.ok(blocks.length >= 1, '写真ブロックがある');
   blocks.forEach((b, i) => {

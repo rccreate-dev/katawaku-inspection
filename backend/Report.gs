@@ -71,7 +71,7 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   h.push('.ng td{background:#fde8e8}.sign td{height:36px}');
   // 写真ブロック(SPEC §10.2b-B): 1枚1table・高さ固定・4枚ごとに改ページ
   h.push('table.pb{table-layout:fixed;width:186mm;height:62mm;margin:0 0 3mm 0;page-break-inside:avoid}table.pb td{overflow:hidden;height:62mm;vertical-align:top;padding:3px 5px}');
-  h.push('table.pb td.pic{width:83mm;text-align:center;vertical-align:middle}table.pb td.pic img{width:80mm;max-height:58mm}');
+  h.push('table.pb td.pic{width:83mm;text-align:center;vertical-align:middle}');
   h.push('table.pb .ngc{color:#c00;font-weight:bold}table.pb .lb{color:#555}');
   h.push('.foot{margin-top:10px;font-size:8px;color:#444;word-break:break-all}');
   h.push('</style></head><body>');
@@ -170,7 +170,10 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
     }
     info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + who + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
     var brk = ((idx + 1) % 4 === 0 && idx < shown.length - 1) ? ' style="page-break-after:always"' : '';
-    h.push('<table class="pb"' + brk + '><tr><td class="pic">' + (b64 ? '<img src="data:image/jpeg;base64,' + b64 + '">' : '') + '</td><td>' + info + '</td></tr></table>');
+    // 写真は引き伸ばさない: 縦横比を保つため、横長は幅、縦長は高さだけを指定する(width/height は元画像の寸法)
+    var portrait = ph.width && ph.height && Number(ph.height) > Number(ph.width);
+    var imgStyle = portrait ? 'height:58mm' : 'width:80mm';
+    h.push('<table class="pb"' + brk + '><tr><td class="pic">' + (b64 ? '<img style="' + imgStyle + '" src="data:image/jpeg;base64,' + b64 + '">' : '') + '</td><td>' + info + '</td></tr></table>');
   });
   if (photos.length > shown.length) h.push('<p>他' + (photos.length - shown.length) + '枚は電子記録で閲覧可</p>');
   h.push('<div class="foot">記録ID: ' + esc_(rec.recordId) + ' / 電子記録ハッシュ(SHA-256): ' + hash + '</div>');
