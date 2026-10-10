@@ -80,20 +80,31 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
     o.push('<p>印の書き込みなし</p></div>');
     return o.join('\n');
   }
-  var byItem = {}, ids = [];
+  // 凡例は印の label ごとに1行(版1.6.4)。同じ label の重複は1行にまとめる。項目番号→枝番の昇順
+  var seen = {}, ents = [];
   markers.forEach(function (m) {
     if (!seq[m.itemId]) return;
-    if (!byItem[m.itemId]) { byItem[m.itemId] = []; ids.push(m.itemId); }
-    byItem[m.itemId].push(m.label);
+    var key = m.itemId + '|' + m.label;
+    if (seen[key]) return;
+    seen[key] = true;
+    var km = /-(\d+)$/.exec(String(m.label));
+    ents.push({ itemId: m.itemId, label: String(m.label), k: km ? Number(km[1]) : 0 });
   });
-  ids.sort(function (a, b) { return seq[a] - seq[b]; });
+  ents.sort(function (a, b) { return (seq[a.itemId] - seq[b.itemId]) || (a.k - b.k); });
   var cell = 'white-space:nowrap;overflow:hidden;height:6mm;line-height:6mm;padding:0 2px;vertical-align:middle';
-  o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:30mm"><col style="width:100mm"><col style="width:28mm"><col style="width:28mm"></colgroup>');
-  o.push('<tr><th style="' + cell + '">番号</th><th style="' + cell + '">項目</th><th style="' + cell + '">職長</th><th style="' + cell + '">管理者</th></tr>');
-  ids.forEach(function (id) {
-    var row = rows[seq[id] - 1], snap = row.snapshot;
-    o.push('<tr><td style="' + cell + '">' + esc_(byItem[id].join(', ')) + '</td><td style="' + cell + '">No.' + seq[id] + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) +
-      '</td><td style="' + cell + '">' + resChip(row.selfResult, row.selfSeverity) + '</td><td style="' + cell + '">' + resChip(row.qaResult, row.qaSeverity) + '</td></tr>');
+  o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:24mm"><col style="width:82mm"><col style="width:24mm"><col style="width:28mm"><col style="width:28mm"></colgroup>');
+  o.push('<tr><th style="' + cell + '">番号</th><th style="' + cell + '">項目</th><th style="' + cell + '">実測値</th><th style="' + cell + '">職長</th><th style="' + cell + '">管理者</th></tr>');
+  ents.forEach(function (e) {
+    var row = rows[seq[e.itemId] - 1], snap = row.snapshot;
+    var val = '';
+    if (e.k > 0) {
+      // 図面を書いた側の測定値を優先し、無ければもう一方
+      var a = ph.side === 'qa' ? row.qaValues : row.selfValues, b = ph.side === 'qa' ? row.selfValues : row.qaValues;
+      var v = (a && a[e.k - 1] !== undefined && a[e.k - 1] !== null) ? a[e.k - 1] : ((b && b[e.k - 1] !== undefined && b[e.k - 1] !== null) ? b[e.k - 1] : null);
+      if (v !== null && v !== '') val = (Number(v) > 0 ? '+' : '') + v + (snap.unit || 'mm');
+    }
+    o.push('<tr><td style="' + cell + '">' + esc_(e.label) + '</td><td style="' + cell + '">No.' + seq[e.itemId] + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) +
+      '</td><td style="' + cell + '">' + esc_(val) + '</td><td style="' + cell + '">' + resChip(row.selfResult, row.selfSeverity) + '</td><td style="' + cell + '">' + resChip(row.qaResult, row.qaSeverity) + '</td></tr>');
   });
   o.push('</table></div>');
   return o.join('\n');
