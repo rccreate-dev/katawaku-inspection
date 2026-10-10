@@ -167,11 +167,11 @@ module.exports = function install(C) {
       const id = r.itemId;
       if (!res) { v.push({ rule: 'ANSWER_MISSING', itemId: id }); continue; }
       if (res === 'ng') {
-        if (photos < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: id });
+        if (who !== 'qa' && photos < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: id });
         if (blank(note)) v.push({ rule: 'NOTE_REQUIRED', itemId: id });
         if (who === 'qa' && !r.qaSeverity) v.push({ rule: 'SEVERITY_REQUIRED', itemId: id });
       }
-      if (res === 'ok' && sn.key && photos < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: id });
+      if (res === 'ok' && sn.key && who !== 'qa' && photos < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: id });
       if (sn.measure === 'required' && res !== 'na' && values.length < sn.minMeasures) v.push({ rule: 'MEASURE_REQUIRED', itemId: id });
       if (sn.tol != null && values.length && res === 'ok' && Math.max(...values.map(Math.abs)) > sn.tol) v.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: id });
     }

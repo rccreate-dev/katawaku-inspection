@@ -33,10 +33,11 @@
       var pc = photoCount(e);
       var values = arr(e.values);
       if (result === 'ng') {
-        if (pc < 1) out.push({ rule: 'PHOTO_REQUIRED', itemId: id });
+        // 写真必須は職長側のみ。管理者(qa)側は任意(SPEC 1.5.1)
+        if (side !== 'qa' && pc < 1) out.push({ rule: 'PHOTO_REQUIRED', itemId: id });
         if (!String(e.note || '').trim()) out.push({ rule: 'NOTE_REQUIRED', itemId: id });
         if (side === 'qa' && !e.severity) out.push({ rule: 'SEVERITY_REQUIRED', itemId: id });
-      } else if (result === 'ok' && def.key && pc < 1) {
+      } else if (result === 'ok' && def.key && side !== 'qa' && pc < 1) {
         out.push({ rule: 'PHOTO_REQUIRED', itemId: id });
       }
       if (def.measure === 'required' && result !== 'na' && values.length < (def.minMeasures || 0)) {

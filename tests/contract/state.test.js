@@ -201,17 +201,17 @@ describe('C-STATE 状態遷移', () => {
     assert.deepEqual(rules(r), ['COMMENT_REQUIRED']);
     r = await verdict('minor', '   ');
     assert.deepEqual(rules(r), ['COMMENT_REQUIRED']);
-    // 6. NGの写真・備考・重さの欠落(i6は写真なし)
+    // 6. NGの備考・重さの欠落(i6は写真なし。QA側の写真は任意なので PHOTO_REQUIRED は出ない。SPEC 1.5.1)
     await set({ i6: { result: 'ng' } });
     r = await verdict('minor', '指摘');
     const v6 = r.error.data.violations.filter((v) => v.itemId === 'i6').map((v) => v.rule).sort();
-    assert.deepEqual(v6, ['NOTE_REQUIRED', 'PHOTO_REQUIRED', 'SEVERITY_REQUIRED']);
-    // 重点項目 ok で写真なしも検出(i9 の写真を消す)
+    assert.deepEqual(v6, ['NOTE_REQUIRED', 'SEVERITY_REQUIRED']);
+    // 重点項目 ok でQA側の写真が無くても PHOTO_REQUIRED は出ない(i9 の写真を消す。SPEC 1.5.1)
     const rec = await h.getRecord(qa, recordId);
     await qa.ok('deletePhoto', { photoId: rec.items.find((i) => i.itemId === 'i9').qa.photos[0].photoId });
     await set({});
     r = await verdict('ok');
-    assert.deepEqual(r.error.data.violations.map((v) => `${v.rule}|${v.itemId}`), ['PHOTO_REQUIRED|i9']);
+    assert.equal(r.ok, true, 'QA側は重点項目okの写真が無くても判定できる: ' + JSON.stringify(r.error));
   });
 
   it('C-STATE-07: 打設停止(他班の職長も可・署名無効・他現場は不可・draftは不可・理由必須)→再提出で再び approved へ', async () => {

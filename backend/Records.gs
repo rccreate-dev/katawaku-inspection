@@ -203,10 +203,11 @@ function checkItems_(side, rows, photos) {
     if (!result) { v.push({ rule: 'ANSWER_MISSING', itemId: r.itemId }); return; }
     var pc = cnt(r.itemId, side);
     if (result === 'ng') {
-      if (pc < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: r.itemId });
+      // 写真必須は職長の提出(side=self)のみ。管理者(qa)側は任意(SPEC 1.5.1)
+      if (side !== 'qa' && pc < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: r.itemId });
       if (Util.blank(r[F.note])) v.push({ rule: 'NOTE_REQUIRED', itemId: r.itemId });
       if (side === 'qa' && !r[F.sev]) v.push({ rule: 'SEVERITY_REQUIRED', itemId: r.itemId });
-    } else if (result === 'ok' && snap.key && pc < 1) {
+    } else if (result === 'ok' && snap.key && side !== 'qa' && pc < 1) {
       v.push({ rule: 'PHOTO_REQUIRED', itemId: r.itemId });
     }
     var values = r[F.values] || [];
