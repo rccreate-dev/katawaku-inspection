@@ -301,8 +301,18 @@
     }
   });
   KW.bus.on('auth:unlocked', function () { if (parseHash().path === '/locked') app.go('#/', true); });
-  KW.bus.on('app:error', function (e) { C.toast(t('err.INTERNAL'), 'bad'); void e; });
-  window.addEventListener('unhandledrejection', function () { C.toast(t('err.INTERNAL'), 'bad'); });
+  /* 予期しないエラーの表示。同じ内容は5秒に1回だけ(連続エラーで画面が埋まらないように)。原因調査のため短い内容も付ける */
+  var lastToastKey = '', lastToastAt = 0;
+  function unexpectedError(e) {
+    var msg = String(e && (e.message || e.reason && e.reason.message || e.reason) || e || '').slice(0, 60);
+    KW.state.lastErr = msg;
+    var now = Date.now();
+    if (msg === lastToastKey && now - lastToastAt < 5000) return;
+    lastToastKey = msg; lastToastAt = now;
+    C.toast(t('err.INTERNAL') + (msg ? ' (' + msg + ')' : ''), 'bad');
+  }
+  KW.bus.on('app:error', function (e) { unexpectedError(e); });
+  window.addEventListener('unhandledrejection', function (ev) { unexpectedError(ev); });
 
   KW.bus.on('outbox:counts', function () { renderHeader(); renderBanners(); });
   KW.bus.on('net:changed', function () { renderHeader(); });
