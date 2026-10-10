@@ -227,6 +227,7 @@
         if (p.local) {
           KW.outbox.forRecord(id).then(function (rows) {
             var row = rows.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
+            if (row && row.status === 'sending') return null; // 送信中は削除できない(完了後に削除)
             var tasks = [KW.data.delPhotoBlob(p.photoId)];
             if (row) tasks.push(KW.outbox.remove(row.seq));
             return Promise.all(tasks);
@@ -373,6 +374,7 @@
         });
       });
       ctx.on('outbox:counts', function () {
+        C.syncDeleteButtons(el);
         if (!work) return;
         KW.outbox.forRecord(id).then(function (rows) {
           if (!rows.length && work.dirty) { work.dirty = false; work.dirtyItems = {}; work.dirtyHeader = false; KW.data.putDraft(work); }

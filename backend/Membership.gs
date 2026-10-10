@@ -33,6 +33,7 @@ function absenceView_(b) {
 function act_requestJoin(ctx) {
   var p = ctx.params, actor = ctx.actor;
   requireAuth_(actor, 'requestJoin', { params: p });
+  Repo.fresh('Sites'); // 合言葉の照合はキャッシュを使わない(失効が遅れないように。SPEC §2.15 の3)
   var site = Repo.get('Sites', p.siteId);
   if (!site) throw new ApiError('NOT_FOUND', '現場が見つかりません');
   if (!Util.safeEqual(p.joinKey, site.joinKey)) throw new ApiError('JOIN_KEY_INVALID', '合言葉が違います');

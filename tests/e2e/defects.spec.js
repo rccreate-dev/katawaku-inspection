@@ -1,6 +1,5 @@
 // フロントの不具合の再現テスト(frontend/ は担当外のため直さない)。
-// 各テストは「あるべき挙動」を検証する。現状は失敗するので node:test の todo として登録(失敗しても全体は落とさない)。
-// フロント修正後は todo を外す(= このファイルの { todo } を削除)。報告書の FE-xx と対応。
+// 各テストは「あるべき挙動」を検証する(FE-01〜04 は修正済みのため通常テスト。todo は外した)。報告書の FE-xx と対応。
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,7 +23,7 @@ async function startRecord(s, floor, lot) {
 }
 
 describe('フロント不具合の再現', () => {
-  it('FE-01 起動時に未処理例外が出ない(s06.js が app.js より先に読まれ KW.app が未定義)', { todo: 'FE-01: frontend/js/ui/s06.js:7-8, index.html の読込順' }, async () => {
+  it('FE-01 起動時に未処理例外が出ない(s06.js が app.js より先に読まれ KW.app が未定義)', async () => {
     const s = await E.newSession(env, { workaround: false });
     await s.page.goto(s.base + '/#/register');
     await s.page.locator('.userlist').waitFor();
@@ -33,7 +32,7 @@ describe('フロント不具合の再現', () => {
     await s.close();
   });
 
-  it('FE-02 打設予定日時が未入力のとき「確認へ進む」で必須メッセージが表示される', { todo: 'FE-02: frontend/js/ui/s06.js showViolations()/planMsg' }, async () => {
+  it('FE-02 打設予定日時が未入力のとき「確認へ進む」で必須メッセージが表示される', async () => {
     const s = await E.newSession(env);
     await E.login(s, '田中');
     await startRecord(s, '1F', 'FE02');
@@ -46,7 +45,7 @@ describe('フロント不具合の再現', () => {
     s.assertClean(); await s.close();
   });
 
-  it('FE-03 最後の写真の送信完了直後に「確認へ進む」を押しても写真必須の誤検出が出ない', { todo: 'FE-03: frontend/js/sync.js handle()(blob削除→photo:done)と s06.js の detail 更新の隙間' }, async () => {
+  it('FE-03 最後の写真の送信完了直後に「確認へ進む」を押しても写真必須の誤検出が出ない', async () => {
     const s = await E.newSession(env);
     const { page } = s;
     await E.login(s, '田中');
@@ -70,7 +69,7 @@ describe('フロント不具合の再現', () => {
     await s.close();
   });
 
-  it('FE-04 タップ領域が 44x44px 以上(ヘッダの未送信バッジ・言語ボタン、「開く」リンク)', { todo: 'FE-04: frontend/styles.css .obx/.lang(高さ40px)・.link(幅40px) / SPEC §9.1' }, async () => {
+  it('FE-04 タップ領域が 44x44px 以上(ヘッダの未送信バッジ・言語ボタン、「開く」リンク)', async () => {
     const s = await E.newSession(env);
     await E.login(s, '責任者');
     await s.page.waitForTimeout(800);

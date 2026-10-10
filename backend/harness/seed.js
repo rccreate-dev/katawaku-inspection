@@ -86,7 +86,9 @@ function seed(ctx, nowMs, variant) {
     const photoId = 'p_' + crypto.createHash('sha256').update(rec.recordId + itemId + side).digest('hex').slice(0, 16);
     const site = Repo.get('Sites', rec.siteId);
     const t = iso(min);
-    const folder = ctx.subFolder_(ctx.subFolder_(ctx.sitePhotoFolder_(site), ctx.Util.sanitizeName(rec.floor)), t.slice(0, 10));
+    const siteFolder = ctx.subFolder_(ctx.subFolder_(ctx.driveRoot_(), 'photos'), ctx.Util.sanitizeName(site.siteId + '_' + site.name));
+    if (!site.driveFolderId) Repo.update('Sites', site, { driveFolderId: siteFolder.getId() });
+    const folder = ctx.subFolder_(ctx.subFolder_(siteFolder, ctx.Util.sanitizeName(rec.floor)), t.slice(0, 10));
     const name = `${rec.recordId}_${itemId || 'prime'}_${side}_${photoId}.jpg`;
     const fid = folder.createFile(ctx.Utilities.newBlob(Array.from(jpeg).map((b) => (b > 127 ? b - 256 : b)), 'image/jpeg', name)).getId();
     const tid = ctx.subFolder_(ctx.driveRoot_(), 'thumbs').createFile(ctx.Utilities.newBlob(Array.from(jpeg).map((b) => (b > 127 ? b - 256 : b)), 'image/jpeg', photoId + '.jpg')).getId();

@@ -393,9 +393,14 @@ module.exports = function install(C) {
 
   // ===== 写真 ==========================================================
   const TTL = 6 * 3600 * 1000;
-  H.uploadPhotoChunk = (rc) => {
-    const p = rc.params; const rec = ctxRec(rc); const actor = rc.actor;
-    const chunkMax = cfg('photoChunkChars'); const maxBytes = cfg('photoMaxBytes');
+  // §5.4.4 / §11.3: uploadPhotoChunk は「ロック外(prepare)」と「ロック内(commit)」に分かれる。
+  // prepare : 入力検証→(分割の中間チャンクはキャッシュ保存して応答)→組立・デコード・検査→仮想Drive保存。Photos には書かない。
+  // commit  : 既存行確認→項目上限確認→Photos追記→touch。(再認証は engine.handleUpload が先に行う)
+  const range = (n) => Array.from({ length: n }, (_, i) => i);
+  H.uploadPhotoChunk$prepare = (rc) => {
+    const p = rc.params; const rec = ctxRec(rc);
+    const single = p.total === 1;
+    const dataMax = single ? cfg('photoSingleMaxChars') : cfg('photoChunkChars'); const maxBytes = cfg('photoMaxBytes');
     const viol = [];
     if (!/^p_[a-z0-9]{16}$/.test(p.photoId)) viol.push({ rule: 'FIELD_INVALID', path: 'photoId' });
     if (!['self', 'qa', 'prime'].includes(p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'side' });
@@ -405,64 +410,89 @@ module.exports = function install(C) {
       if (!row || (p.side === 'self' && row.snapshot.audience === 'qa') || (p.side === 'qa' && row.snapshot.audience === 'foreman')) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
     }
     if (p.total < 1 || p.total > 12) viol.push({ rule: 'FIELD_INVALID', path: 'total' });
-    if (p.index < 0 || p.index >= p.total) viol.push({ rule: 'FIELD_INVALID', path: 'index' });
+    else if (p.index < 0 || p.index >= p.total) viol.push({ rule: 'FIELD_INVALID', path: 'index' });
     if (p.mime !== 'image/jpeg') viol.push({ rule: 'FIELD_INVALID', path: 'mime' });
-    if (p.data.length === 0 || p.data.length > chunkMax || !B64.test(p.data)) viol.push({ rule: 'FIELD_INVALID', path: 'data' });
-    if (p.thumb != null && (!B64.test(p.thumb) || p.thumb.length === 0)) viol.push({ rule: 'FIELD_INVALID', path: 'thumb' });
     if (!U.isDtInput(p.takenAt)) viol.push({ rule: 'FIELD_INVALID', path: 'takenAt' });
     if (p.width < 1) viol.push({ rule: 'FIELD_INVALID', path: 'width' });
     if (p.height < 1) viol.push({ rule: 'FIELD_INVALID', path: 'height' });
     if (p.bytes < 1) viol.push({ rule: 'FIELD_INVALID', path: 'bytes' });
     if (!/^[0-9a-f]{64}$/.test(p.sha256)) viol.push({ rule: 'FIELD_INVALID', path: 'sha256' });
-    if (blank(p.stampText) || p.stampText.length > 200) viol.push({ rule: 'FIELD_INVALID', path: 'stampText' });
+    if (blank(p.stampText) || p.stampText.length > 300) viol.push({ rule: 'FIELD_INVALID', path: 'stampText' });
     if (viol.length) vfail(viol);
 
-    const done = find('Photos', p.photoId);
-    if (done) {
-      if (done.takenBy !== actor.userId || done.recordId !== rec.recordId) fail('PHOTO_INVALID', '写真IDが重複しています');
-      return { photoId: p.photoId, received: Array.from({ length: p.total }, (_, i) => i), complete: true, photo: C.photoMeta(done) };
-    }
+    // 1 data の文字数(単発=photoSingleMaxChars/分割=photoChunkChars)・4の倍数・base64
+    if (p.data.length === 0 || p.data.length > dataMax || p.data.length % 4 !== 0 || !B64.test(p.data)) fail('PHOTO_INVALID', '写真データが不正です(文字数上限・base64)');
+    // 2 申告 bytes(デコード前)
     if (p.bytes > maxBytes) fail('PHOTO_TOO_LARGE', '写真が大きすぎます', { max: maxBytes });
-    if (p.index === 0 && (p.thumb == null)) fail('PHOTO_INVALID', 'サムネイルがありません');
 
     const S = C.S();
     const t = nowMs();
-    for (const [k, v] of S.chunks) if (v.exp < t) S.chunks.delete(k);
-    let ent = S.chunks.get(p.photoId);
-    if (!ent) { ent = { chunks: new Map(), thumb: null, exp: t + TTL }; S.chunks.set(p.photoId, ent); }
-    ent.chunks.set(p.index, p.data);
-    if (p.thumb != null) ent.thumb = p.thumb;
-    ent.exp = t + TTL;
-    if (p.index !== p.total - 1) return { photoId: p.photoId, received: [...ent.chunks.keys()].sort((a, b) => a - b), complete: false };
-
-    const missing = [];
-    for (let i = 0; i < p.total; i++) if (!ent.chunks.has(i)) missing.push(i);
-    if (ent.thumb == null && !missing.includes(0)) missing.unshift(0);
-    if (missing.length) fail('CHUNK_MISSING', 'チャンクが欠けています', { missing });
-    let body = '';
-    for (let i = 0; i < p.total; i++) body += ent.chunks.get(i);
+    let body = p.data; let thumbB64 = p.thumb;
+    if (!single) {
+      // 分割モード: 中間チャンクはキャッシュに保存するだけ(ロックを取らず、シートに書かない)
+      for (const [k, v] of S.chunks) if (v.exp < t) S.chunks.delete(k);
+      let ent = S.chunks.get(p.photoId);
+      if (!ent) { ent = { chunks: new Map(), thumb: null, exp: t + TTL }; S.chunks.set(p.photoId, ent); }
+      ent.chunks.set(p.index, p.data);
+      if (p.thumb != null) ent.thumb = p.thumb;
+      ent.exp = t + TTL;
+      if (p.index !== p.total - 1) return { response: { photoId: p.photoId, received: [...ent.chunks.keys()].sort((a, b) => a - b), complete: false } };
+      const missing = [];
+      for (let i = 0; i < p.total; i++) if (!ent.chunks.has(i)) missing.push(i);
+      if (missing.length) fail('CHUNK_MISSING', 'チャンクが欠けています', { missing });
+      body = ''; for (let i = 0; i < p.total; i++) body += ent.chunks.get(i);
+      thumbB64 = ent.thumb;
+    }
+    // 3 デコード後バイト数 / 4 JPEGマジック / 5 SHA-256 / 6 サムネ / 7 takenAt補正
     const buf = Buffer.from(body, 'base64');
-    if (buf.length > maxBytes) fail('PHOTO_TOO_LARGE', '写真が大きすぎます', { max: maxBytes });
     if (buf.length !== p.bytes) fail('PHOTO_INVALID', 'バイト数が一致しません');
+    if (buf.length > maxBytes) fail('PHOTO_TOO_LARGE', '写真が大きすぎます', { max: maxBytes });
     if (buf.length < 2 || buf[0] !== 0xff || buf[1] !== 0xd8) fail('PHOTO_INVALID', 'JPEGではありません');
     if (U.sha256(buf) !== p.sha256) fail('PHOTO_INVALID', 'ハッシュが一致しません');
-    const thumbBuf = Buffer.from(ent.thumb, 'base64');
+    if (thumbB64 == null || thumbB64.length === 0 || thumbB64.length > cfg('photoThumbMaxChars') || thumbB64.length % 4 !== 0 || !B64.test(thumbB64)) fail('PHOTO_INVALID', 'サムネイルが不正です');
+    const thumbBuf = Buffer.from(thumbB64, 'base64');
     if (thumbBuf.length < 2 || thumbBuf[0] !== 0xff || thumbBuf[1] !== 0xd8) fail('PHOTO_INVALID', 'サムネイルがJPEGではありません');
-    const itemId = p.side === 'prime' ? null : p.itemId;
-    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.side === p.side && (x.itemId || null) === itemId).length;
-    if (cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
-
     let takenMs = U.parseDt(p.takenAt); let suspect = false;
     if (takenMs > t + 5 * 60000 || takenMs < t - 14 * 86400000) { takenMs = t; suspect = true; }
+    // 仮想Drive保存(ロックの外)
+    const itemId = p.side === 'prime' ? null : p.itemId;
     const site = siteRow(rec.siteId);
-    const clean = (s) => String(s).replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60);
+    const clean = (x) => String(x).replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60);
     const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${itemId || 'prime'}_${p.side}_${p.photoId}.jpg`;
     const driveFileId = C.driveSave(path, buf);
     const thumbFileId = C.driveSave(`thumbs/${p.photoId}.jpg`, thumbBuf);
-    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: buf.length, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId, thumbFileId, clockSuspect: suspect, deleted: false });
+    return { itemId, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
+  };
+  H.uploadPhotoChunk$commit = (rc, prep) => {
+    const p = rc.params; const rec = ctxRec(rc); const actor = rc.actor;
+    const S = C.S();
+    const received = range(p.total);
+    // 2 既存行の確認(同じ photoId。recordId/itemId/side/sha256 が一致なら新しい行を作らず既存の PhotoMeta で成功)
+    const done = find('Photos', p.photoId);
+    if (done) {
+      if (done.takenBy !== actor.userId || done.recordId !== rec.recordId || (done.itemId || null) !== prep.itemId || done.side !== p.side || done.sha256 !== p.sha256) fail('PHOTO_INVALID', '写真データが不正です');
+      S.chunks.delete(p.photoId);
+      return { created: false, data: { photoId: p.photoId, received, complete: true, photo: C.photoMeta(done) } };
+    }
+    // 3 項目×side の未削除写真数の上限(確定判定)
+    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.side === p.side && (x.itemId || null) === prep.itemId).length;
+    if (cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
+    // 4 Photos 行の追記(round=ここで読んだ Records.round、receivedAt=ここでの現在時刻)
+    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false });
     S.chunks.delete(p.photoId);
+    // 5 touch(Events には残さない)
     C.touch(rec);
-    return { photoId: p.photoId, received: Array.from({ length: p.total }, (_, i) => i), complete: true, photo: C.photoMeta(ph) };
+    return { created: true, data: { photoId: p.photoId, received, complete: true, photo: C.photoMeta(ph) } };
+  };
+  // 同期経路(engine.handle 直呼び用)。ロック分離なしで prepare→commit を続けて実行する。
+  H.uploadPhotoChunk = (rc) => {
+    const prep = H.uploadPhotoChunk$prepare(rc);
+    if (prep.response) return prep.response;
+    try {
+      const r = H.uploadPhotoChunk$commit(rc, prep);
+      if (!r.created) prep.fileIds.forEach((id) => C.driveTrash(id));
+      return r.data;
+    } catch (e) { prep.fileIds.forEach((id) => C.driveTrash(id)); throw e; }
   };
 
   H.deletePhoto = (rc) => {

@@ -92,6 +92,13 @@ const stateRows = async (sheet) => {
 };
 const stateCounts = async () => { const d = await mock('state', {}); return d.counts || d; };
 const mailsList = async () => { const d = await mock('mails', {}); return Array.isArray(d) ? d : (d.mails || []); };
+/** 仮想Driveの有効ファイル(ゴミ箱でないもの)。bodies=photos/ 配下、thumbs=thumbs/ 配下 */
+const driveInfo = async () => {
+  const d = await mock('drive', {});
+  const paths = d.paths || d;
+  return { paths, bodies: paths.filter((x) => x.startsWith('photos/')).length, thumbs: paths.filter((x) => x.startsWith('thumbs/')).length, files: d.files || [] };
+};
+const driveLog = async () => (await mock('driveLog', {})).log;
 const eventsOf = async (recordId) => (await stateRows('Events')).filter((e) => e.recordId === recordId);
 
 // ---------------------------------------------------------------------------
@@ -152,20 +159,28 @@ function photoChunks(buf, { chunkChars = 90000, parts } = {}) {
   for (let i = 0; i < b64.length; i += size) out.push(b64.slice(i, i + size));
   return out;
 }
-/** チャンクをindex昇順に1つずつ送る。最後の応答を返す。 */
+/** 1回の uploadPhotoChunk の params を組み立てる(単発=total1/index0。分割は total/index/data を上書き)。 */
+function photoParams({ photoId = newPhotoId(), recordId, itemId = null, side = 'self', buf = SAMPLE, bytes, sha, thumb, stampText, takenAt, index = 0, total = 1, data } = {}) {
+  const params = {
+    photoId, recordId, side, index, total, mime: 'image/jpeg', data: data !== undefined ? data : buf.toString('base64'),
+    takenAt: takenAt || new Date().toISOString(), width: 64, height: 48, bytes: bytes !== undefined ? bytes : buf.length, sha256: sha || sha256(buf),
+    stampText: stampText || 'A現場(仮) 1F ・ テスト ・ 2026-10-07 09:58',
+  };
+  if (itemId) params.itemId = itemId;
+  if (index === 0 && thumb !== null) params.thumb = thumb !== undefined ? thumb : SAMPLE.toString('base64');
+  return params;
+}
+/**
+ * 写真を1枚アップロードする。既定は **単発モード**(版1.4。1リクエスト)。
+ * 分割(後方互換)にしたいときは `parts`(分割数)か `chunkChars` を渡す。分割は index 昇順に1つずつ送り、最後の応答を返す。
+ */
 async function uploadPhoto(session, { recordId, itemId = null, side = 'self', buf = SAMPLE, photoId = newPhotoId(), parts, chunkChars, bytes, sha, thumb, stampText, takenAt, stopAt } = {}) {
-  const chunks = photoChunks(buf, { parts, chunkChars });
+  const split = parts !== undefined || chunkChars !== undefined;
+  const chunks = split ? photoChunks(buf, { parts, chunkChars }) : [buf.toString('base64')];
   let last = null;
   for (let i = 0; i < chunks.length; i++) {
     if (stopAt !== undefined && i >= stopAt) break;
-    const params = {
-      photoId, recordId, side, index: i, total: chunks.length, mime: 'image/jpeg', data: chunks[i],
-      takenAt: takenAt || new Date().toISOString(), width: 64, height: 48, bytes: bytes !== undefined ? bytes : buf.length, sha256: sha || sha256(buf),
-      stampText: stampText || 'A現場(仮) 1F ・ テスト ・ 2026-10-07 09:58',
-    };
-    if (itemId) params.itemId = itemId;
-    if (i === 0 && thumb !== null) params.thumb = thumb !== undefined ? thumb : SAMPLE.toString('base64');
-    last = await session.call('uploadPhotoChunk', params);
+    last = await session.call('uploadPhotoChunk', photoParams({ photoId, recordId, itemId, side, buf, bytes, sha, thumb, stampText, takenAt, index: i, total: chunks.length, data: chunks[i] }));
     if (!last.ok) { last.photoId = photoId; return last; }
   }
   if (last) Object.defineProperty(last, '_photoId', { value: photoId, enumerable: false });
@@ -231,4 +246,4 @@ async function makeQaOk(tanaka, qa, opts = {}) {
   return { recordId };
 }
 
-module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, eventsOf, Session, login, freshLogin, jst, jstDate, serverNow, pourPlanned, photoChunks, uploadPhoto, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };
+module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };

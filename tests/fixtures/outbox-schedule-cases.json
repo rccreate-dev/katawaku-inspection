@@ -1,0 +1,1298 @@
+{
+ "_comment": "U-OUTBOX-04 (SPEC §12.4 / §8.4 送信可否規則)。rows の photoId は photo.photoId に変換して selectSendable(rows,{now,photoParallel}) に渡す。expect は選ばれる seq の集合(first があれば先頭がその seq)。",
+ "cases": [
+  {
+   "id": "1a",
+   "title": "写真の行3件(先行の非写真なし)で photoParallel=3 → 3件",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1,
+    2,
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "1b",
+   "title": "photoParallel=2 → 2件",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1,
+    2
+   ],
+   "photoParallel": 2,
+   "now": 1000
+  },
+  {
+   "id": "1c",
+   "title": "photoParallel 欠落 → 1件(直列)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "now": 1000
+  },
+  {
+   "id": "1e",
+   "title": "photoParallel が null → 1件",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": null,
+   "now": 1000
+  },
+  {
+   "id": "1g",
+   "title": "photoParallel=3 で既に1件 sending → 残り枠2件",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [
+    2,
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "1h",
+   "title": "photoParallel=3 で既に3件 sending → 0件",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2pending",
+   "title": "同じ記録に先行する createRecord が pending のうちは写真の行を選ばない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "createRecord",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2sending",
+   "title": "同じ記録に先行する createRecord が sending のうちは写真の行を選ばない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "createRecord",
+     "recordId": "r1",
+     "status": "sending"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2failed",
+   "title": "同じ記録に先行する createRecord が failed のうちは写真の行を選ばない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "createRecord",
+     "recordId": "r1",
+     "status": "failed"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2blocked",
+   "title": "同じ記録に先行する createRecord が blocked のうちは写真の行を選ばない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "createRecord",
+     "recordId": "r1",
+     "status": "blocked"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2done",
+   "title": "先行の createRecord が完了して行が消えたら写真の行を選ぶ",
+   "rows": [
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "2saveDraft",
+   "title": "先行の saveDraft が pending のうちは写真の行を選ばない(saveDraft 自身は選ばれる)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3a",
+   "title": "写真A・写真B・saveDraft・写真C の順 → A,B は同時に選ばれ、saveDraft と C は選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [
+    1,
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3b",
+   "title": "A,B が sending → saveDraft も C も選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3c",
+   "title": "A が failed でも saveDraft は選ばれない(B は sending)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "failed",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3d",
+   "title": "A が failed、B が消えた → saveDraft は選ばれない・C も選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "failed",
+     "photoId": "p1"
+    },
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3e",
+   "title": "A,B が消えたら saveDraft が選ばれる。C は saveDraft が消えるまで選ばれない",
+   "rows": [
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3f",
+   "title": "saveDraft が sending の間は C は選ばれない",
+   "rows": [
+    {
+     "seq": 3,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "sending"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "3g",
+   "title": "saveDraft が消えたら C が選ばれる",
+   "rows": [
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    }
+   ],
+   "expect": [
+    4
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "4a",
+   "title": "別の記録の saveDraft 2件 → 同時に1件だけ(seq の小さい方)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r2",
+     "status": "pending"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "4b",
+   "title": "別の記録の saveDraft が sending なら、もう1件の saveDraft は選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "sending"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r2",
+     "status": "pending"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "5a",
+   "title": "別の記録の写真の行と非写真の行は同時に選べる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r2",
+     "status": "pending"
+    }
+   ],
+   "expect": [
+    1,
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "5b",
+   "title": "別の記録の saveDraft が sending でも写真の行は選べる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r2",
+     "status": "sending"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "5c",
+   "title": "写真の行が sending でも別の記録の saveDraft は選べる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r2",
+     "status": "pending"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "6a",
+   "title": "同じ photoId の行が2件 → 1件だけ",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "pdup"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "pdup"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1,
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "6b",
+   "title": "同じ photoId の行が sending なら選ばない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "pdup"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "pdup"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "7a",
+   "title": "写真Aが failed でも同じ記録の写真B,Cは選ばれ続ける。後続の saveDraft は選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "failed",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    }
+   ],
+   "expect": [
+    2,
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "7b",
+   "title": "非写真の行(saveDraft)が failed なら同じ記録の後続の写真の行は選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "failed"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "7c",
+   "title": "blocked の行は選ばれない(blocked にされた saveDraft の後続も待つ)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "blocked"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "8a",
+   "title": "stopPour は写真の行の完了を待たず最優先で選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "sending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [
+    3,
+    2
+   ],
+   "photoParallel": 3,
+   "first": 3,
+   "now": 1000
+  },
+  {
+   "id": "8b",
+   "title": "stopPour は先行する未完了の非写真の行(failed)があっても選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "failed"
+    },
+    {
+     "seq": 2,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "8c",
+   "title": "stopPour は (b)(c) で「同じ記録の他の行」として数えない: pending の stopPour があっても先行扱いにならず写真の行は選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "failed",
+     "priority": 1
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "8d",
+   "title": "非写真の行は全体で同時に1件(stopPour も例外ではない): saveDraft が sending の間は stopPour も待つ",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "sending"
+    },
+    {
+     "seq": 2,
+     "action": "stopPour",
+     "recordId": "r2",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "9a",
+   "title": "写真の行が backoff 待ち(nextTryAt が未来)でも他の写真の行は選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1",
+     "nextTryAt": 9000
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "9b",
+   "title": "photoParallel=1 でも backoff 待ちの行が枠を塞がない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1",
+     "nextTryAt": 9000
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 1,
+   "now": 1000
+  },
+  {
+   "id": "9c",
+   "title": "nextTryAt が到来した行は選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1",
+     "nextTryAt": 900
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    }
+   ],
+   "expect": [
+    1,
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "1k",
+   "title": "photoParallel=9 → 6件(整数。1〜6に収める)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    },
+    {
+     "seq": 5,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p5"
+    },
+    {
+     "seq": 6,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p6"
+    },
+    {
+     "seq": 7,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p7"
+    }
+   ],
+   "expect": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "photoParallel": 9,
+   "now": 1000
+  },
+  {
+   "id": "1l",
+   "title": "photoParallel=0 → 1件(0以下は1)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    },
+    {
+     "seq": 5,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p5"
+    },
+    {
+     "seq": 6,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p6"
+    },
+    {
+     "seq": 7,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p7"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": 0,
+   "now": 1000
+  },
+  {
+   "id": "1m",
+   "title": "photoParallel=-3 → 1件(0以下は1)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p3"
+    },
+    {
+     "seq": 4,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p4"
+    },
+    {
+     "seq": 5,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p5"
+    },
+    {
+     "seq": 6,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p6"
+    },
+    {
+     "seq": 7,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p7"
+    }
+   ],
+   "expect": [
+    1
+   ],
+   "photoParallel": -3,
+   "now": 1000
+  },
+  {
+   "id": "8e",
+   "title": "他の行(写真)が failed でも pending の stopPour は選ばれる(後続の saveDraft は選ばれない)",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "failed",
+     "photoId": "p1"
+    },
+    {
+     "seq": 2,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "pending"
+    },
+    {
+     "seq": 3,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "8f",
+   "title": "他の行(saveDraft)が blocked でも pending の stopPour は選ばれる",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "blocked"
+    },
+    {
+     "seq": 2,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [
+    2
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  },
+  {
+   "id": "8g",
+   "title": "他の行(saveDraft)が failed のとき、後続の pending の stopPour は選ばれ saveDraft/写真は選ばれない",
+   "rows": [
+    {
+     "seq": 1,
+     "action": "saveDraft",
+     "recordId": "r1",
+     "status": "failed"
+    },
+    {
+     "seq": 2,
+     "action": "uploadPhotoChunk",
+     "recordId": "r1",
+     "status": "pending",
+     "photoId": "p2"
+    },
+    {
+     "seq": 3,
+     "action": "stopPour",
+     "recordId": "r1",
+     "status": "pending",
+     "priority": 1
+    }
+   ],
+   "expect": [
+    3
+   ],
+   "photoParallel": 3,
+   "now": 1000
+  }
+ ]
+}

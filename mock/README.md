@@ -43,7 +43,10 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 | `patch` | `{sheet,key,set}` / `{sheet,insert}` | スプレッドシート直接編集の再現(Users/Sites/Assignments/Items/Config/Absences のみ。列名・型はSCHEMA準拠で検証。`pinSalt/pinHash/failedCount/lockedAt` は不可)。insert はIDや既定値を補完 |
 | `state` | `{sheet?}` | `sheet` なし: `{counts:{シート名:行数}}` / あり: `{sheet,rows:[…]}`(`pinHash/pinSalt/tokenHash/codeHash` は出さない。json列は解析済みオブジェクト) |
 | `mails` | `{}` | `{mails:[{to,subject,body,at,toUserId}]}` |
-| `drive` | `{}` | `{paths:[…],files:[{path,bytes}]}`(仮想Drive。§7.4の構造) |
+| `drive` | `{}` | `{paths:[…],files:[{path,fileId,bytes}]}`(仮想Driveの **ゴミ箱でない** ファイルだけ。§7.4の構造) |
+| `driveLog` | `{}` | `{log:[{op:"create"\|"trash",path,fileId,lockHeld,at}]}`。仮想Driveの作成・ゴミ箱の履歴。`lockHeld`=その時点で更新系ミューテックスを保持していたか。`reset` で空 |
+| `interleave` | `{action:"uploadPhotoChunk",next:n,patches:[…]}` | 次のn件の該当リクエストについて、ロック外処理(仮想Drive保存)の後・ロック取得の前に `patches` を順に適用。`patches` は `patch` と同形式に加え `{sheet:"Records",key,set}` と `{sheet:"Photos",insert:{…必須列}}` も可。ロック取得に至らない(検証エラー等の)リクエストは消費しない |
+| `cacheStats` | `{}` | `{enabled:false,entries:[],hits:0,misses:0,skippedTooLarge:0}` 固定(モックは参照キャッシュ §2.15 を実装しない=常に最新) |
 | `meta` | `{}` | `{actions,errorCodes,violationRules,configKeys,schema:{sheet:[列名]},itemsSeedHash}`(`itemsSeedHash`=`sha256(canonicalJSON(SEED_ITEMSの31行))`) |
 
 ## シード(§11.5)
@@ -61,13 +64,14 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 ## 実装メモ(SPECで曖昧だった点の仮置き)
 
 - 仮想時計は `実時刻 + オフセット`(時間は流れる)。`reset` で `now` を渡すとその時刻から流れ始める。
-- 更新系は同期処理=1本のミューテックスと等価。`--latency` はその前に適用。
+- 更新系は1本のFIFOミューテックス(`engine.handleAsync`)で直列化。`--latency` はその前に適用。`uploadPhotoChunk`(版1.4)だけは、認証・検証・仮想Drive保存をロックの外、再認証〜既存行確認〜上限確認〜Photos追記〜touchをロックの内で行い、境界で必ず `setImmediate` により制御を返す(別リクエストが割り込める)。ロック内で `Photos` 行にならなかった場合は、ロック解放後に作った仮想Driveファイルをゴミ箱扱いにする。
+- 仮想Driveは fileId 管理(同じパスのファイルが複数あり得る)。`getPhoto`/`getPhotoThumbs` は `Photos.driveFileId`/`thumbFileId` のバイト列を返す。
 - 状態ダンプの json 列(`Events.detail` など)は解析済みオブジェクトで返す(テストヘルパは文字列でも解析する)。
 - `Invites.usedAt` に旧コード失効時は `superseded` を入れる(SPECの `expired` と同系)。
 - 写真: `Photos.round` は撮影時の `Records.round`。QA写真・元請証跡写真は **現在のラウンドのもののみ** を `RecordDetail` に出し、判定の写真検査(side=qa)も現在ラウンドで数える。自己写真は全ラウンド通算。
 - 写真アップロードで記録の `updatedAt`/`version` を更新する(一覧ポーリングで検知できるように)。
 - `RecordSummary.qaCounts` は職長に対し `draft`/`submitted` では0で返す(QA下書きを見せない)。
-- `uploadPhotoChunk` の `thumb` は index=0 で必須(無ければ即 `PHOTO_INVALID`)。`bytes` が上限超過なら先頭チャンクで `PHOTO_TOO_LARGE`。
+- `uploadPhotoChunk`: 単発(`total=1,index=0`)は Cache 不使用で `data` 上限=`photoSingleMaxChars`、分割(`total` 2〜12)は `photoChunkChars`。`thumb` の欠落・不正は最終の組立後の検査(§5.4.4 の6)で `PHOTO_INVALID`。`bytes` が上限超過なら `PHOTO_TOO_LARGE`(デコード前)。`total=1,index≠0`・`total` が1〜12でない → `VALIDATION_FAILED`(`FIELD_INVALID`)。
 - `reinspectOf` は元記録と同一スロットで `approved` のとき可。それ以外は `FIELD_INVALID`/`STATE_CONFLICT`。
 - `adminSetUserStatus(active)` は `pinHash` があれば `active`、無ければ `invited`(`failedCount`/`lockedAt` も解除)。
 

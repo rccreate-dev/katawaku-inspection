@@ -75,25 +75,53 @@ var Repo = (function () {
   R.toCell = toCell;
   R.fromCell = fromCell;
 
-  function load(name) {
-    if (tables[name]) return tables[name];
+  /** シートから全行を読み込んで {rows, byPk} を作る(キャッシュを使わない) */
+  function loadFromSheet(name) {
     var def = SCHEMA[name];
     var sh = R.sheet(name);
     var last = sh.getLastRow();
-    var rows = [], byPk = {};
+    var rows = [];
     if (last >= 2) {
       var vals = sh.getRange(2, 1, last - 1, def.columns.length).getValues();
       for (var i = 0; i < vals.length; i++) {
         var o = toObj(def, vals[i], i + 2);
-        var pk = o[def.pk];
-        if (pk === '') continue;
+        if (o[def.pk] === '') continue;
         rows.push(o);
-        if (!Object.prototype.hasOwnProperty.call(byPk, pk)) byPk[pk] = o;
       }
     }
-    tables[name] = { rows: rows, byPk: byPk };
+    return rows;
+  }
+  function indexRows(name, rows) {
+    var pkName = SCHEMA[name].pk, byPk = {};
+    rows.forEach(function (o) {
+      if (!Object.prototype.hasOwnProperty.call(byPk, o[pkName])) byPk[o[pkName]] = o;
+    });
+    return { rows: rows, byPk: byPk };
+  }
+
+  function load(name) {
+    if (tables[name]) return tables[name];
+    // Config/Items/Sites だけは60秒の読み取りキャッシュを使う(SPEC §2.15。RefCache.gs)
+    var rows = RefCache.has(name) ? RefCache.read(name) : null;
+    if (!rows) {
+      rows = loadFromSheet(name);
+      RefCache.write(name, rows);
+    }
+    tables[name] = indexRows(name, rows);
     return tables[name];
   }
+
+  /**
+   * そのシートをキャッシュを使わず最新で読み直す(以後このリクエスト内はその結果を使う)。
+   * 合言葉(joinKey)を扱う requestJoin/adminGetJoinInfo/adminRotateJoinKey の Sites、
+   * 行番号を使って更新する場合、setupSheets などで使う(SPEC §2.15 の3)。
+   */
+  R.fresh = function (name) {
+    delete tables[name];
+    if (name === 'Config') delete R.rc.cfg;
+    tables[name] = indexRows(name, loadFromSheet(name));
+    return tables[name].rows;
+  };
 
   /** 全行(読み取り専用として扱う。変更は update 経由) */
   R.all = function (name) { return load(name).rows; };
@@ -164,8 +192,12 @@ var Repo = (function () {
     ensureCapacity(sh, first + objs.length - 1);
     var rows = objs.map(function (o) { return toRow(def, o); });
     var range = sh.getRange(first, 1, rows.length, def.columns.length);
-    range.setNumberFormat('@');
-    range.setValues(rows);
+    try {
+      range.setNumberFormat('@');
+      range.setValues(rows);
+    } finally {
+      RefCache.drop(name); // 書込み直後に破棄(対象シートのみ。SPEC §2.15 の4)
+    }
     var out = objs.map(function (o, i) {
       var n = {};
       def.columns.forEach(function (c) { n[c.name] = fromCell(c.type, rows[i][def.columns.indexOf(c)]); });
@@ -197,12 +229,16 @@ var Repo = (function () {
     if (!changed.length) return obj;
     dirty(name, false);
     var sh = R.sheet(name);
-    if (changed.length <= 4) {
-      changed.forEach(function (i) {
-        sh.getRange(obj._r, i + 1).setValue(toCell(def.columns[i].type, obj[def.columns[i].name]));
-      });
-    } else {
-      sh.getRange(obj._r, 1, 1, def.columns.length).setValues([toRow(def, obj)]);
+    try {
+      if (changed.length <= 4) {
+        changed.forEach(function (i) {
+          sh.getRange(obj._r, i + 1).setValue(toCell(def.columns[i].type, obj[def.columns[i].name]));
+        });
+      } else {
+        sh.getRange(obj._r, 1, 1, def.columns.length).setValues([toRow(def, obj)]);
+      }
+    } finally {
+      RefCache.drop(name); // 書込み直後に破棄(対象シートのみ。SPEC §2.15 の4)
     }
     return obj;
   };

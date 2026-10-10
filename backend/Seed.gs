@@ -76,6 +76,9 @@ var DEFAULT_CONFIG = [
   { key: 'photoMaxPerItem', value: '5', type: 'int', description: '項目×sideあたりの写真上限' },
   { key: 'photoChunkChars', value: '90000', type: 'int', description: 'base64分割サイズ(文字数)' },
   { key: 'photoMaxBytes', value: '600000', type: 'int', description: '写真本体の最大バイト数' },
+  { key: 'photoSingleMaxChars', value: '1200000', type: 'int', description: '単発モード(total=1)のdata最大文字数(4の倍数)。photoMaxBytesを上げるときは ceil(photoMaxBytes/3)*4 以上に' },
+  { key: 'photoThumbMaxChars', value: '100000', type: 'int', description: 'サムネ(base64)の最大文字数。サーバー専用(アプリには配信しない)。超えると PHOTO_INVALID' },
+  { key: 'photoParallel', value: '3', type: 'int', description: '1端末から同時に送る写真アップロード数(1〜6)' },
   { key: 'enabledStages', value: 'pre_pour', type: 'str', description: '作成可能な段階(カンマ区切り)' },
   { key: 'pollIntervalSec', value: '60', type: 'int', description: 'クライアントのポーリング間隔(秒)' },
   { key: 'driveRootFolderId', value: '', type: 'str', description: 'Driveルートフォルダ(setupSheetsが作成)' },
@@ -86,4 +89,4 @@ var DEFAULT_CONFIG = [
 ];
 
 /** getBootstrap.config に含める公開設定キー(SPEC §5.4.2) */
-var PUBLIC_CONFIG_KEYS = ['escalationMin1', 'escalationMin2', 'claimTakeoverMin', 'selfDeadlineHour', 'qaOpenHour', 'qaLeadMinutes', 'photoMaxEdge', 'photoJpegQuality', 'photoThumbEdge', 'photoMaxPerItem', 'photoChunkChars', 'photoMaxBytes', 'enabledStages', 'pollIntervalSec', 'pinMaxFail', 'minClientVersion'];
+var PUBLIC_CONFIG_KEYS = ['escalationMin1', 'escalationMin2', 'claimTakeoverMin', 'selfDeadlineHour', 'qaOpenHour', 'qaLeadMinutes', 'photoMaxEdge', 'photoJpegQuality', 'photoThumbEdge', 'photoMaxPerItem', 'photoChunkChars', 'photoSingleMaxChars', 'photoParallel', 'photoMaxBytes', 'enabledStages', 'pollIntervalSec', 'pinMaxFail', 'minClientVersion'];
