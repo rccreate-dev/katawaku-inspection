@@ -101,7 +101,7 @@
       var layer = document.getElementById('overlay');
       var src = o.canvas;
       var markers = [];          // 置いた順。{itemId, x, y, label}
-      var activeId = null, selected = null, zoom = 1, busy = false, done = false;
+      var activeId = null, activeK = null, selected = null, zoom = 1, busy = false, done = false;
       var marksEls = [];
 
       var cv = h('canvas', { class: 'dcanvas' });
@@ -109,6 +109,8 @@
       var stage = h('div', { class: 'dstage' }, cv, markLayer);
       var view = h('div', { class: 'dview' }, stage);
       var hint = h('div', { class: 'dhint' });
+      var itemBox = h('div', { class: 'ditem', hidden: true });   // 選んだ項目の内容(No.N・項目文・★)
+      var pointsBox = h('div', { class: 'dpoints', hidden: true }); // 測定点チップ
       var msg = h('div', { class: 'dmsg', role: 'alert', hidden: true });
 
       var numBtns = {};
@@ -117,7 +119,12 @@
         var b = h('button', { type: 'button', class: 'dnum', 'data-no': String(it.no), 'data-item': it.itemId, 'aria-pressed': 'false', 'aria-label': t('drawing.item_no', { n: it.no }), title: it.text || '' }, P.drawingNo(it.no));
         b.addEventListener('click', function () {
           activeId = (activeId === it.itemId) ? null : it.itemId;
-          selected = null; refresh();
+          activeK = null; selected = null;
+          if (activeId && it.measure !== 'none') { // 未配置の最初の測定点を選んでおく
+            for (var k = 1; k <= (it.values || []).length; k++) { if (!findMark(it.itemId, k)) { activeK = k; break; } }
+            if (activeK == null && (it.values || []).length) activeK = 1;
+          }
+          refresh();
         });
         numBtns[it.itemId] = b; nums.appendChild(b);
       });
@@ -134,9 +141,12 @@
       var save = h('button', { type: 'button', class: 'dtool wide primary', 'data-act': 'save' }, t('drawing.save'));
       var tools = h('div', { class: 'dtools' }, zoomBtns, rotateBtn, undoBtn, delBtn);
       var top = h('div', { class: 'dtop' }, cancel, h('b', null, t('drawing.title')), save);
-      var box = h('div', { class: 'dedit', role: 'dialog', 'aria-modal': 'true' }, top, h('div', { class: 'dsub' }, t('drawing.hint')), nums, tools, hint, msg, view);
+      var box = h('div', { class: 'dedit', role: 'dialog', 'aria-modal': 'true' }, top, h('div', { class: 'dsub' }, t('drawing.hint')), nums, itemBox, pointsBox, tools, hint, msg, view);
       layer.appendChild(box);
 
+      function findMark(itemId, k) { return markers.filter(function (m) { return m.itemId === itemId && m.k === k; })[0] || null; }
+      function itemOf(id) { return o.items.filter(function (i) { return i.itemId === id; })[0] || null; }
+      function valText(v, unit) { return (v > 0 ? '+' : '') + v + (unit || 'mm'); }
       function showMsg(text) { msg.hidden = !text; KW.clear(msg); if (text) msg.appendChild(document.createTextNode(text)); }
       function relabel() { var ls = P.drawingLabels(markers, o.items); markers.forEach(function (m, i) { m.label = ls[i]; }); }
 
@@ -180,8 +190,28 @@
         undoBtn.disabled = busy || !markers.length;
         delBtn.disabled = busy || !selected;
         rotateBtn.disabled = busy; save.disabled = busy;
-        var act = o.items.filter(function (i) { return i.itemId === activeId; })[0];
-        KW.clear(hint).appendChild(document.createTextNode(act ? t('drawing.placing', { no: P.drawingNo(act.no), text: act.text || '' }) : t('drawing.pick_item')));
+        var act = itemOf(activeId);
+        var measured = !!act && act.measure !== 'none';
+        var vals = (act && act.values) || [];
+        var hintText = t('drawing.pick_item');
+        itemBox.hidden = !act; KW.clear(itemBox);
+        pointsBox.hidden = !measured; KW.clear(pointsBox);
+        if (act) {
+          itemBox.appendChild(document.createTextNode('No.' + act.no + ' ' + (act.text || '') + (act.key ? ' ★' : '')));
+          if (!measured) hintText = t('drawing.placing', { no: P.drawingNo(act.no), text: act.text || '' });
+          else if (!vals.length) { hintText = t('drawing.no_points'); }
+          else {
+            hintText = activeK ? t('drawing.placing_point', { label: P.drawingLabel(act.no, activeK, act.measure), value: valText(vals[activeK - 1], act.unit) }) : t('drawing.pick_point');
+            vals.forEach(function (v, i) {
+              var k = i + 1, placed = !!findMark(act.itemId, k), label = P.drawingLabel(act.no, k, act.measure);
+              var c = h('button', { type: 'button', class: 'dpoint' + (placed ? ' placed' : ''), 'data-k': String(k), 'aria-pressed': k === activeK ? 'true' : 'false' },
+                (placed ? '● ' : '') + label + ' ' + valText(v, act.unit));
+              c.addEventListener('click', function () { activeK = k; selected = null; refresh(); });
+              pointsBox.appendChild(c);
+            });
+          }
+        }
+        KW.clear(hint).appendChild(document.createTextNode(hintText));
         renderMarks();
       }
 
@@ -189,10 +219,23 @@
       stage.addEventListener('click', function (ev) {
         if (busy || ev.target.closest('.dmark')) return;
         if (!activeId) { selected = null; refresh(); return; }
+        var it = itemOf(activeId);
         var r = cv.getBoundingClientRect();
-        if (!r.width || !r.height) return;
-        markers.push({ itemId: activeId, x: Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height)), label: '' });
-        selected = null; relabel(); refresh();
+        if (!it || !r.width || !r.height) return;
+        var x = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), y = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
+        selected = null;
+        if (it.measure === 'none') {
+          markers.push({ itemId: activeId, k: null, x: x, y: y, label: '' }); // 測定なしの項目は何個でも N
+        } else {
+          if (!activeK) { refresh(); return; } // 測定点が未入力/未選択: 置けない
+          var ex = findMark(activeId, activeK);
+          if (ex) { ex.x = x; ex.y = y; } // 1測定点につき印は1つ: 置き済みなら移動
+          else {
+            markers.push({ itemId: activeId, k: activeK, x: x, y: y, label: '' });
+            for (var k2 = 1; k2 <= (it.values || []).length; k2++) { if (!findMark(activeId, k2)) { activeK = k2; break; } } // 次の未配置の測定点へ
+          }
+        }
+        relabel(); refresh();
       });
       undoBtn.addEventListener('click', function () {
         if (!markers.length) return;

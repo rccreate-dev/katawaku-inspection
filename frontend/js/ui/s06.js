@@ -173,7 +173,7 @@
         var chips = h('span', { class: 'chips' });
         (x.values || []).forEach(function (v, i) {
           var over = def.tol != null && Math.abs(v) > def.tol;
-          chips.appendChild(h('span', { class: 'val' + (over ? ' over' : '') }, (v > 0 ? '+' : '') + v,
+          chips.appendChild(h('span', { class: 'val' + (over ? ' over' : '') }, KW.photo.pointNo(i + 1) + (v > 0 ? '+' : '') + v,
             editable ? h('button', { type: 'button', 'aria-label': t('act.delete'), on: { click: function () { x.values.splice(i, 1); touch(it.itemId); redrawItem(it.itemId); } } }, '×') : null));
         });
         var inp = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', class: 'inp', disabled: !editable, 'aria-label': t('lbl.measure') });
@@ -321,7 +321,7 @@
           recordId: id, side: 'self',
           get: function () { return { detail: detail, work: work, blobs: blobs }; },
           canEdit: function () { return editable && (detail.actions || []).indexOf('uploadPhotoChunk') >= 0; },
-          items: function () { return visibleItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, measure: i.def.measure, text: KW.itemText(i.def) }; }); },
+          items: function () { return visibleItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, measure: i.def.measure, text: KW.itemText(i.def), key: !!i.def.key, unit: i.def.unit || 'mm', values: ((work.items[i.itemId] || {}).values || []).slice() }; }); },
           refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
         });
         el.appendChild(drawBox);

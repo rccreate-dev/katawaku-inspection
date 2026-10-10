@@ -60,7 +60,7 @@
         var chips = h('span', { class: 'chips' });
         (x.values || []).forEach(function (v, i) {
           var over = def.tol != null && Math.abs(v) > def.tol;
-          chips.appendChild(h('span', { class: 'val' + (over ? ' over' : '') }, (v > 0 ? '+' : '') + v,
+          chips.appendChild(h('span', { class: 'val' + (over ? ' over' : '') }, KW.photo.pointNo(i + 1) + (v > 0 ? '+' : '') + v,
             h('button', { type: 'button', 'aria-label': t('act.delete'), on: { click: function () { x.values.splice(i, 1); touch(it.itemId); redraw(it.itemId); } } }, '×')));
         });
         var inp = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', class: 'inp', 'aria-label': t('lbl.measure') });
@@ -332,7 +332,7 @@
           items: function () {
             return allItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, def: i.def }; })
               .filter(function (o) { return o.def.audience !== 'foreman'; })
-              .map(function (o) { return { itemId: o.itemId, no: o.no, measure: o.def.measure, text: KW.itemText(o.def) }; });
+              .map(function (o) { return { itemId: o.itemId, no: o.no, measure: o.def.measure, text: KW.itemText(o.def), key: !!o.def.key, unit: o.def.unit || 'mm', values: ((work.qaItems[o.itemId] || {}).values || []).slice() }; });
           },
           refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
         });
