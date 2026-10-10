@@ -1298,6 +1298,8 @@ PDF: `generateReport` `listReports`
 | `photoBlobs` | `photoId` | `{photoId,recordId,itemId,side,full:Blob,thumb:Blob,meta,uploadState}`(アップロード完了で本体を削除し `photoCache` へサムネを移す) |
 | `photoCache` | `photoId` | `{photoId,thumb:Blob,full:Blob|null,lastUsedAt}`(LRU) |
 
+版1.6.4: `photoBlobs`/`photoCache` の Blob 値は IndexedDB へ **`{__ab:ArrayBuffer,__type}` に変換して保存し、読み出し時に Blob へ戻す**(アプリ内の値は従来どおり Blob)。理由: iOS WebKit で Blob を直接保存すると "Error preparing Blob/File data to be stored in object store" で失敗するため。旧形式(Blob直接)の既存行も読める。
+
 端末データはユーザー単位ではなくDB単位。そのため **端末のユーザー切替**(S01で `kv.me.userId` と異なるユーザーで `registerDevice` に成功したとき)は次のとおり扱う。同一ユーザーの再登録(§3.7)では何も消さない。
 - **`records` / `bootstrap`(`kv`)/ `photoCache` は、outbox の有無に関わらず必ず消去する**(前のユーザーの記録・写真が新しいユーザーに見えないようにする)。`drafts` と `photoBlobs` も、未送信が無くなった時点(下記「送信してから切替」の完了後、または破棄)で消去する。
 - 未送信のoutboxが1件でもあるときは、`registerDevice` を呼ぶ前に確認ダイアログを出す。選択肢は次の2つだけ(ダイアログを閉じれば切替を中止し、何も消さない)。
@@ -1983,3 +1985,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.6.1 | ユーザー決定: 図面の印の規則変更。①番号を選ぶと項目内容を表示。②枝番 `N-k` は測定点がある項目だけ(測定なしの項目は何個置いても `N`)。③測定点に番号を付け(項目内のチップに `①+2mm`)、図面では測定項目を選ぶと入力済みの測定点(`④-1`,`④-2`…)をチップで選んで配置(1測定点につき印1つ)。API契約・列名は変更なし(§7.7-2 のみ)。 |
 | 2026-10-10 | 1.6.2 | ユーザー決定: 測定点を追加できる項目でも、測定点を入力していない(追加せずにOKした)場合は、図面に枝番なしの `N`(例 `④`)を何個でも置ける。測定点が入力されている項目は従来どおり `N-k`。§7.7-2。 |
 | 2026-10-10 | 1.6.3 | 不具合対応: 短時間に複数回更新すると、precache がHTTPキャッシュ(GitHub Pages は約10分)から古いファイルを取り込み、新旧のJSが混在して画面でエラーになる。§8.10: precache は `cache:'reload'` で取得する。API契約は変更なし。 |
+| 2026-10-10 | 1.6.4 | 不具合対応: iPhone で図面(写真)保存時に IndexedDB が Blob 保存に失敗しエラーになる。§8.2: Blob は ArrayBuffer+type で保存し読み出し時に Blob へ戻す。API契約は変更なし。 |

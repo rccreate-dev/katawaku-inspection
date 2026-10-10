@@ -68,13 +68,19 @@
       }).then(function (p) {
         if (!p) return null;
         var photoId = KW.newPhotoId();
+        // 端末への保存を完了してから outbox に積む。保存に失敗したら outbox には積まない(半端な行を残さない)
         return KW.data.putPhotoBlob({
           photoId: photoId, recordId: o.recordId, itemId: null, side: o.side, kind: 'drawing', full: p.full, thumb: p.thumb,
           meta: { takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, sha256: p.sha256, stampText: p.stampText, kind: 'drawing', markers: p.markers },
           uploadState: 'pending'
         }).then(function () {
-          return KW.outbox.enqueue('uploadPhotoChunk', { recordId: o.recordId, side: o.side }, { recordId: o.recordId, photo: { photoId: photoId, total: 0, nextIndex: 0 } });
-        }).then(function () { return o.refreshBlobs(); });
+          return KW.outbox.enqueue('uploadPhotoChunk', { recordId: o.recordId, side: o.side }, { recordId: o.recordId, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
+            .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); }); // 積めなければ本体も消す
+        }).then(function () { return o.refreshBlobs(); }).catch(function (e) {
+          KW.reportError && KW.reportError(e);
+          notice = t('err.INTERNAL'); C.toast(notice, 'bad');
+          return null;
+        });
       }, function (e) {
         // 読めない画像(HEIC等): スクリーンショットかカメラでの撮り直しを案内
         notice = t(e && e.code === 'DRAWING_UNREADABLE' ? 'err.drawing_unreadable' : 'err.INTERNAL');
