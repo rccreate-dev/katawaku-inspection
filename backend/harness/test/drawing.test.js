@@ -38,7 +38,7 @@ test('C-DRAW-05 PDF: 図面ページ(1枚1ページ・凡例・固定レイア�
 
   // 図面2枚(職長1: 横長 / 管理者1: 縦長)
   const id = newRecord();
-  fillAll(h, tanaka, id, 'self');
+  fillAll(h, tanaka, id, 'self', { patch: (i) => (i.itemId === 'i9' ? { values: [2, -1] } : null) });
   const d1 = tanaka('uploadPhotoChunk', drawing(id, 'self'));
   assert.equal(d1.ok, true, JSON.stringify(d1));
   assert.equal(tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' }).ok, true);
@@ -52,7 +52,9 @@ test('C-DRAW-05 PDF: 図面ページ(1枚1ページ・凡例・固定レイア�
   const html = h.state.lastHtml;
 
   assert.equal((html.match(/<div style="page-break-before:always"><h2>確認箇所\(図面\)<\/h2>/g) || []).length, 2, '図面ごとに改ページ+見出し');
-  assert.ok(html.includes('④-1, ④-2') && html.includes('④-1'), '凡例に label');
+  assert.ok(html.includes('>実測値</th>'), '凡例に実測値列(1.6.4)');
+  assert.ok(html.includes('>④-1</td>') && html.includes('>④-2</td>'), '凡例は label ごとに1行(1.6.4)');
+  assert.ok(html.includes('>+2mm</td>') && html.includes('>-1mm</td>'), '凡例に実測値(符号付き・単位つき)(1.6.4)');
   assert.match(html, /No\.\d+ /, '凡例に No. と項目文');
   assert.ok(html.includes('width:186mm;') || html.includes('<img style="width:186mm"'), '横長は width:186mm');
   assert.ok(html.includes('<img style="width:186mm"'), '横長画像');
