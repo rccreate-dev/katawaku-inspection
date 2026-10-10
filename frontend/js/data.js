@@ -194,10 +194,12 @@
         return p.then(function () {
           return KW.api.call('getPhotoThumbs', { photoIds: g }).then(function (res) {
             if (!res.ok) return null;
+            // 1枚の変換・キャッシュ失敗で全体を失敗させない(失敗した写真は表示できないだけ)
             return Promise.all(res.data.photos.map(function (ph) {
-              var b = dataUrlToBlob(ph.dataUrl);
+              var b;
+              try { b = dataUrlToBlob(ph.dataUrl); } catch (e) { return null; }
               result[ph.photoId] = b;
-              return cacheThumb(ph.photoId, b);
+              return cacheThumb(ph.photoId, b).catch(function () { return null; });
             }));
           });
         });

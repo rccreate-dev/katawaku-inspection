@@ -142,7 +142,7 @@
     if (need.length) {
       KW.data.loadThumbs(need).then(function (map) {
         Object.keys(map).forEach(function (id) { if (imgs[id] && imgs[id].isConnected !== false) imgs[id].src = C.blobUrl(map[id]); });
-      });
+      }).catch(function (e) { KW.state.lastErr = String(e && e.message || e); /* サムネが出ないだけ。エラー表示は出さない */ });
     }
     return box;
   };
