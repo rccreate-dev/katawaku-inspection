@@ -4,7 +4,7 @@
  * ・同一 SW_VERSION の間は、シェルのファイルを実行時に取得して上書きしない(JS/CSS/i18n が新旧混在になるのを防ぐ)。
  * ・唯一の例外はナビゲーション(HTMLへの遷移)だけ stale-while-revalidate。
  * ・APIは一切キャッシュしない(別オリジンは素通し)。 */
-var SW_VERSION = '1.0.0-16';
+var SW_VERSION = '1.0.0-17';
 var CACHE = 'katawaku-shell-' + SW_VERSION;
 var SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'manifest.webmanifest',
@@ -15,7 +15,16 @@ var SHELL = [
 ];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }));
+  // ブラウザのHTTPキャッシュ(GitHub Pagesは約10分)を使わず必ずサーバーから取得する。
+  // 使うと、短時間に更新したとき古いファイルと新しいファイルが混ざって保存され、画面でエラーが出る(SPEC §8.10)
+  e.waitUntil(caches.open(CACHE).then(function (c) {
+    return Promise.all(SHELL.map(function (u) {
+      return fetch(new Request(u, { cache: 'reload' })).then(function (res) {
+        if (!res.ok) throw new Error('precache failed: ' + u);
+        return c.put(u, res);
+      });
+    }));
+  }));
 });
 
 self.addEventListener('activate', function (e) {
