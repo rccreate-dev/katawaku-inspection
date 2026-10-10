@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.5.2 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
+- 版: 1.5.3 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -1441,9 +1441,9 @@ PDF: `generateReport` `listReports`
 2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
 3. **3者サイン欄**: 職長(氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
-5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。
+5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。折り返し・行の高さ・列幅は §10.2b-A(版1.5.3)。
 6. NG・是正の経過: 判定イベント(`verdict_*`)を時系列に(日時・判定者・判定・総合コメント・NG項目)、提出回数、停止の理由・日時。
-7. 写真: 項目ごとにサムネ(長辺320px)をグリッド表示。キャプション=項目No.・撮影者区分(職長/管理者/元請サイン証跡)・`stampText`。最大60枚(超える場合はNG項目の写真を優先し、残りは「他N枚は電子記録で閲覧可」と注記)。
+7. 写真: **1ページ最大4枚**、1枚=1行ブロック(左に写真、右に情報欄)。レイアウトは §10.2b-B(版1.5.3。従来の「1行4枚のサムネ格子」は廃止)。並びは項目順、最大60枚(超える場合はNG項目の写真を優先し、残りは「他N枚は電子記録で閲覧可」と注記)。
 8. フッタ(全ページ): 記録ID・ページ番号・「電子記録ハッシュ(SHA-256): {64桁}」。ハッシュ = 記録スナップショット(`recordId`,`round`,項目結果一式,署名3者の氏名・日時,判定イベント一覧)の canonicalJSON のSHA-256。
 
 ### 10.2a 件名(subject)とファイル名(版1.5.2。ユーザー決定)
@@ -1452,9 +1452,35 @@ PDF: `generateReport` `listReports`
 - **PDFファイル名** = `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(日時はJST・生成時刻)。`subject` 部分に `Util.sanitizeName`(§7.4 のフォルダ名と同じ置換: `\ / : * ? " < > |` を `_`、前後空白除去、最大60文字)を適用する。従来の `{recordId}_v...` 形式は廃止(`recordId` はPDF本文・フッタに残る)。同名ファイルがあっても別ファイルとして保存する(`version` と生成時刻で通常は重ならない)。保存先フォルダは変更なし。
 - `Reports` の列・`Report` 応答(§5.1)・API契約は変更なし(`subject` は応答に含めない。PDF名とPDF本文のみ)。
 
+### 10.2b レイアウト詳細(版1.5.3。ユーザー決定。項目5・7の具体化。API契約・列名は変更なし)
+**共通(GAS変換の制約)**: GASの HTML→PDF 変換は flex / grid の対応が弱いので、**レイアウトは `<table>` とインラインの固定サイズ(mm / px)だけで組む**。`display:flex`・`display:grid`・`position` による配置・CSS変数・`calc()` は使わない。`table-layout:fixed` と `<colgroup>` の幅(mm)で列を固定する。
+
+**A. 項目表(§10.2 項目5)**
+- 表全体に `table-layout:fixed`。列幅は `<colgroup>` で固定(合計=用紙幅 186mm。余白12mm引き後)。
+- 既定のセルは **折り返さない**(`white-space:nowrap`)。**行の高さは固定**(1行分。例 `height:6mm;line-height:6mm`)で、セルは `overflow:hidden`。長い項目文は枠内で**単に切れてよい**(`text-overflow:ellipsis` は使わない。GAS変換で効かないため)。
+- 例外は **「職長コメント」列だけ折り返しあり**(`white-space:normal`、`word-break:break-all`)。その行に限り高さが伸びてよい(`height` は最小値扱い、`overflow` は `visible`)。
+- **「管理者コメント」列は折り返しなし・固定高さ**(他列と同じ扱い)。長文は切れるため、表の下に注記「管理者コメントの全文は写真ページおよび電子記録で確認できます」を1行入れる。写真ブロックの管理者コメント欄(B)には全文を出す。
+- NG行の薄い赤背景は行(`<tr>`)の `background` で指定(継続)。
+
+**B. 写真ページ(§10.2 項目7)**
+- **1ページに最大4枚**。1枚につき1つの `<table>`(ブロック)を縦に並べる。ブロックの高さは固定(約 **62mm**。`height:62mm`、4枚+余白で A4 の本文領域に収まる)、`page-break-inside:avoid`。**4枚ごとに `page-break-after:always`**(4の倍数枚目のブロックに付与。最後のブロックには付けない)。
+- ブロックは2セル: **左=写真**(幅約45%、`photoThumb` を `<img>` で拡大表示。`width` と `max-height` をmmで固定、`object-fit` は使わない=縦横比は元画像のまま収める)、**右=情報欄**(下記)。
+- 情報欄の内容(上から):
+  1. 項目No.と項目文(`textJa`)
+  2. 職長の結果 と 管理者の結果(OK/NG/該当なし。**NGは赤**)と、重さ(NG時の `selfSeverity` / `qaSeverity` = 軽微 minor / 重大 major)
+  3. 実測(`selfValues` / `qaValues` がある項目のみ。差mm・許容 `tol` を項目表と同じ表記で)
+  4. 職長コメント(全文)
+  5. 管理者コメント(全文。職長コメントと別行・別欄)
+  6. 撮影者区分(職長 / 管理者 / 元請サイン証跡)
+  7. スタンプ文字(`stampText`)
+- **項目に紐づかない写真**(元請サイン証跡、`itemId` なし)は、情報欄に**撮影者区分とスタンプ文字のみ**を出す(項目No.・結果・コメント欄は作らない)。
+- 情報欄が62mmに収まらない長文は枠内で切れてよい(`overflow:hidden`)。全文は電子記録で確認できる。
+- 写真の並び順・最大60枚・NG項目優先・「他N枚は電子記録で閲覧可」の注記は従来どおり(変更なし)。
+- **画質の注意**: 写真は `photoThumb`(長辺 `photoThumbEdge`=320px、§7.3)を拡大して表示するため、**拡大すると粗くなる**。v1は容量(Drive取得量・PDFサイズ・タイムアウト120秒)を優先して許容する。改善が必要なら将来 `Config.photoThumbEdge` を上げる(例 480〜640。`photoThumbMaxChars` とサムネ目安も併せて見直す)。本版では値を変えない。
+
 ### 10.3 生成方法(GAS)
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
-2. インラインCSSのみのHTML文字列を組み立てる(`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
+2. インラインCSSのみのHTML文字列を組み立てる(**レイアウトは table と固定サイズのみ。§10.2b**。`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
 3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む。
 4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
 5. `reports/{siteId}_{現場名}/` に保存。`Config.pdfShareMode=anyone_with_link` なら `file.setSharing(ANYONE_WITH_LINK, VIEW)`、`private` なら共有しない(P-32)。`url = file.getUrl()`。
@@ -1674,7 +1700,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-CACHE-01(キャッシュが権限を跨がない): 事前に `getBootstrap` などで参照キャッシュを温めた状態で、`/__mock/patch`(`keepCache:true`)により ①田中の `Users.status=disabled` → **直後の** 田中のtokenでの任意のaction(`me` 以外)が `USER_DISABLED` ②田中の s_a の `Assignments` を `active=FALSE` → **直後の** `listRecords(siteId=s_a)` が `FORBIDDEN_SITE`、`getBootstrap.sites` から s_a が消える ③佐藤の `Absences` を挿入 → **直後の** `listAssignments.absentToday=true`、鈴木が主担当の代行として `decideJoin` 可 ④`adminRevokeDevice` 直後に当該端末が `DEVICE_REVOKED` いずれも遅延が許されない。(mock/harness共通。モックは常に最新なので自明に通る)
 - C-CACHE-02: (harness-only。`/__mock/cacheStats.enabled=true` のときだけ実行)①温めた後 `Config.photoMaxPerItem` を `keepCache:true` で変更 → 直後の `getBootstrap.config.photoMaxPerItem` は旧値(`hits` が増える)、`/__mock/clock` で+61秒後は新値 ②`keepCache` 無しの `patch` は直後に新値 ③`adminRotateJoinKey` の直後に旧 `joinKey` の `requestJoin` が `JOIN_KEY_INVALID`(`Sites` 破棄+`joinKey` 照合はキャッシュを使わない) ④`Config` に1行120,000文字の `description` を持つ行を `patch` で追加し、キャッシュ値が100KB(102,400バイト)を超える状態で `getBootstrap` が正常応答・`skippedTooLarge` が増え、`Items`/`Sites` のキャッシュは影響を受けない ⑤`Sites` を `keepCache:true` で `status=closed` に変更 → +61秒後は `createRecord` が `SITE_CLOSED`(60秒以内は成功/`SITE_CLOSED` のどちらも許す=assertしない)。
 - C-ROSTER-01: `adminValidateRoster` はシードで `problems` にerrorなし。(mock-only)`patch` で `qa_sub` を外す→`SITE_NO_QA_SUB`、`qa_main==qa_sub`→`QA_MAIN_EQ_SUB`、職長のUserにQA担当→`ROLE_MISMATCH`。
-- C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。**(版1.5.2)PDFファイル名は `{subject}_v{n}_{YYYYMMDD-HHmm}.pdf`**: 工区なし(例 `奥沢中学校 基礎 L2`)・工区あり(例 `Jビル赤坂 1F 東工区 L1`)で subject が §10.2a 通り(半角スペース区切り・工区が空なら詰める)、`url`(復号後)の名前に `recordId` が含まれない、禁止文字(例 現場名に `/`)は `_` に置換される。GAS互換ハーネスでは生成HTMLの `<title>` が subject と一致する。
+- C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。**(版1.5.2)PDFファイル名は `{subject}_v{n}_{YYYYMMDD-HHmm}.pdf`**: 工区なし(例 `奥沢中学校 基礎 L2`)・工区あり(例 `Jビル赤坂 1F 東工区 L1`)で subject が §10.2a 通り(半角スペース区切り・工区が空なら詰める)、`url`(復号後)の名前に `recordId` が含まれない、禁止文字(例 現場名に `/`)は `_` に置換される。GAS互換ハーネスでは生成HTMLの `<title>` が subject と一致する。 **(版1.5.3)GAS互換ハーネスで生成したHTMLの確認(§10.2b)**: ①写真ブロック(`table`、固定高さ約62mm、`page-break-inside:avoid`)が4枚ごとに `page-break-after`(5枚以上の記録で、4・8枚目に付き、最後のブロックには付かない)、写真が4枚以下なら改ページなし。②項目表に `table-layout:fixed` と `white-space:nowrap` があり、**折り返しが許されるのは「職長コメント」列のみ**(管理者コメント列は nowrap・固定高さ)。③HTMLに `display:flex` / `display:grid` が含まれない。④項目に紐づかない写真(`side=prime`)のブロックは区分とスタンプのみ。⑤NGの結果が赤で出る。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
 ### 12.4 ユニットテスト(U-)
@@ -1885,3 +1911,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.5.0 | 写真送信のさらなる高速化の確認と固定処理の削減(本番実測: 1往復≒1.3〜2.8秒、本文400KBでも約1.6秒、4件同時でも全体約3.2秒、写真300KBを90KB×5分割で約35秒=1回約6秒)。既存の列名・action名・エラーコード・action数(43)・Config キーは変更なし。**依頼のうち単発送信(`total=1`)、`uploadPhotoChunk` の最大3並列(`photoParallel`)、ロック範囲の縮小(Drive書込みはロック外)、`Config`/`Items`/`Sites` の60秒キャッシュは、版1.4〜1.4.3で既に記載済みのため再記述せず整合のみ確認**(本番が旧実装のまま分割送信になっている可能性が高い。実装の反映状況の確認が必要)。①§2.14: `photoChunkChars` は 90000 のまま(700000 へ上げない。分割モードは CacheService の1値100KB制限があるため。単発の上限 `photoSingleMaxChars=1200000` は `photoMaxBytes` のbase64長800,000以上で整合済みと明記)。②§2.16 新設・§1.4・§13.2: 1リクエスト内の同一シート再読込禁止(リクエスト内メモ)、ロック取得後は読み直し、端末認証などで必要な行/列だけ読む、可変データのリクエストまたぎキャッシュ禁止(結果は素朴な実装と同一)。③§2.15-10: キャッシュTTL上限を60秒固定と明記(5分は採らない)。④§12.6 新設・§12.2: 性能の受け入れ基準 PERF-01〜03(ping 約1.5秒、写真1枚約10秒、10枚約40秒・3並列)を手動確認項目として追加。⑤§7.3・§14 P-37/P-38/P-39・§14.2 の12: 整合。 |
 | 2026-10-10 | 1.5.1 | ユーザー決定: 管理者(QA)側の確認では写真は不要(任意)。写真必須は職長の自己点検(`submitRecord`)のみ。既存の列名・action名・エラーコード・action数(43)は変更なし。①§5.3.1: `PHOTO_REQUIRED` を職長提出時のみ(`selfResult=ng`、または `key` の `ok`)に限定し、`submitVerdict` では出さない(`NOTE_REQUIRED`/`SEVERITY_REQUIRED` は従来どおり必須)。QA側の写真の撮影・添付・削除は任意で可能。②§9.1(写真ルール)・§9.2 S10・§12.2 要件対応表・§12.3 C-STATE-05/C-STATE-06・§12 E-03: 整合。 |
 | 2026-10-10 | 1.5.2 | ユーザー決定: 元請提出用PDFの件名を「現場名 階 工区 打設箇所」にする。既存の列名・action名・エラーコード・action数(43)・API契約は変更なし。§10.2a 新設(`subject`=`{現場名} {階}[ {工区}] {lot}`、PDF名=`{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`、`{recordId}_v...` は廃止)、§10.2(件名を表示)・§10.3(`<title>`・ファイル名)・§7.4(reports のパス)・§11.3(モックのPDF名)・§12.3 C-REP-01 に整合。 |
+| 2026-10-10 | 1.5.3 | ユーザー決定: 元請提出PDFのレイアウト。項目表は折り返しなし・行高さ固定(職長コメント列のみ折り返し可、管理者コメントは固定高さで全文は写真ページ・電子記録)、写真は1ページ最大4枚の「左=写真/右=情報欄」ブロック(約62mm、4枚ごと改ページ)に変更(サムネ格子は廃止)。GAS変換のためtable+固定サイズのみで組む。拡大による粗さを注意書き(将来 `photoThumbEdge` を上げる余地)。API契約・列名・action数(43)は変更なし。§10.2・§10.2b新設・§10.3・§12.3 C-REP-01。 |

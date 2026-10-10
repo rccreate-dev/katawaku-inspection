@@ -65,7 +65,14 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   h.push('@page{size:A4;margin:12mm}body{font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif;font-size:10px;color:#111}');
   h.push('h1{font-size:16px;margin:0 0 6px}h2{font-size:12px;margin:12px 0 4px;border-bottom:1px solid #444}');
   h.push('table{border-collapse:collapse;width:100%}th,td{border:1px solid #666;padding:2px 4px;vertical-align:top}th{background:#eee}');
-  h.push('.ng td{background:#fde8e8}.sign td{height:36px}.photos{width:100%}.ph{display:inline-block;width:23%;margin:1%;vertical-align:top;font-size:8px}.ph img{width:100%}');
+  // 項目表(SPEC §10.2b-A): 固定レイアウト・折り返しなし・行高固定。職長コメント列だけ折り返し
+  h.push('table.items{table-layout:fixed;width:186mm}table.items th,table.items td{white-space:nowrap;overflow:hidden;height:6mm;line-height:6mm;padding:0 2px;vertical-align:middle}');
+  h.push('table.items td.wrap{white-space:normal;word-break:break-all;overflow:visible;line-height:12px;vertical-align:top;padding:2px}');
+  h.push('.ng td{background:#fde8e8}.sign td{height:36px}');
+  // 写真ブロック(SPEC §10.2b-B): 1枚1table・高さ固定・4枚ごとに改ページ
+  h.push('table.pb{table-layout:fixed;width:186mm;height:62mm;margin:0 0 3mm 0;page-break-inside:avoid}table.pb td{overflow:hidden;height:62mm;vertical-align:top;padding:3px 5px}');
+  h.push('table.pb td.pic{width:83mm;text-align:center;vertical-align:middle}table.pb td.pic img{width:80mm;max-height:58mm}');
+  h.push('table.pb .ngc{color:#c00;font-weight:bold}table.pb .lb{color:#555}');
   h.push('.foot{margin-top:10px;font-size:8px;color:#444;word-break:break-all}');
   h.push('</style></head><body>');
   h.push('<!--REPORT ' + esc_(rec.recordId) + ' v' + version + ' ' + esc_(rec.status) + '-->');
@@ -108,17 +115,19 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   h.push('<tr><th>職長</th><td>' + cs.ok + '</td><td>' + cs.ng + '</td><td>' + cs.na + '</td></tr>');
   h.push('<tr><th>管理者</th><td>' + cq.ok + '</td><td>' + cq.ng + '</td><td>' + cq.na + '</td></tr></table>');
 
-  // 項目表
-  h.push('<h2>項目表</h2><table><tr><th>No.</th><th>項目</th><th>職長結果</th><th>管理者結果</th><th>実測</th><th>職長コメント</th><th>管理者コメント</th></tr>');
+  // 項目表(SPEC §10.2b-A)
+  h.push('<h2>項目表</h2><table class="items"><colgroup><col style="width:8mm"><col style="width:62mm"><col style="width:14mm"><col style="width:18mm"><col style="width:24mm"><col style="width:30mm"><col style="width:30mm"></colgroup>');
+  h.push('<tr><th>No.</th><th>項目</th><th>職長結果</th><th>管理者結果</th><th>実測</th><th>職長コメント</th><th>管理者コメント</th></tr>');
   rows.forEach(function (r, i) {
     var snap = r.snapshot;
     var ng = r.selfResult === 'ng' || r.qaResult === 'ng';
     var m = [measureText_(r, 'self'), measureText_(r, 'qa')].filter(function (x) { return x; }).join(' | ');
-    h.push('<tr' + (ng ? ' class="ng"' : '') + '><td>' + (i + 1) + '</td><td>' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</td>' +
+    h.push('<tr' + (ng ? ' class="ng" style="background:#fde8e8"' : '') + '><td>' + (i + 1) + '</td><td>' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</td>' +
       '<td>' + esc_(RESULT_LABEL_[r.selfResult] || '') + '</td><td>' + esc_(RESULT_LABEL_[r.qaResult] || '') + (r.qaSeverity ? '(' + esc_(r.qaSeverity === 'major' ? '重大' : '軽微') + ')' : '') + '</td>' +
-      '<td>' + esc_(m) + '</td><td>' + esc_(r.foremanNote) + '</td><td>' + esc_(r.qaNote) + '</td></tr>');
+      '<td>' + esc_(m) + '</td><td class="wrap">' + esc_(r.foremanNote) + '</td><td>' + esc_(r.qaNote) + '</td></tr>');
   });
   h.push('</table>');
+  h.push('<p style="font-size:8px;color:#444">管理者コメントの全文は写真ページおよび電子記録で確認できます。</p>');
 
   // NG・是正の経過
   h.push('<h2>NG・是正の経過</h2>');
@@ -132,22 +141,37 @@ function buildReportHtml_(rec, site, rows, photos, notes, events, version, nowDt
   });
   h.push('<p>提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length + '</p>');
 
-  // 写真(最大60枚。NG項目の写真を優先)
-  h.push('<h2>写真</h2><div class="photos">');
+  // 写真(最大60枚。NG項目の写真を優先)。SPEC §10.2b-B: 1ページ最大4枚、左=写真・右=項目内容とコメント
+  h.push('<h2 style="page-break-before:always">写真</h2>');
   var ngItems = {};
   rows.forEach(function (r) { if (r.selfResult === 'ng' || r.qaResult === 'ng') ngItems[r.itemId] = true; });
-  var seq = {};
-  rows.forEach(function (r, i) { seq[r.itemId] = i + 1; });
+  var rowOf = {}, seq = {};
+  rows.forEach(function (r, i) { seq[r.itemId] = i + 1; rowOf[r.itemId] = r; });
   var sorted = photos.slice().sort(function (a, b) { return (ngItems[b.itemId] ? 1 : 0) - (ngItems[a.itemId] ? 1 : 0); });
   var shown = sorted.slice(0, 60);
-  shown.forEach(function (ph) {
+  function resChip_(res, sev) {
+    var t = (RESULT_LABEL_[res] || '-') + (res === 'ng' && sev ? '(' + (sev === 'major' ? '重大' : '軽微') + ')' : '');
+    return res === 'ng' ? '<span class="ngc">' + esc_(t) + '</span>' : esc_(t);
+  }
+  shown.forEach(function (ph, idx) {
     var b64 = '';
     try { b64 = photoBytesB64_(ph.thumbFileId); } catch (e) { b64 = ''; }
     var who = ph.side === 'self' ? '職長' : (ph.side === 'qa' ? '管理者' : '元請サイン証跡');
-    h.push('<div class="ph">' + (b64 ? '<img src="data:image/jpeg;base64,' + b64 + '">' : '') +
-      '<br>' + (ph.itemId ? 'No.' + (seq[ph.itemId] || '') + ' ' : '') + who + '<br>' + esc_(ph.stampText) + '</div>');
+    var row = ph.itemId ? rowOf[ph.itemId] : null;
+    var info = '';
+    if (row) {
+      var snap = row.snapshot;
+      info += '<div><b>No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</b></div>';
+      info += '<div><span class="lb">職長:</span> ' + resChip_(row.selfResult, row.selfSeverity) + ' / <span class="lb">管理者:</span> ' + resChip_(row.qaResult, row.qaSeverity) + '</div>';
+      var mt = [measureText_(row, 'self'), measureText_(row, 'qa')].filter(function (x) { return x; }).join(' | ');
+      if (mt) info += '<div><span class="lb">実測:</span> ' + esc_(mt) + '</div>';
+      info += '<div><span class="lb">職長コメント:</span> ' + esc_(row.foremanNote) + '</div>';
+      info += '<div><span class="lb">管理者コメント:</span> ' + esc_(row.qaNote) + '</div>';
+    }
+    info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + who + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
+    var brk = ((idx + 1) % 4 === 0 && idx < shown.length - 1) ? ' style="page-break-after:always"' : '';
+    h.push('<table class="pb"' + brk + '><tr><td class="pic">' + (b64 ? '<img src="data:image/jpeg;base64,' + b64 + '">' : '') + '</td><td>' + info + '</td></tr></table>');
   });
-  h.push('</div>');
   if (photos.length > shown.length) h.push('<p>他' + (photos.length - shown.length) + '枚は電子記録で閲覧可</p>');
   h.push('<div class="foot">記録ID: ' + esc_(rec.recordId) + ' / 電子記録ハッシュ(SHA-256): ' + hash + '</div>');
   h.push('</body></html>');
