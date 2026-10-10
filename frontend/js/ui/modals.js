@@ -276,10 +276,16 @@
     close.addEventListener('click', function () { if (box.parentNode) box.parentNode.removeChild(box); });
     close.focus();
     if (p.local && p.blob) { img.src = C.blobUrl(p.blob); return; }
+    note.hidden = false; KW.clear(note).appendChild(document.createTextNode(t('photo.loading')));
     KW.data.loadFull(p.photoId).then(function (r) {
+      note.hidden = true; KW.clear(note).appendChild(document.createTextNode(t('photo.thumb_only')));
       if (r.blob) img.src = C.blobUrl(r.blob);
       if (r.thumbOnly) note.hidden = false;
       if (r.error) { note.hidden = false; KW.clear(note).appendChild(document.createTextNode(KW.errText(r.error))); }
+      if (!r.blob && !r.error) { note.hidden = false; KW.clear(note).appendChild(document.createTextNode(t('photo.load_failed'))); }
+    }).catch(function (e) {
+      KW.state.lastErr = String(e && e.message || e);
+      note.hidden = false; KW.clear(note).appendChild(document.createTextNode(t('photo.load_failed') + ' (' + KW.state.lastErr + ')'));
     });
   };
 

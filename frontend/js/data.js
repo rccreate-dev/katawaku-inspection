@@ -222,7 +222,7 @@
             var fulls = rows.filter(function (x) { return x.full; }).sort(function (a, b) { return a.lastUsedAt - b.lastUsedAt; });
             return Promise.all(fulls.slice(0, Math.max(0, fulls.length - FULL_MAX)).map(function (x) { x.full = null; return db().put('photoCache', x); }));
           });
-        }).then(function () { return { blob: b }; });
+        }).catch(function (e) { KW.state.lastErr = String(e && e.message || e); /* キャッシュに保存できなくても拡大表示はする */ }).then(function () { return { blob: b }; });
       });
     });
   }
