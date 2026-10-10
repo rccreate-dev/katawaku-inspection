@@ -186,6 +186,15 @@ async function uploadPhoto(session, { recordId, itemId = null, side = 'self', bu
   if (last) Object.defineProperty(last, '_photoId', { value: photoId, enumerable: false });
   return last;
 }
+/** 図面(版1.6。kind=drawing)を1枚アップロードする(単発)。itemId は常に空。markers 既定=2件。extra で params を上書き。 */
+async function uploadDrawing(session, { recordId, side = 'self', photoId = newPhotoId(), markers, buf = SAMPLE, extra = {} } = {}) {
+  const base = photoParams({ photoId, recordId, side, buf });
+  const params = { ...base, kind: 'drawing', markers: markers !== undefined ? markers : [{ itemId: 'i9', label: '④-1', x: 0.231, y: 0.412 }, { itemId: 'i9', label: '④-2', x: 0.8, y: 0.1 }], ...extra };
+  for (const k of Object.keys(params)) if (params[k] === undefined) delete params[k];
+  const r = await session.call('uploadPhotoChunk', params);
+  Object.defineProperty(r, '_photoId', { value: photoId, enumerable: false });
+  return r;
+}
 const bigJpeg = (n) => { const b = Buffer.alloc(n, 0x41); b[0] = 0xff; b[1] = 0xd8; return b; };
 
 // ---------------------------------------------------------------------------
@@ -246,4 +255,4 @@ async function makeQaOk(tanaka, qa, opts = {}) {
   return { recordId };
 }
 
-module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };
+module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };

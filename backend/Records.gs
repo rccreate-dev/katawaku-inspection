@@ -82,11 +82,15 @@ function recordListView_(actor, rec) {
   return recordSummary_(actor, rec);
 }
 
+/** Photos 行の種別(版1.6。旧行で kind が空なら 'photo') */
+function photoKindOf_(p) { return p.kind === 'drawing' ? 'drawing' : 'photo'; }
+
 function photoMeta_(p) {
+  var kind = photoKindOf_(p);
   return {
     photoId: p.photoId, itemId: orNull_(p.itemId), side: p.side, round: p.round, takenBy: p.takenBy,
     takenByName: userName_(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes,
-    stampText: p.stampText
+    stampText: p.stampText, kind: kind, markers: kind === 'drawing' ? (Array.isArray(p.markers) ? p.markers : []) : null
   };
 }
 
@@ -120,7 +124,11 @@ function recordDetail_(actor, rec) {
   var base = recordSummary_(actor, rec);
   var isForeman = actor.role === 'foreman';
   var hideQa = isForeman && (rec.status === 'draft' || rec.status === 'submitted');
-  var photos = Repo.where('Photos', 'recordId', rec.recordId).filter(function (p) { return !p.deleted; });
+  var allPhotos = Repo.where('Photos', 'recordId', rec.recordId).filter(function (p) { return !p.deleted; });
+  // 検査写真のみ(図面は drawings に分ける。版1.6)
+  var photos = allPhotos.filter(function (p) { return photoKindOf_(p) === 'photo'; });
+  var drawings = allPhotos.filter(function (p) { return photoKindOf_(p) === 'drawing' && !(hideQa && p.side === 'qa'); })
+    .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : (a.takenAt > b.takenAt ? 1 : 0); }).map(photoMeta_);
   var byKey = {};
   photos.forEach(function (p) { if (p.side !== 'prime') (byKey[p.itemId + '|' + p.side] = byKey[p.itemId + '|' + p.side] || []).push(photoMeta_(p)); });
   var items = [];
@@ -146,6 +154,7 @@ function recordDetail_(actor, rec) {
   var detail = Object.assign({}, base, {
     items: items,
     primePhotos: photos.filter(function (p) { return p.side === 'prime'; }).map(photoMeta_),
+    drawings: drawings,
     notes: notes, events: evs,
     qaComment: qaVisible ? (rec.qaComment || '') : '',
     stopInfo: rec.stopped ? { by: orNull_(rec.stoppedBy), byName: userName_(rec.stoppedBy), at: orNull_(rec.stoppedAt), reason: rec.stopReason || '' } : null,
@@ -185,7 +194,7 @@ function activePhotos_(recordId) {
 
 function photoCounter_(photos) {
   var m = {};
-  photos.forEach(function (p) { var k = p.itemId + '|' + p.side; m[k] = (m[k] || 0) + 1; });
+  photos.forEach(function (p) { if (photoKindOf_(p) === 'drawing') return; var k = p.itemId + '|' + p.side; m[k] = (m[k] || 0) + 1; });
   return function (itemId, side) { return m[itemId + '|' + side] || 0; };
 }
 

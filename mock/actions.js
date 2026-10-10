@@ -163,7 +163,7 @@ module.exports = function install(C) {
       const res = who === 'self' ? r.selfResult : r.qaResult;
       const values = (who === 'self' ? r.selfValues : r.qaValues) || [];
       const note = who === 'self' ? r.foremanNote : r.qaNote;
-      const photos = C.photosOf(rec.recordId).filter((p) => p.itemId === r.itemId && p.side === who && (who === 'self' || p.round === rec.round)).length;
+      const photos = C.photosOf(rec.recordId).filter((p) => p.kind !== 'drawing' && p.itemId === r.itemId && p.side === who && (who === 'self' || p.round === rec.round)).length;
       const id = r.itemId;
       if (!res) { v.push({ rule: 'ANSWER_MISSING', itemId: id }); continue; }
       if (res === 'ng') {
@@ -405,6 +405,7 @@ module.exports = function install(C) {
     if (!/^p_[a-z0-9]{16}$/.test(p.photoId)) viol.push({ rule: 'FIELD_INVALID', path: 'photoId' });
     if (!['self', 'qa', 'prime'].includes(p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'side' });
     else if (p.side === 'prime') { if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' }); }
+    else if (p.kind === 'drawing') { /* 図面は itemId 空(下の kind 検証で判定) */ }
     else {
       const row = p.itemId ? rowsOf(rec).find((r) => r.itemId === p.itemId) : null;
       if (!row || (p.side === 'self' && row.snapshot.audience === 'qa') || (p.side === 'qa' && row.snapshot.audience === 'foreman')) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
@@ -418,6 +419,28 @@ module.exports = function install(C) {
     if (p.bytes < 1) viol.push({ rule: 'FIELD_INVALID', path: 'bytes' });
     if (!/^[0-9a-f]{64}$/.test(p.sha256)) viol.push({ rule: 'FIELD_INVALID', path: 'sha256' });
     if (blank(p.stampText) || p.stampText.length > 300) viol.push({ rule: 'FIELD_INVALID', path: 'stampText' });
+    // 版1.6: kind / markers(図面。§5.4.4・§7.7)
+    const isDrawingReq = p.kind === 'drawing';
+    let markers = null;
+    if (p.kind !== undefined && p.kind !== null && p.kind !== 'photo' && p.kind !== 'drawing') viol.push({ rule: 'FIELD_INVALID', path: 'kind' });
+    else if (isDrawingReq) {
+      if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
+      if (p.side === 'prime') viol.push({ rule: 'FIELD_INVALID', path: 'side' });
+      const ms = p.markers;
+      let bad = !Array.isArray(ms) || ms.length > 60;
+      if (!bad) {
+        const rows = rowsOf(rec);
+        markers = [];
+        for (const m of ms) {
+          const row = m && typeof m === 'object' ? rows.find((r) => r.itemId === m.itemId) : null;
+          const audOk = row && (p.side === 'self' ? row.snapshot.audience !== 'qa' : row.snapshot.audience !== 'foreman');
+          const num01 = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+          if (!audOk || typeof m.label !== 'string' || m.label.length < 1 || m.label.length > 8 || !num01(m.x) || !num01(m.y)) { bad = true; break; }
+          markers.push({ itemId: m.itemId, label: m.label, x: m.x, y: m.y });
+        }
+      }
+      if (bad) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
+    } else if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
     if (viol.length) vfail(viol);
 
     // 1 data の文字数(単発=photoSingleMaxChars/分割=photoChunkChars)・4の倍数・base64
@@ -455,13 +478,13 @@ module.exports = function install(C) {
     let takenMs = U.parseDt(p.takenAt); let suspect = false;
     if (takenMs > t + 5 * 60000 || takenMs < t - 14 * 86400000) { takenMs = t; suspect = true; }
     // 仮想Drive保存(ロックの外)
-    const itemId = p.side === 'prime' ? null : p.itemId;
+    const itemId = (p.side === 'prime' || isDrawingReq) ? null : p.itemId;
     const site = siteRow(rec.siteId);
     const clean = (x) => String(x).replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60);
-    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${itemId || 'prime'}_${p.side}_${p.photoId}.jpg`;
+    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${isDrawingReq ? 'drawing' : (itemId || 'prime')}_${p.side}_${p.photoId}.jpg`;
     const driveFileId = C.driveSave(path, buf);
     const thumbFileId = C.driveSave(`thumbs/${p.photoId}.jpg`, thumbBuf);
-    return { itemId, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
+    return { itemId, kind: isDrawingReq ? 'drawing' : 'photo', markers, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
   };
   H.uploadPhotoChunk$commit = (rc, prep) => {
     const p = rc.params; const rec = ctxRec(rc); const actor = rc.actor;
@@ -470,15 +493,20 @@ module.exports = function install(C) {
     // 2 既存行の確認(同じ photoId。recordId/itemId/side/sha256 が一致なら新しい行を作らず既存の PhotoMeta で成功)
     const done = find('Photos', p.photoId);
     if (done) {
-      if (done.takenBy !== actor.userId || done.recordId !== rec.recordId || (done.itemId || null) !== prep.itemId || done.side !== p.side || done.sha256 !== p.sha256) fail('PHOTO_INVALID', '写真データが不正です');
+      if (done.takenBy !== actor.userId || done.recordId !== rec.recordId || (done.itemId || null) !== prep.itemId || done.side !== p.side || done.sha256 !== p.sha256 || (done.kind || 'photo') !== prep.kind) fail('PHOTO_INVALID', '写真データが不正です');
       S.chunks.delete(p.photoId);
       return { created: false, data: { photoId: p.photoId, received, complete: true, photo: C.photoMeta(done) } };
     }
     // 3 項目×side の未削除写真数の上限(確定判定)
-    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.side === p.side && (x.itemId || null) === prep.itemId).length;
-    if (cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
+    // 版1.6: 図面は記録×sideあたり5枚(固定)。検査写真の枚数(photoMaxPerItem)とは別勘定。
+    if (prep.kind === 'drawing') {
+      const dc = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind === 'drawing' && x.side === p.side).length;
+      if (dc >= 5) fail('PHOTO_LIMIT', '図面の上限です', { max: 5 });
+    }
+    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind !== 'drawing' && x.side === p.side && (x.itemId || null) === prep.itemId).length;
+    if (prep.kind !== 'drawing' && cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
     // 4 Photos 行の追記(round=ここで読んだ Records.round、receivedAt=ここでの現在時刻)
-    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false });
+    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false, kind: prep.kind, markers: prep.kind === 'drawing' ? prep.markers : null });
     S.chunks.delete(p.photoId);
     // 5 touch(Events には残さない)
     C.touch(rec);

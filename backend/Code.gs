@@ -133,7 +133,9 @@ var ACTIONS = {
       total: { t: 'int', req: 1, min: 1, max: 12 }, mime: { t: 'enum', req: 1, values: ['image/jpeg'] },
       data: { t: 'str', req: 1 }, thumb: { t: 'str' }, takenAt: { t: 'dt', req: 1 },
       width: { t: 'int', req: 1, min: 1 }, height: { t: 'int', req: 1, min: 1 }, bytes: { t: 'int', req: 1, min: 1 },
-      sha256: { t: 'str', req: 1, max: 64 }, stampText: { t: 'str', req: 1, max: 300 }
+      sha256: { t: 'str', req: 1, max: 64 }, stampText: { t: 'str', req: 1, max: 300 },
+      // 版1.6(図面): 値の検証は PhotoUpload.gs が path 付きで行う(markers は配列/null のみ許すので型指定なし)
+      kind: { t: 'str', nullable: true, max: 20 }, markers: { t: 'any', nullable: true }
     }
   },
   deletePhoto: { w: true, idem: true, roles: ALL_ROLES, params: { photoId: { t: 'id', p: 'p', req: 1 } } },

@@ -86,7 +86,7 @@
       // 読み込み中・エラー時も現場名を出す(キャッシュから)
       C.siteNameOfRecord(id).then(function (n) { if (ctx.alive() && !detail) ctx.chrome({ back: '#/', site: n }); });
       var itemNodes = {}, pending = {}, headerPatch = null;
-      var progress = null, progressText = null, problemsBox = null;
+      var progress = null, progressText = null, problemsBox = null, drawBox = null;
 
       var save = KW.debounce(doSave, 500);
       function touch(itemId) {
@@ -316,6 +316,15 @@
           itemNodes[it.itemId] = node;
           el.appendChild(node);
         });
+        // 図面(確認箇所の書き込み。SPEC §7.7): 自分(職長)の図面を追加・削除。管理者の図面は読み取りのみ
+        drawBox = C.drawingSection({
+          recordId: id, side: 'self',
+          get: function () { return { detail: detail, work: work, blobs: blobs }; },
+          canEdit: function () { return editable && (detail.actions || []).indexOf('uploadPhotoChunk') >= 0; },
+          items: function () { return visibleItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, measure: i.def.measure, text: KW.itemText(i.def) }; }); },
+          refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
+        });
+        el.appendChild(drawBox);
         refreshProgress();
         // 下部
         if (editable) {
@@ -384,6 +393,7 @@
           if (v[0] && v[0].detail) detail = v[0].detail;
           blobs = v[1];
           Object.keys(itemNodes).forEach(redrawItem);
+          if (drawBox) drawBox.redraw();
         });
       });
       ctx.on('outbox:counts', function () {

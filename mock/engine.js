@@ -143,7 +143,8 @@ const leads = () => table('Users').filter((u) => u.role === 'lead' && u.status =
 const recordRow = (id) => find('Records', id);
 const itemsOf = (recordId) => table('RecordItems').filter((r) => r.recordId === recordId).sort((a, b) => a.snapshot.seq - b.snapshot.seq);
 const photosOf = (recordId) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted);
-const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && p.side === side && (itemId == null || p.itemId === itemId)).length;
+const isDrawing = (p) => p.kind === 'drawing';
+const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && !isDrawing(p) && p.side === side && (itemId == null || p.itemId === itemId)).length;
 
 function canViewDetail(actor, rec) {
   if (actor.role === 'lead') return true;
@@ -331,7 +332,7 @@ function siteView(actor, s) {
   return { siteId: s.siteId, name: s.name, status: s.status, floors: splitCsv(s.floors), zones: splitCsv(s.zones), primeContractor: s.primeContractor || '', qa: { main: q.main ? brief(q.main) : null, mainAbsent: q.mainAbsent, subs: q.subs.map(brief) }, myAssignRole: mine ? mine.assignRole : null, myTeam: mine && mine.team ? mine.team : null };
 }
 function photoMeta(p) {
-  return { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText };
+  return { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText, kind: p.kind === 'drawing' ? 'drawing' : 'photo', markers: p.kind === 'drawing' ? (p.markers || []) : null };
 }
 function countsOf(rows, kinds, filledKey) {
   const c = { total: 0, filled: 0, ok: 0, ng: 0, na: 0 };
@@ -377,7 +378,10 @@ function detailView(actor, rec) {
   const base = summaryView(actor, rec);
   const isForeman = actor.role === 'foreman';
   const hideQa = isForeman && (rec.status === 'draft' || rec.status === 'submitted');
-  const photos = photosOf(rec.recordId);
+  // 版1.6: 検査写真(kind=photo)と図面(kind=drawing)を分ける。items[].photos・primePhotos には図面を含めない。
+  const allPhotos = photosOf(rec.recordId);
+  const photos = allPhotos.filter((p) => !isDrawing(p));
+  const drawings = allPhotos.filter((p) => isDrawing(p) && !(hideQa && p.side === 'qa')).sort((a, b) => (a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0)).map(photoMeta);
   const items = itemsOf(rec.recordId)
     .filter((r) => !(isForeman && r.snapshot.audience === 'qa'))
     .map((r) => {
@@ -393,7 +397,7 @@ function detailView(actor, rec) {
   const notes = table('Notes').filter((n) => n.recordId === rec.recordId).map(noteView);
   const showQaComment = !isForeman || ['fix', 'qa_ok', 'approved'].includes(rec.status);
   return Object.assign(base, {
-    items, primePhotos: photos.filter((p) => p.side === 'prime' && p.round === rec.round).map(photoMeta), notes, events,
+    items, primePhotos: photos.filter((p) => p.side === 'prime' && p.round === rec.round).map(photoMeta), drawings, notes, events,
     qaComment: showQaComment ? (rec.qaComment || '') : '',
     stopInfo: rec.stoppedBy ? { by: rec.stoppedBy, byName: userName(rec.stoppedBy), at: rec.stoppedAt, reason: rec.stopReason || '' } : null,
     signatures: {
@@ -556,7 +560,7 @@ const ACTIONS = {
   recordPrimeSign: A(ROLES_QL, { recordId: 's', signerName: 's', method: 's', evidencePhotoId: 's?' }, { write: true, star: true, pin: true, load: 'record' }),
   stopPour: A(ROLES_ALL, { recordId: 's', reason: 's' }, { write: true, star: true, load: 'record' }),
   addNote: A(ROLES_ALL, { recordId: 's', itemId: 's?', text: 's' }, { write: true, star: true, load: 'record' }),
-  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's' }, { write: true, load: 'record' }),
+  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's', kind: 's?', markers: 'x?' }, { write: true, load: 'record' }),
   deletePhoto: A(ROLES_ALL, { photoId: 's' }, { write: true, star: true, load: 'photo' }),
   getPhotoThumbs: A(ROLES_ALL, { photoIds: 'a' }), getPhoto: A(ROLES_ALL, { photoId: 's' }),
   generateReport: A(ROLES_QL, { recordId: 's' }, { write: true, star: true, load: 'record' }),
@@ -876,7 +880,7 @@ function resetState(opts = {}) {
     const path = `photos/${rec.siteId}_${site.name}/${rec.floor}/${date}/${rec.recordId}_${itemId || 'prime'}_${side}_${photoId}.jpg`;
     const driveFileId = driveSave(path, SAMPLE_JPEG);
     const thumbFileId = driveSave(`thumbs/${photoId}.jpg`, SAMPLE_JPEG);
-    insert('Photos', { photoId, recordId: rec.recordId, itemId: itemId || null, side, round: 1, takenBy: userId, takenAt: dt(at), receivedAt: dt(at), mime: 'image/jpeg', bytes: SAMPLE_JPEG.length, width: 64, height: 48, sha256: sampleSha, stampText, driveFileId, thumbFileId, clockSuspect: false, deleted: false });
+    insert('Photos', { photoId, recordId: rec.recordId, itemId: itemId || null, side, round: 1, takenBy: userId, takenAt: dt(at), receivedAt: dt(at), mime: 'image/jpeg', bytes: SAMPLE_JPEG.length, width: 64, height: 48, sha256: sampleSha, stampText, driveFileId, thumbFileId, clockSuspect: false, deleted: false, kind: 'photo', markers: null });
   };
   const addNoteRow = (rec, itemId, kind, authorUserId, authorRole, text, source, at) => insert('Notes', { noteId: U.newId('n'), recordId: rec.recordId, itemId: itemId || null, kind, authorUserId, authorRole, round: 1, text, source, clientId: null, createdAt: dt(at) });
   const addEv = (kind, rec, at, actorUserId, extra = {}) => {
@@ -996,7 +1000,7 @@ function applyPatch(b, { extra = true } = {}) {
     if (sheet === 'Photos') {
       for (const k of PHOTO_REQUIRED_COLS) if (o[k] === undefined || o[k] === null) throw new Error(`Photos.${k} は必須`);
       if (find('Photos', o.photoId)) throw new Error('キーが重複しています');
-      return { row: insert('Photos', Object.assign({ itemId: null, stampText: '', clockSuspect: false, deleted: false }, o)) };
+      return { row: insert('Photos', Object.assign({ itemId: null, stampText: '', clockSuspect: false, deleted: false, kind: 'photo', markers: null }, o)) };
     }
     if (sheet === 'Records') throw new Error('Records は insert できません');
     const prefix = { Users: 'u', Sites: 's', Assignments: 'a', Absences: 'b' }[sheet];

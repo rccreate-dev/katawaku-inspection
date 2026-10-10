@@ -48,6 +48,7 @@
       ['self', 'qa'].forEach(function (sd) { ((it[sd] && it[sd].photos) || []).forEach(function (p) { ids[p.photoId] = 1; }); });
     });
     (d.primePhotos || []).forEach(function (p) { ids[p.photoId] = 1; });
+    (d.drawings || []).forEach(function (p) { ids[p.photoId] = 1; }); // 図面(版1.6)
     return photoBlobsFor(d.recordId).then(function (rows) {
       return Promise.all(rows.filter(function (r) { return r.uploadState === 'uploaded' && ids[r.photoId]; }).map(function (r) { return delPhotoBlob(r.photoId); }));
     });
@@ -55,7 +56,7 @@
   /* 詳細(サーバーの写真一覧)に photoId が載っているか */
   function detailHasPhoto(d, pid) {
     if (!d) return false;
-    var found = (d.primePhotos || []).some(function (p) { return p.photoId === pid; });
+    var found = (d.primePhotos || []).some(function (p) { return p.photoId === pid; }) || (d.drawings || []).some(function (p) { return p.photoId === pid; });
     (d.items || []).forEach(function (it) {
       ['self', 'qa'].forEach(function (sd) { if (((it[sd] && it[sd].photos) || []).some(function (p) { return p.photoId === pid; })) found = true; });
     });
@@ -63,7 +64,7 @@
   }
   function stripDetail(d) {
     var s = Object.assign({}, d);
-    ['items', 'primePhotos', 'notes', 'events', 'stopInfo', 'signatures', 'timing', 'qaComment'].forEach(function (k) { delete s[k]; });
+    ['items', 'primePhotos', 'drawings', 'notes', 'events', 'stopInfo', 'signatures', 'timing', 'qaComment'].forEach(function (k) { delete s[k]; });
     return s;
   }
   /* RecordSummary を受けた時: 要約を更新し、詳細があれば同名キーだけ上書き */

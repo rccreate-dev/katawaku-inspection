@@ -29,7 +29,7 @@ var SCHEMA = (function () {
   def('RecordItems', 'recordItemId', false,
     'recordItemId,recordId,itemId,snapshot:json,selfResult,selfSeverity,selfValues:json,foremanNote,selfUpdatedAt:dt,qaResult,qaSeverity,qaValues:json,qaNote,qaUpdatedAt:dt');
   def('Photos', 'photoId', false,
-    'photoId,recordId,itemId,side,round:int,takenBy,takenAt:dt,receivedAt:dt,mime,bytes:int,width:int,height:int,sha256,stampText,driveFileId,thumbFileId,clockSuspect:bool,deleted:bool,deletedBy,deletedAt:dt');
+    'photoId,recordId,itemId,side,round:int,takenBy,takenAt:dt,receivedAt:dt,mime,bytes:int,width:int,height:int,sha256,stampText,driveFileId,thumbFileId,clockSuspect:bool,deleted:bool,deletedBy,deletedAt:dt,kind,markers:json');
   def('Notes', 'noteId', true,
     'noteId,recordId,itemId,kind,authorUserId,authorRole,round:int,text,source,clientId,createdAt:dt');
   def('Events', 'eventId', true,
@@ -93,9 +93,10 @@ function setupSheets() {
       if (!sh) {
         sh = ss.insertSheet(name);
       } else if (sh.getLastRow() >= 1) {
-        var cur = sh.getRange(1, 1, 1, cols).getValues()[0].map(String);
+        // 版1.6(§2.9a): ヘッダが SPEC の先頭部分と一致し列数が少ないだけなら、不足列のヘッダは下で末尾に書き足す
         var lastCol = sh.getLastColumn();
-        if (lastCol > cols || cur.join('|') !== header.join('|')) {
+        var cur = sh.getRange(1, 1, 1, Math.min(cols, lastCol)).getValues()[0].map(String);
+        if (lastCol > cols || cur.join('|') !== header.slice(0, cur.length).join('|')) {
           throw new Error('シート ' + name + ' の列がSPECと一致しません。手動で修正してから再実行してください');
         }
       }
