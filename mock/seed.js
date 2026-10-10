@@ -930,12 +930,12 @@ const CONFIG_ROWS = [
   ['qaLeadMinutes', '120', 'int', ''], ['qaMaxSitesPerDay', '3', 'int', ''], ['pinMaxFail', '5', 'int', ''],
   ['maxDevicesPerUser', '3', 'int', ''], ['inviteTtlHours', '72', 'int', ''], ['photoMaxEdge', '1280', 'int', ''],
   ['photoJpegQuality', '0.72', 'num', ''], ['photoThumbEdge', '320', 'int', ''], ['photoMaxPerItem', '5', 'int', ''],
-  ['photoChunkChars', '90000', 'int', ''], ['photoMaxBytes', '600000', 'int', ''], ['enabledStages', 'pre_pour', 'str', ''],
+  ['photoChunkChars', '90000', 'int', ''], ['photoMaxBytes', '600000', 'int', ''], ['photoSingleMaxChars', '1200000', 'int', ''], ['photoParallel', '3', 'int', ''], ['photoThumbMaxChars', '100000', 'int', ''], ['enabledStages', 'pre_pour', 'str', ''],
   ['pollIntervalSec', '60', 'int', ''], ['driveRootFolderId', 'mock_drive_root', 'str', ''], ['pdfShareMode', 'anyone_with_link', 'str', ''],
   ['mailEnabled', 'TRUE', 'bool', ''], ['appBaseUrl', 'http://localhost:8080', 'str', ''], ['retentionYears', '10', 'int', ''],
 ].map(([key, value, type, description]) => ({ key, value, type, description }));
 
-const PUBLIC_CONFIG_KEYS = ['escalationMin1', 'escalationMin2', 'claimTakeoverMin', 'selfDeadlineHour', 'qaOpenHour', 'qaLeadMinutes', 'photoMaxEdge', 'photoJpegQuality', 'photoThumbEdge', 'photoMaxPerItem', 'photoChunkChars', 'photoMaxBytes', 'enabledStages', 'pollIntervalSec', 'pinMaxFail', 'minClientVersion'];
+const PUBLIC_CONFIG_KEYS = ['escalationMin1', 'escalationMin2', 'claimTakeoverMin', 'selfDeadlineHour', 'qaOpenHour', 'qaLeadMinutes', 'photoMaxEdge', 'photoJpegQuality', 'photoThumbEdge', 'photoMaxPerItem', 'photoChunkChars', 'photoSingleMaxChars', 'photoParallel', 'photoMaxBytes', 'enabledStages', 'pollIntervalSec', 'pinMaxFail', 'minClientVersion'];
 
 const SAMPLE_JPEG_B64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABQODxIPDRQSEBIXFRQYHjIhHhwcHj0sLiQySUBMS0dARkVQWnNiUFVtVkVGZIhlbXd7gYKBTmCNl4x9lnN+gXz/2wBDARUXFx4aHjshITt8U0ZTfHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHz/wAARCAAwAEADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCKiiugoxGI9jbS9yadPnvqc/RXQUVy/wBof3fx/wCAafV/M5+iugrDuP8Aj4l/3z/OunD4n2zatYzqU+RbkdFFFdZkFdBXP1uefD/z1T/voV5mPi3y2Xf9DpoNK5JRUfnw/wDPVP8AvoUefD/z1T/voV5vJLsdN0SVh3H/AB8S/wC+f51sefD/AM9U/wC+hWPOQZ5CDkFjg/jXoYCLUndHPXaaRHRRRXqnKFFFFABRRRQAUUUUAFFFFAH/2Q==';
 

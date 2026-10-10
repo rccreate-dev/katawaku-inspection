@@ -158,7 +158,25 @@
     return blobToB64(fullBlob).then(function (b64) { return splitBase64(b64, chunkChars || 90000); });
   }
 
+  /*
+   * アップロード方式の決定(SPEC §7.3-6)。b64 = 本体のbase64全体、cfg = bootstrap.config
+   * ・L <= photoSingleMaxChars なら必ず単発(total=1, chunks=[b64全体])
+   * ・超える / photoSingleMaxChars が無い(旧サーバー)ときだけ分割(photoChunkChars ごと。最大12)
+   * lockedTotal > 1(分割に入った後 nextIndex>0)のときは単発へ切り替えない
+   * 戻り値: { single, total, chunks, tooLarge }
+   */
+  function planUpload(b64, cfg, lockedTotal) {
+    cfg = cfg || {};
+    var singleMax = Number(cfg.photoSingleMaxChars);
+    var chunkChars = Number(cfg.photoChunkChars) > 0 ? Number(cfg.photoChunkChars) : 90000;
+    var single = !(lockedTotal > 1) && cfg.photoSingleMaxChars != null && isFinite(singleMax) && singleMax > 0 && b64.length <= singleMax;
+    if (single) return { single: true, total: 1, chunks: [b64], tooLarge: false };
+    var chunks = splitBase64(b64, chunkChars);
+    return { single: false, total: chunks.length, chunks: chunks, tooLarge: chunks.length > 12 };
+  }
+
   var api = {
+    planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,
     process: process, startCamera: startCamera, stopCamera: stopCamera, chunksOf: chunksOf, blobToB64: blobToB64, sha256Hex: sha256Hex
   };

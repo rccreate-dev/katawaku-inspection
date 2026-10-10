@@ -5,21 +5,41 @@
   var db = function () { return KW.db; };
 
   /* ---- records キャッシュ ---- */
+  /* 並行して返った古い応答で新しい内容を巻き戻さない(SPEC §8.3-6)。同じ記録は version が大きい方を残す */
+  function verOf(row) {
+    var v = -Infinity;
+    if (row && row.summary && typeof row.summary.version === 'number') v = Math.max(v, row.summary.version);
+    if (row && row.detail && typeof row.detail.version === 'number') v = Math.max(v, row.detail.version);
+    return v;
+  }
   function putSummary(s) {
-    return db().get('records', s.recordId).then(function (old) {
-      var row = { recordId: s.recordId, siteId: s.siteId, summary: s, detail: old ? old.detail : null, fetchedAt: Date.now() };
-      // マスクされた要約で既存の詳細を上書きしない。版が進んだ詳細は古い扱いにする
-      if (old && old.detail && old.summary && s.version != null && old.detail.version != null && s.version !== old.detail.version) row.detail = old.detail;
-      return db().put('records', row);
+    return db().tx(['records'], 'readwrite', function (st) {
+      return db().reqP(st.records.get(s.recordId)).then(function (old) {
+        if (old && typeof s.version === 'number' && verOf(old) > s.version) return null; // 古い応答は捨てる
+        var row = { recordId: s.recordId, siteId: s.siteId, summary: s, detail: old ? old.detail : null, fetchedAt: Date.now() };
+        // マスクされた要約で既存の詳細を上書きしない。版が進んだ詳細は古い扱いにする
+        if (old && old.detail && old.summary && s.version != null && old.detail.version != null && s.version !== old.detail.version) row.detail = old.detail;
+        return db().reqP(st.records.put(row));
+      });
     });
   }
   function putSummaries(list) {
     return list.reduce(function (p, s) { return p.then(function () { return putSummary(s); }); }, Promise.resolve())
       .then(function () { KW.bus.emit('records:changed', list.map(function (s) { return s.recordId; })); });
   }
+  /* 戻り値: 実際に残った詳細(古い応答だったときは既存の新しい詳細) */
   function putDetail(d) {
-    var row = { recordId: d.recordId, siteId: d.siteId, summary: stripDetail(d), detail: d, fetchedAt: Date.now() };
-    return db().put('records', row).then(function () { return reapUploaded(d); }).then(function () { KW.bus.emit('records:changed', [d.recordId]); });
+    var kept = d;
+    return db().tx(['records'], 'readwrite', function (st) {
+      return db().reqP(st.records.get(d.recordId)).then(function (old) {
+        if (old && typeof d.version === 'number' && verOf(old) > d.version) {
+          if (old.detail) { kept = old.detail; return null; } // 古い応答は捨てる(既存の新しい詳細を残す)
+          return null;
+        }
+        var row = { recordId: d.recordId, siteId: d.siteId, summary: stripDetail(d), detail: d, fetchedAt: Date.now() };
+        return db().reqP(st.records.put(row));
+      });
+    }).then(function () { return reapUploaded(kept); }).then(function () { KW.bus.emit('records:changed', [d.recordId]); return kept; });
   }
   /* 送信済みだが本体が残っている写真(詳細を取れなかったとき)を、詳細に載った時点で消す */
   function reapUploaded(d) {
@@ -32,6 +52,15 @@
       return Promise.all(rows.filter(function (r) { return r.uploadState === 'uploaded' && ids[r.photoId]; }).map(function (r) { return delPhotoBlob(r.photoId); }));
     });
   }
+  /* 詳細(サーバーの写真一覧)に photoId が載っているか */
+  function detailHasPhoto(d, pid) {
+    if (!d) return false;
+    var found = (d.primePhotos || []).some(function (p) { return p.photoId === pid; });
+    (d.items || []).forEach(function (it) {
+      ['self', 'qa'].forEach(function (sd) { if (((it[sd] && it[sd].photos) || []).some(function (p) { return p.photoId === pid; })) found = true; });
+    });
+    return found;
+  }
   function stripDetail(d) {
     var s = Object.assign({}, d);
     ['items', 'primePhotos', 'notes', 'events', 'stopInfo', 'signatures', 'timing', 'qaComment'].forEach(function (k) { delete s[k]; });
@@ -39,11 +68,14 @@
   }
   /* RecordSummary を受けた時: 要約を更新し、詳細があれば同名キーだけ上書き */
   function mergeSummary(s) {
-    return db().get('records', s.recordId).then(function (old) {
-      var row = old || { recordId: s.recordId, siteId: s.siteId, detail: null };
-      row.summary = s; row.siteId = s.siteId; row.fetchedAt = Date.now();
-      if (row.detail && !s.masked) row.detail = Object.assign({}, row.detail, s);
-      return db().put('records', row);
+    return db().tx(['records'], 'readwrite', function (st) {
+      return db().reqP(st.records.get(s.recordId)).then(function (old) {
+        if (old && typeof s.version === 'number' && verOf(old) > s.version) return null; // 古い応答は捨てる(§8.3-6)
+        var row = old || { recordId: s.recordId, siteId: s.siteId, detail: null };
+        row.summary = s; row.siteId = s.siteId; row.fetchedAt = Date.now();
+        if (row.detail && !s.masked) row.detail = Object.assign({}, row.detail, s);
+        return db().reqP(st.records.put(row));
+      });
     }).then(function () { KW.bus.emit('records:changed', [s.recordId]); });
   }
   function getRow(recordId) { return db().get('records', recordId); }
@@ -59,7 +91,7 @@
       return cachedP.then(function (r) { return { detail: r && r.detail, cached: true, error: r && r.detail ? null : { code: 'NETWORK' } }; });
     }
     return KW.api.call('getRecord', { recordId: recordId }).then(function (res) {
-      if (res.ok) return putDetail(res.data.record).then(function () { return { detail: res.data.record, cached: false }; });
+      if (res.ok) return putDetail(res.data.record).then(function (kept) { return { detail: kept || res.data.record, cached: false }; });
       return cachedP.then(function (r) {
         return { detail: res.network && r ? r.detail : null, cached: !!(res.network && r && r.detail), error: res.error };
       });
@@ -194,7 +226,7 @@
 
   KW.data = {
     putSummary: putSummary, putSummaries: putSummaries, putDetail: putDetail, mergeSummary: mergeSummary, stripDetail: stripDetail,
-    getRow: getRow, allSummaries: allSummaries, removeRecord: removeRecord, loadDetail: loadDetail,
+    getRow: getRow, detailHasPhoto: detailHasPhoto, allSummaries: allSummaries, removeRecord: removeRecord, loadDetail: loadDetail,
     fetchAllRecords: fetchAllRecords, syncRecords: syncRecords,
     getDraft: getDraft, putDraft: putDraft, delDraft: delDraft, allDrafts: allDrafts, draftFromDetail: draftFromDetail,
     allPhotoBlobs: allPhotoBlobs, photoBlobsFor: photoBlobsFor, putPhotoBlob: putPhotoBlob, delPhotoBlob: delPhotoBlob,

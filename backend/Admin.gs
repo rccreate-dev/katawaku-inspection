@@ -120,6 +120,7 @@ function act_adminCancelAbsence(ctx) {
 
 function act_adminGetJoinInfo(ctx) {
   adminGuard_(ctx, 'adminGetJoinInfo');
+  Repo.fresh('Sites'); // joinKey はキャッシュ経由で返さない(SPEC §2.15 の3)
   var site = Repo.get('Sites', ctx.params.siteId);
   if (!site) throw new ApiError('NOT_FOUND', '現場が見つかりません');
   return { siteId: site.siteId, joinKey: site.joinKey, joinUrl: joinUrl_(site) };
@@ -127,6 +128,7 @@ function act_adminGetJoinInfo(ctx) {
 
 function act_adminRotateJoinKey(ctx) {
   adminGuard_(ctx, 'adminRotateJoinKey');
+  Repo.fresh('Sites'); // 古い行番号・古い値で更新しない(SPEC §2.15 の3)
   var site = Repo.get('Sites', ctx.params.siteId);
   if (!site) throw new ApiError('NOT_FOUND', '現場が見つかりません');
   Repo.update('Sites', site, { joinKey: Util.randomAlnum(16), updatedAt: Util.nowIso() });

@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.3 / 作成日: 2026-10-07(最終改訂 2026-10-07) / 作成: 設計担当
+- 版: 1.5.0 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -99,11 +99,12 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | CORSプリフライトを処理できない(`doOptions` なし) | **POSTは必ず `Content-Type: text/plain;charset=utf-8`** で本文にJSON文字列を送る(単純リクエスト化)。カスタムヘッダ(`Authorization`等)を付けない。`credentials:'omit'`。トークンも本文に入れる。 |
 | `doPost` は302でリダイレクトされる | `fetch(url,{method:'POST',redirect:'follow',...})`。ブラウザが `script.googleusercontent.com` のGETにフォローする。応答は `ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON)`。 |
 | HTTPステータスを返せない | 常に200。成否は本文の `ok`。 |
-| 同時実行で書き込みが競合 | **更新系は全て `LockService.getScriptLock().waitLock(20000)` 内で実行**。取れなければ `LOCK_TIMEOUT`(再試行可)。参照系はロックしない。ロックは「冪等キー確認→権限再確認→PIN検証→更新→Events→冪等キー保存」の全体を覆う。 |
-| 1リクエストの実行時間・ペイロード | 1リクエストは通常30秒以内に完了させる。写真は **base64を9万文字ごとに分割**(§7.3)。PDF生成のみ最大120秒を許容。 |
-| CacheServiceは1値100KB・TTL最長6時間 | 写真チャンクの一時保存に使用(1チャンク≤90,000文字)。 |
+| 同時実行で書き込みが競合 | **更新系は `LockService.getScriptLock().waitLock(20000)` 内で実行**(例外は `uploadPhotoChunk` のみ。下記)。取れなければ `LOCK_TIMEOUT`(再試行可)。参照系はロックしない。ロックは「冪等キー確認→権限再確認→PIN検証→更新→Events→冪等キー保存」の全体を覆う。**`uploadPhotoChunk` の例外(版1.4)**: 重い処理(端末認証・パラメータ検証・base64デコード・JPEG/SHA-256検査・Driveへの本体とサムネの保存)は **ロックの外**で行い、ロック内は「再認証・記録の存在/状態確認・項目あたり上限確認・`Photos` 行の追記・記録の `touch`」だけに絞る(§1.6 の7、§5.4.4、§7.3)。他のactionのロック方式は変えない。 |
+| 1リクエストの実行時間・ペイロード | 1リクエストは通常30秒以内に完了させる。写真は原則 **1枚1リクエスト(単発モード。base64全体を1回で送る。上限 `photoSingleMaxChars`)**。それを超えるときだけ従来どおり **9万文字ごとに分割**(§7.3)。PDF生成のみ最大120秒を許容。 |
+| CacheServiceは1値100KB・TTL最長6時間 | 写真チャンクの一時保存に使用(**分割モードのみ**。1チャンク≤90,000文字)。単発モードはCacheServiceを使わない。参照シートのキャッシュ(§2.15)は1値100KB未満のときだけ使い、超えるときは使わず通常読み込みにフォールバックする。 |
 | 起動が遅い(コールドスタート) | クライアントのタイムアウトは通常30秒・写真チャンク60秒・PDF生成120秒。タイムアウトは再試行扱い。 |
-| 参照が遅い(行ごとのAPI呼び出し) | バックエンドは **1リクエスト内でシートを `getValues()` 一括読み**し、マスタ系(Users/Sites/Assignments/Items/Config)は `CacheService` で最大60秒キャッシュ可(更新時に破棄)。契約上は常に最新を返すこと。 |
+| 参照が遅い(行ごとのAPI呼び出し) | バックエンドは **1リクエスト内でシートを `getValues()` 一括読み**する。参照シート **`Config` / `Items` / `Sites` のみ** `CacheService`(スクリプトキャッシュ)で最大60秒キャッシュしてよい(§2.15。書込み時に破棄)。**権限判定に使うシート(`Users` / `Devices` / `Assignments` / `Memberships` / `Absences`)は絶対にキャッシュしない**(認可は常に最新のシートで判定する)。 |
+| 固定処理(認証・シート読込)が1リクエストの大半を占める(版1.5) | 本番実測: 1往復≒1.3〜2.8秒、写真1枚の1リクエスト≒6秒のうち大半はサーバー側の固定処理(端末認証・シート読込)。本文サイズは主因ではない。対処は ①写真は単発1回(§7.3) ②同時送信(§8.4) ③**1リクエスト内で同じシートを再読込しない・必要な行/列だけ読む(§2.16)** ④`Config`/`Items`/`Sites` のみ最大60秒の読み取りキャッシュ(§2.15)。性能の目標値は §12.6(手動確認)。 |
 | 認証されないGET/POSTが誰でも打てる | トークン検査をdispatcher冒頭で行う。公開actionは `ping`/`listLoginUsers`/`registerDevice` のみ。 |
 | `.gs` の構文チェック | `node --check` は拡張子 `.gs` でも動くか確認し、動かない場合 `tests/check-syntax.js` が一時コピーを `.js` にして検査する(テスト担当)。 |
 
@@ -152,6 +153,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 5. ユーザー状態: `disabled` → `USER_DISABLED`、`locked` で `me`/`logoutDevice` 以外 → `USER_LOCKED`。
 6. **参照系**: `params` の契約外キー検査(§5.4。表に無いキー → `BAD_REQUEST`)→ `authorize()`(§4.2)→実行→応答(ロックなし)。
 7. **更新系**: `params` の契約外キー検査(`BAD_REQUEST`。ロック取得前)→ スクリプトロック取得 → (a) 冪等キー検索(あれば保存済み応答を `replayed:true` で返す) → (b) `authorize()` 再評価(ロック内で最新状態)+入力検証 → (c) PIN必須なら検証(§3.4。権限・状態・入力検証に通った後) → (d) 本処理 → (e) Events追記 → (f) 冪等キー保存 → ロック解放。
+   - **例外 `uploadPhotoChunk`(版1.4。冪等キー対象外のため上の(a)(f)は無い。処理全体をロックで覆わない)**: ①契約外キー検査(`BAD_REQUEST`) → ②【ロック外】手順4・5と `authorize()`(一次判定。早期失敗のため。確定判定は⑤) → ③【ロック外】入力検証・(分割モードの中間チャンクはここでCache保存して応答し終了)・組立・デコード・JPEG/SHA-256検査・Drive保存 → ④スクリプトロック取得(取れなければ `LOCK_TIMEOUT`) → ⑤【ロック内】手順4・5 と `authorize()` を **最新のシートで再評価**(失敗ならそのエラー)→ 既存 `Photos` 行の確認 → 項目あたり上限確認 → `Photos` 追記・記録の `touch` → ロック解放 → ⑥③で作ったDriveファイルは、⑤で `Photos` 行にならなかった全経路(エラー・例外・`LOCK_TIMEOUT`・既存行ありの冪等成功)でゴミ箱へ。詳細は §5.4.4。
 8. 例外は `INTERNAL`(再試行可)。スタックトレース・内部パスを応答に含めない。
 
 ---
@@ -163,6 +165,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 - `setupSheets()`(Setup相当の関数。GASエディタから手動実行): シート作成・ヘッダ書込・全列を `@` 書式に設定・Config初期値投入・Items初期値投入(§2.6)・先頭行固定・ヘッダ保護。既存シートは破壊しない(不足列のみ追加でなく、**列不一致ならエラー終了**)。
 - 追記専用シート(**更新・削除しない**): `Events` / `Notes` / `Reports` / `Idem`(Idemのみ保守で古い行の削除可)。`Photos` は論理削除のみ(`deleted`)。
 - 直接編集してよいシート(名簿の暫定運用=A案): `Users`(行追加・`name`/`role`/`status`/`lang`/`email`/`qaQualified`/`note`のみ)、`Sites`、`Assignments`、`Items`、`Config`、`Absences`。**`pinSalt`/`pinHash`/`failedCount`/`lockedAt` と他シート(Records系・Devices・Memberships等)は手編集禁止**(権限・ロック解除はアプリ経由)。
+- **直接編集の反映遅延(版1.4)**: `Config` / `Items` / `Sites` を直接編集した内容は、アプリ(API)へ **最大60秒遅れて**反映されてよい(参照シートの読み取りキャッシュ。§2.15)。`Users` / `Assignments` / `Absences`(と `Devices` / `Memberships`)の直接編集は遅れず、次のリクエストから反映される。
 
 ### 2.1 Users(ユーザー名簿)  PK=`userId`
 
@@ -366,6 +369,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 3. **反映範囲**: 変更は **以後に新規作成される記録から** 反映される。既存記録は作成時のスナップショット(§2.6)で不変(`active` を下げても既存記録は影響なし)。
 4. **編集後の検証**: 名簿の `adminValidateRoster`(§5.4.7)と同様に責任者が管理者操作で行える Items 検証が望ましい。**現行SPECには Items の整合チェックが無い**ため、v1 は編集後に責任者が目視確認する(`itemId` の重複なし・`seq` の重複なし・`tol` があれば `measure` が `optional` 以上・`stage` が §0.2 の値・`groupKey` ごとに `groupJa/groupId` 同一・`audience`/`measure` が §0.2 の値)。自動化は **SPEC変更要望として §14.2 の10に記載**(P-36)。
 5. **インドネシア語**: 追加・変更した `textId` は暫定訳のまま使い、ネイティブ確認を行う(P-22)。
+6. **反映の遅れ(版1.4)**: アプリが `Items` をキャッシュする(§2.15)ため、編集がアプリへ届くまで最大60秒かかる(「以後に新規作成される記録から反映」の規則は変わらない)。編集後に動作を確認するときは約1分待つ。
 
 ### 2.7 Records(記録ヘッダ)  PK=`recordId`
 
@@ -533,9 +537,12 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | photoMaxEdge | `1280` | 本体の長辺px上限 |
 | photoJpegQuality | `0.72` | |
 | photoThumbEdge | `320` | サムネ長辺px |
+| photoThumbMaxChars | `100000` | サムネ `thumb`(base64)の最大文字数。超えると `PHOTO_INVALID`(§5.4.4)。**サーバー専用で公開Config(`getBootstrap.config`)には入れない**。サムネ目安(≤30KB、§7.3)の約3倍の余裕 |
 | photoMaxPerItem | `5` | 項目×side あたりの写真上限 |
-| photoChunkChars | `90000` | base64分割サイズ(文字数) |
+| photoChunkChars | `90000` | **分割モード(`total>1`)** の1チャンクあたりbase64文字数上限(4の倍数)。単発モードには適用しない。**版1.5で決定: 既定を 700000 等へ上げない(90000のまま)**。分割モードは途中チャンクを CacheService に保存し、CacheService は1値100KB(=102,400バイト)までのため(§1.4)、90000を超えるとCache保存が失敗して分割モードが壊れる。「実質常に1回で送る」は `photoSingleMaxChars` で実現する(下の行。`photoMaxBytes` のbase64長 800,000 文字 ≤ 1,200,000 なので初期設定は常に単発になり、分割は `photoMaxBytes` を大きく上げた場合と旧クライアント・旧サーバー互換の経路だけで使う)。責任者が値を変更する場合は 100KB 未満(推奨は90000以下)に保つこと |
 | photoMaxBytes | `600000` | 本体の最大バイト数 |
+| photoSingleMaxChars | `1200000` | **単発モード(`total=1`)** の `data`(base64全体)の最大文字数(4の倍数)。`photoMaxBytes`(600000)のbase64(800000文字)を十分に含む値。責任者が `photoMaxBytes` を上げるときは `ceil(photoMaxBytes/3)*4` 以上に合わせる(下回っても動作する。クライアントが分割にフォールバックするだけ)。**版1.5で整合を確認**: 既定の `photoMaxBytes=600000` → base64長は `ceil(600000/3)*4=800000` 文字 ≤ `photoSingleMaxChars=1200000`(余裕150%)。リクエスト本文は `data`+`thumb`(≤`photoThumbMaxChars` 100,000)+メタで約0.9MB以下。本文サイズは遅さの原因ではない(実測: 400KB本文でも約1.6秒)ので上限は変えない |
+| photoParallel | `3` | 1端末から同時に送ってよい写真アップロード(`uploadPhotoChunk` の行)の最大数。サーバーは `Config` の `int` 変換(`parseInt`)で整数として返す(空・非数のセルは既定値3が返る)。クライアントはその値を §8.4-0 の規則で1〜6に収める。§8.4 |
 | enabledStages | `pre_pour` | カンマ区切り。作成可能な段階 |
 | pollIntervalSec | `60` | クライアントのポーリング間隔 |
 | driveRootFolderId | (setupで作成) | |
@@ -543,6 +550,32 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | mailEnabled | `TRUE` | |
 | appBaseUrl | (要設定) | メール内リンク用 |
 | retentionYears | `10` | 保管年数(表示・運用用。自動削除はしない P-18) |
+
+### 2.15 参照シートの読み取りキャッシュ(版1.4)
+
+読み取りを速くするための契約。**認可の正しさを優先**し、キャッシュしてよいシートを限定する。
+
+1. **対象(これだけ)**: `Config` / `Items` / `Sites`。`CacheService.getScriptCache()` に、キー `ref:Config` / `ref:Items` / `ref:Sites`、TTL **最大60秒** で保存してよい(キャッシュしない実装も契約適合)。`itemsHash`(§5.4.2)はキャッシュ済みの `Items` から計算してよい。
+2. **絶対にキャッシュしない**: `Users` / `Devices` / `Assignments` / `Memberships` / `Absences`(権限判定・端末認証・ユーザー状態・担当・不在の入力)。`Records` / `RecordItems` / `Photos` / `Notes` / `Events` / `Idem` / `Invites` / `Reports` も対象外。端末認証(§1.6 の4・5)と `authorize()`(§4.2)は常に最新のシートを読む。ロック内の再確認(§5.4.4)も同じ。
+3. **`joinKey` はキャッシュ経由で照合・返却しない**: `requestJoin` / `adminGetJoinInfo` / `adminRotateJoinKey` は `Sites` を常にシートから直接読む(合言葉の失効が60秒遅れないように)。
+4. **破棄**: アプリ(API・セットアップ関数)が `Config` / `Items` / `Sites` に書き込んだら、書込み直後(ロックを解放する前)に該当キーを `remove` する。現状の該当は `adminRotateJoinKey`(`Sites.joinKey`)・`uploadPhotoChunk`(`Sites.driveFolderId` の初回記入)・`setupSheets()`/`Seed`。**実装は `Repo.gs` の書込み関数が対象シートなら自動で破棄する形にして漏れを防ぐ**。
+5. **直接編集の遅れ**: 責任者がスプレッドシートで直接編集した `Config` / `Items` / `Sites` の反映は **最大60秒遅れてよい**(運用上の周知は §2.6.2・§2 の注記)。それ以外のシートの直接編集は遅れない。
+6. **100KB超**: CacheService の1値上限(100KB=102,400バイト。UTF-8のバイト数で判定)を超える、または `put` が例外になるときは、**黙って(エラーにせず・値をログに出さず)キャッシュを使わず** 通常のシート読み込みの結果を返す。`get` の失敗・JSON解釈の失敗も同じく通常読み込みにフォールバックする。値を分割して保存することはしない。
+7. **競合の許容**: 参照シートを読んだ後、キャッシュへ書く前に別リクエストが書込み・破棄をすると、書込み前に読んだ古い値がキャッシュに残りうる。この古い値は最大60秒(TTL)で自然に消えるため **許容する**(追加の排他や世代管理は不要)。
+8. キャッシュの有無でAPIの契約(応答の形・エラーコード)は変わらない。変わりうるのは、直接編集された `Config`/`Items`/`Sites` が最大60秒古いこと(例: 直後の `getBootstrap` が古い `items`/`config` を返す、`createRecord` の項目スナップショットが古い `Items` で作られる、`Sites.status` を閉鎖(`closed`)に直接編集した直後の最大60秒間は `createRecord` が `SITE_CLOSED` にならず通りうる)だけ。これらは **許容する**。
+9. モックは常に最新を返す(キャッシュ非実装)。harness は実装してよく、実装するときは §11.4 の `keepCache`/`cacheStats` と C-CACHE を満たすこと。
+10. **TTLの上限は60秒で固定**(版1.5で確認)。5分などへ延ばすと、責任者が直接編集した `Config`/`Items`/`Sites` の反映遅れ(上記5・8)がその分だけ延びるため、延ばす場合は先に本書(2・5・8 と §2 の注記、§2.6.2、P-38)を直す。**書込み系の可変データ(`Users`/`Devices`/`Records`/`RecordItems`/`Photos`/`Assignments`/`Memberships`/`Absences`/`Notes`/`Events`/`Idem`/`Invites`/`Reports`)をリクエストをまたいでキャッシュすることは、理由を問わず禁止**(上記2の再掲)。
+
+### 2.16 1リクエスト内の読み込み最小化(版1.5。バックエンド担当向け。APIの契約・結果は変えない)
+
+固定処理時間(§1.4)を縮めるための実装規則。**応答・権限判定・エラーコード・書込み結果は、全シートを毎回全件読む素朴な実装と完全に同じ**でなければならない(契約テストは変更しない)。
+
+1. **リクエスト内メモ**: `Repo.gs` は1回の `doPost`/`doGet` の間だけ有効な「シート別の読み込み結果メモ」を持つ。同じシート(同じ範囲)を2回以上 `getValues()` してはならない(端末認証→ユーザー状態→`authorize()`→本処理で `Users`/`Assignments` 等を何度も読まない)。メモはリクエスト開始時に空にし、**リクエストをまたいで持ち越さない**(グローバル変数に残さない)。
+2. **書込みとの整合**: 同じリクエスト内でそのシートに書いたら、メモを更新するか破棄する(書込み後の読み込みは書込みを反映する)。
+3. **ロック取得後は必ず読み直す**: 更新系でスクリプトロックを取得した直後にメモを全破棄し、ロック内の冪等キー検索・`authorize()` 再評価(§1.6 の7(b))・ロック内の再認証(§5.4.4)は最新のシートから読む。ロック前に読んだ値でロック内の判定をしてはならない。
+4. **読む範囲を絞ってよい**(挙動が変わらない範囲で): 端末認証は `Devices` を全列・全行読まず、`deviceId` 列だけ読んで該当行を特定し、その1行だけ読む(`Users` も同様に `userId` で1行)。`Idem` は `clientId`(と保持期間内の行)だけを探し、`Events`・`Records`・`Photos`・`Notes` は対象の `recordId` の行だけを必要な列だけ読む。**全件走査が必要な処理(担当表の有効行判定、不在判定、一覧系、`adminValidateRoster`)は全件読んでよい**。行の探索に `TextFinder`・列だけの `getRange().getValues()` を使ってよい。
+5. 上記1〜4は **可変データのリクエストをまたぐキャッシュ(Script/Document/UserCache、PropertiesService への保存を含む)にはあたらない**。リクエストをまたぐキャッシュは §2.15 の `Config`/`Items`/`Sites` だけ。
+6. 効果の確認は §12.6(実GASで手動)。実行ログ(Apps Script の実行数・実行時間)で `ping` 以外の1リクエストあたりの固定処理が短くなっていることを見る。
 
 ---
 
@@ -792,7 +825,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - **成功応答のみ保存**。失敗(エラー)は保存しない(修正後に同じ `clientId` で再送できるようにするため。ただし同じ `clientId` を内容違いで使えない=上記)。
 - `RecordDetail` を返す `createRecord` / `claimReview` / `takeoverReview` は `responseJson` を空で保存し、再生時は現在状態から再構築する: `createRecord`=記録が存在し `ownerUserId` が同一なら成功(現在の詳細)/ `claimReview`・`takeoverReview`=現在 `claimedBy` が同一ユーザーかつ `round` 一致なら成功、そうでなければ `ALREADY_CLAIMED` か `STATE_CONFLICT`。
 - 冪等キー対象外: `registerDevice`・`adminIssueInvite`(応答に秘密が入る)・写真チャンク(下記)・参照系・本質的に冪等な更新(`setLang`,`logoutDevice`,`adminUnlockUser`,`adminSetUserStatus`,`adminRevokeDevice`,`adminCancelAbsence`)。
-- `uploadPhotoChunk` の冪等性は `(photoId, index)`: 同じチャンクの再送は上書き、完成済み `photoId` の再送(全チャンク)は成功を返す(`complete:true`、既存 `photo`)。
+- `uploadPhotoChunk` の冪等性は **`photoId` 単位**: ①`Photos` に同じ `photoId` の行が既にあれば(`deleted` の値に関わらず)新しい行・新しいDriveファイルを残さず成功(`complete:true`、既存の `photo`)を返す。同時に届いた同一 `photoId` の再送も、ロック内の再確認で1行だけになる(§5.4.4)。②分割モードの途中チャンクは `(photoId, index)` で上書き。
 - `Idem` は30日で削除。オフラインで30日を超えて滞留した outbox 行は送信も再送もせず、利用者が内容を確認して「破棄」のみできる(§8.5)。
 
 ### 5.3 エラーコード一覧(統一形式 `{ok:false,error:{code,message,data?}}`)
@@ -824,10 +857,10 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | TAKEOVER_NOT_ALLOWED | 引き継ぎ条件未達 | × | `{availableAt}` |
 | STAGE_NOT_ENABLED | 未有効の段階 | × | |
 | SITE_CLOSED | 閉鎖現場 | × | |
-| PHOTO_INVALID | 画像形式・ハッシュ・サムネ不備 | × | |
-| PHOTO_LIMIT | 項目あたり上限超過 | × | `{max}` |
+| PHOTO_INVALID | 画像形式・ハッシュ・サムネ不備、`data` 文字数が上限超過(単発=`photoSingleMaxChars`、分割=`photoChunkChars`)、base64不正、デコード後バイト数と `bytes` の不一致、既存の同一 `photoId` と内容(`recordId`/`itemId`/`side`/`sha256`)または撮影者(`takenBy`)が食い違う | × | |
+| PHOTO_LIMIT | 項目あたり上限超過(ロック内で確定判定する) | × | `{max}` |
 | PHOTO_TOO_LARGE | バイト数超過 | × | `{max}` |
-| CHUNK_MISSING | 最終チャンク時に欠けがある/キャッシュ失効 | **写真を0から再送** | `{missing:[index]}` |
+| CHUNK_MISSING | **分割モードの**最終チャンク時に欠けがある/キャッシュ失効(単発モードでは発生しない) | **写真を0から再送** | `{missing:[index]}` |
 | JOIN_KEY_INVALID | QAの合言葉が違う | × | |
 | ALREADY_MEMBER | 既に参加済み | × | |
 | JOIN_PENDING | 申請中 | × | `{membershipId}` |
@@ -905,7 +938,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 **logoutDevice** `{}` → `{ "loggedOut":true }`
 
 **getBootstrap** `{}` → `{ "user":<Me>, "sites":[<Site>], "items":[<Item>], "itemsHash":"<Itemsのactive行のSHA-256 hex>", "config":{ …公開設定 }, "serverTime" }`
-公開設定 `config` のキー(値は §2.14 の型): `escalationMin1, escalationMin2, claimTakeoverMin, selfDeadlineHour, qaOpenHour, qaLeadMinutes, photoMaxEdge, photoJpegQuality, photoThumbEdge, photoMaxPerItem, photoChunkChars, photoMaxBytes, enabledStages, pollIntervalSec, pinMaxFail, minClientVersion`。
+公開設定 `config` のキー(値は §2.14 の型。`photoParallel` のクライアント側の解釈は §8.4-0): `escalationMin1, escalationMin2, claimTakeoverMin, selfDeadlineHour, qaOpenHour, qaLeadMinutes, photoMaxEdge, photoJpegQuality, photoThumbEdge, photoMaxPerItem, photoChunkChars, photoSingleMaxChars, photoParallel, photoMaxBytes, enabledStages, pollIntervalSec, pinMaxFail, minClientVersion`。
 `sites` は見える現場のみ(職長/QA=有効担当あり、責任者=全て。`closed` も含む)。
 
 #### 5.4.3 記録
@@ -975,22 +1008,40 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 #### 5.4.4 写真(詳細は §7)
 
-**uploadPhotoChunk** Q(`clientId`なし) 
+**uploadPhotoChunk** Q(`clientId`なし。冪等性は `photoId` 単位。§5.2)
 params:
 ```json
 { "photoId":"p_1a2b3c4d5e6f7a8b", "recordId":"r_…", "itemId":"i9", "side":"self",
-  "index":0, "total":3, "mime":"image/jpeg", "data":"<base64の一部。≤photoChunkChars>",
+  "index":0, "total":1, "mime":"image/jpeg", "data":"<base64。単発=本体全体(≤photoSingleMaxChars)/分割=一部(≤photoChunkChars)>",
   "thumb":"<base64。index=0のときのみ必須>",
   "takenAt":"2026-10-07T09:58:12+09:00", "width":1280, "height":960,
   "bytes":214532, "sha256":"<本体全体のSHA-256 hex>", "stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58" }
 ```
-- メタ(`takenAt`〜`stampText`)は **全チャンクに付ける**(サーバーはステートレスに検査できる)。`total` 1〜12。チャンクは **index昇順に1つずつ**送る。
-- 途中のチャンク応答: `{ "photoId", "received":[0,1], "complete":false }`
-- 最終チャンク(`index=total-1`)で全チャンクが揃っていれば組み立て・検証・Drive保存・`Photos`行追加 → `{ "photoId", "received":[0,1,2], "complete":true, "photo":<PhotoMeta> }`。
-- 検証: 各チャンク文字数≤`photoChunkChars`、全体のデコード後バイト数=`bytes` かつ ≤`photoMaxBytes`(`PHOTO_TOO_LARGE`)、JPEG先頭マジック `FF D8`(`PHOTO_INVALID`)、SHA-256一致(`PHOTO_INVALID`)、`thumb` がJPEG(`PHOTO_INVALID`)、項目×sideの未削除写真数 < `photoMaxPerItem`(`PHOTO_LIMIT`。完成時に検査)。
+- **モード**(版1.4): **単発モード** = `total=1` かつ `index=0`。1リクエストで検証・組立・Drive保存・`Photos` 追記まで完了し `complete:true` を返す(CacheServiceを使わない)。`thumb` は同じリクエストに含める(`index===0` のとき必須、という従来の規則のまま)。**分割モード** = `total` 2〜12(後方互換。従来どおり)。`total=1` で `index≠0`、`index>=total`、`total` が1〜12の整数でない → `VALIDATION_FAILED`(`FIELD_INVALID`、`path`=`index`/`total`)。
+- クライアントの選び方は §7.3(base64長 ≤ `photoSingleMaxChars` なら必ず単発。超える場合と旧サーバーのときだけ分割)。サーバーはどちらのモードも受理する(クライアントが選ぶ)。
+- メタ(`takenAt`〜`stampText`)は **全リクエスト(全チャンク)に付ける**(サーバーはステートレスに検査できる)。分割モードのチャンクは **index昇順に1つずつ**送る。
+- **応答**: 単発 → `{ "photoId", "received":[0], "complete":true, "photo":<PhotoMeta> }`。分割の途中チャンク → `{ "photoId", "received":[0,1], "complete":false }`(`received` はCacheに存在するindex昇順)。分割の最終チャンク(`index=total-1`)で全チャンクが揃っていれば組み立て → 以降は単発と同じ → `{ "photoId", "received":[0,1,2], "complete":true, "photo":<PhotoMeta> }`。
+- **入力検証と順序**(すべて **ロックの外**。§4.2 の評価順どおり、`authorize` を通ってから行う。最初に失敗したもので返す):
+  1. `data` の文字数 > 上限(単発=`photoSingleMaxChars`、分割=`photoChunkChars`)、文字数が4の倍数でない、base64でない文字を含む → `PHOTO_INVALID`。
+  2. 申告 `bytes` > `photoMaxBytes` → `PHOTO_TOO_LARGE`(`{max}`。デコード前に判定してよい)。
+  3. (単発、または分割の最終組立後)デコード後バイト数 ≠ `bytes` → `PHOTO_INVALID`。デコード後バイト数 > `photoMaxBytes` → `PHOTO_TOO_LARGE`。
+  4. 先頭が JPEG マジック `FF D8` でない → `PHOTO_INVALID`。
+  5. SHA-256 が `sha256` と不一致 → `PHOTO_INVALID`。
+  6. `thumb` の欠落・base64不正・先頭が `FF D8` でない・文字数が `Config.photoThumbMaxChars`(既定100000)を超える → `PHOTO_INVALID`。
+  7. `takenAt` の補正(§7.5)。
+  上限超過・不正のとき **Driveには何も書かない**(検証はDrive保存より前)。
+- **ロック内の処理**(Drive保存の後。`waitLock(20000)`、取れなければ `LOCK_TIMEOUT` で、作ったDriveファイルは削除する):
+  1. **再認証**: 端末(`Devices`)・ユーザー状態・`authorize()`(記録の存在・班・`status`/`claim` の状態を含む)を、ロック外の読み取り結果を使い回さず **最新のシート**で再評価する。失敗ならそのエラー(`RECORD_LOCKED`/`NOT_CLAIMER`/`STATE_CONFLICT`/`NOT_FOUND`/`FORBIDDEN_*`/`USER_*`/`DEVICE_REVOKED`)。
+  2. **既存行の確認**: `Photos` に同じ `photoId` があれば、`recordId`/`itemId`/`side`/`sha256` の4項目が一致し、かつ既存行の `takenBy` が認証済みユーザーと同一の場合だけ **新しい行を作らず** 既存行の `PhotoMeta` で成功(`complete:true`)。1つでも一致しなければ `PHOTO_INVALID`(他ユーザーの `photoId` を指定しても成功応答は得られず、存在も示さない)。**既存行が参照するDriveファイルは絶対に削除しない**。
+  3. **上限確認**: 項目×sideの未削除写真数 ≥ `photoMaxPerItem`(`side=prime` は記録×primeあたり)→ `PHOTO_LIMIT`(`{max}`)。ロック外で事前に数えて早期に `PHOTO_LIMIT` にしてもよいが、確定判定はここ。
+  4. **`Photos` 行の追記**: `round` = ここで読んだ `Records.round`、`receivedAt` = ここでの現在時刻、`takenBy` = 認証済みユーザー。
+  5. **touch**: `Records.updatedAt` = 現在時刻、`Records.version` + 1(`saveDraft` と同じ扱い。Eventsには残さない。一覧のポーリング `since` に出すため)。
+  6. `Sites.driveFolderId` が空で、ロック外で現場フォルダを特定・作成してあれば、ここで書く(書いたら参照キャッシュの `Sites` を破棄。§2.15)。
+- **Driveファイルの後始末(孤児を作らない)**: ロック外で作った本体とサムネは、ロック内の1〜3で成功しなかった全経路(エラー応答・例外・`LOCK_TIMEOUT`・手順2の冪等成功)で、応答を返す前に `setTrashed(true)`(ゴミ箱)にする。削除の失敗は握りつぶしてよい(主処理の結果を優先。ログにファイルIDのみ)。本体の保存に成功しサムネの保存に失敗したときは `DRIVE_ERROR` とし、保存済みの本体も削除する。
+- **同一 `photoId` の並行・再送**: 同時に複数届いても `Photos` 行は1行だけ。後着は手順2で成功し、自分のDriveファイルを削除する(先着の行のファイルは残る)。完成済みの再送は、手順1(再認証)に通れば成功を返す。
+- **分割モード**: 途中チャンク(`index<total-1`)は、一次 `authorize` と文字数検査(1)のあと `CacheService`(キー `pc:{photoId}:{index}`、TTL 21600秒。サムネは `pt:{photoId}`)に保存するだけで、**ロックを取らず、シートに書かない**。最終チャンクで全index(0〜total-1)がCacheに揃っていれば連結して上の検証(1〜7)→Drive保存→ロック内の処理(1〜6)→成功後にCacheを消す(失敗時は消さなくてよい)。欠け・失効は検証の前に `CHUNK_MISSING`(`{missing}`)。クライアントは当該写真を **index 0 から再送**。
 - 権限: §4.1(`side`別)。`itemId` は `side=prime` で空、それ以外は必須(記録の項目に存在し `audience` が合うこと)。
-- 欠けがあれば `CHUNK_MISSING`(`{missing}`)。クライアントは当該写真を **index 0 から再送**。
-- エラー: `NOT_FOUND`/`FORBIDDEN_*`/`RECORD_LOCKED`/`NOT_CLAIMER`/`STATE_CONFLICT`(side=primeでqa_okでない)/`PHOTO_*`/`CHUNK_MISSING`/`DRIVE_ERROR`。
+- エラー: `NOT_FOUND`/`FORBIDDEN_*`/`RECORD_LOCKED`/`NOT_CLAIMER`/`STATE_CONFLICT`(side=primeでqa_okでない)/`VALIDATION_FAILED`(`FIELD_INVALID`)/`PHOTO_*`/`CHUNK_MISSING`(分割のみ)/`LOCK_TIMEOUT`/`DRIVE_ERROR`。
 
 **deletePhoto** ★ Q `{ "photoId" }` → `{ "photoId", "deleted":true }`(論理削除。撮影者本人・`photo.round == record.round`・そのsideが編集可能な間のみ。他ラウンドの写真は消せない)。**削除済みの写真は `NOT_FOUND`**(存在しない `photoId` と同じ扱い。権限判定より先に評価し、削除済みかどうかを他人に知らせない)。エラー: `NOT_FOUND` / `FORBIDDEN_TEAM` / `RECORD_LOCKED`。
 
@@ -1153,10 +1204,10 @@ PDF: `generateReport` `listReports`
 3. JPEG化 `quality = photoJpegQuality`(0.72)。サイズが **400,000バイトを超える**場合は品質を `0.6 → 0.5` の順に下げて再エンコード、それでも超えるなら寸法を0.85倍にして0.6から再試行(最大4回)。最終的に `photoMaxBytes`(600,000)を超えたらエラー(`err.photo_too_large`)として撮り直しを促す。
 4. サムネ: スタンプ後の画像を長辺 `photoThumbEdge`(320px)・品質0.6でJPEG化(目安≤30KB。60KBを超えたら品質を下げる)。
 5. `sha256` = `crypto.subtle.digest('SHA-256', 本体バイト列)` の16進(HTTPS/localhost必須)。
-6. 本体をbase64化し、**`photoChunkChars`(90,000文字。4の倍数)ごとに分割**(`total = ceil(長さ/90000)`、最大12)。サムネは1個のbase64文字列で `index=0` のチャンクに付ける。
-7. `uploadPhotoChunk` を **index昇順・1チャンクずつ・直列**で送る。各チャンクはタイムアウト60秒、通信失敗は同じチャンクを再送(冪等)。途中経過(`nextIndex`)はIndexedDBに保存し、アプリ再起動後も続きから再開。`CHUNK_MISSING` が返ったら `nextIndex=0` から全送信し直す。
+6. 本体をbase64化(長さ `L`)。**モードの決め方(版1.4)**: `L ≤ config.photoSingleMaxChars` なら **必ず単発**(`total=1`、`index=0`、`data`=本体全体、`thumb` を同じリクエストに入れる)。`L` がそれを超える場合、または `bootstrap` の `config` に `photoSingleMaxChars` が無い(旧サーバー)場合だけ **分割**: `photoChunkChars`(90,000文字。4の倍数)ごとに分割(`total = ceil(L/90000)`、最大12。超えるなら `err.photo_too_large`)し、サムネは1個のbase64文字列で `index=0` のチャンクに付ける。モードは **outbox行の送信直前、未送信(`nextIndex=0`)のとき** に最新の `bootstrap.config` で決め直してよい(行の `photo.total` を更新する)。分割に入った後(`nextIndex>0`)は変えない。初期設定(`photoMaxBytes=600,000`)では `L≤800,000` のため常に単発になる(版1.5: 分割の1チャンクを大きくして単発に近づける案は採らない。分割はCacheServiceの1値100KB制限のため `photoChunkChars=90000` のまま。理由は §2.14)。**この判定は `photo.js` の純関数 `planUpload(b64, cfg, lockedTotal)` → `{single:bool, total:int, chunks:string[], tooLarge:bool}` として確定(テストが直接呼ぶ)**: `cfg` は `bootstrap.config`、`lockedTotal` は分割に入った後(`nextIndex>0`)の固定 `total`(未送信なら `null`)。単発のとき `single=true,total=1,chunks=[b64]`。分割のとき `chunks` は `photoChunkChars` ごと。`total>12` なら `tooLarge=true`(`err.photo_too_large`)。
+7. 送信: **単発** = 1枚1リクエスト(タイムアウト60秒。通信失敗・タイムアウトは同じリクエスト(同じ `photoId`)をそのまま再送=冪等。サーバー側で前のリクエストがまだ処理中でも二重にならない §5.4.4)。**分割** = 従来どおり **index昇順・1チャンクずつ・直列**(各チャンクのタイムアウト60秒、通信失敗は同じチャンクを再送。途中経過 `nextIndex` はIndexedDBに保存し、アプリ再起動後も続きから再開。`CHUNK_MISSING` が返ったら `nextIndex=0` から全送信し直す)。**写真の行どうしの並行送信**は §8.4(1端末で最大 `config.photoParallel` 件)。
 - 撮影した瞬間に本体・サムネ・メタをIndexedDB `photoBlobs` に保存し、`outbox` にアップロード操作を積む(§8)。画面にはローカルのサムネを即時表示(アップロード中バッジ)。
-- サーバー: チャンクを `CacheService`(キー `pc:{photoId}:{index}`、TTL 21600秒)に保存し、サムネは `pt:{photoId}`。最終チャンクで全て揃っていれば連結→base64デコード→検証(§5.4.4)→Drive保存→`Photos` 追記→キャッシュ削除。
+- サーバー: **単発**はCacheServiceを使わず、1リクエスト内で検証→Drive保存→(ロック内で)`Photos` 追記→応答。**分割**は、チャンクを `CacheService`(キー `pc:{photoId}:{index}`、TTL 21600秒)に保存し、サムネは `pt:{photoId}`。最終チャンクで全て揃っていれば連結→base64デコード→検証(§5.4.4)→Drive保存→`Photos` 追記→キャッシュ削除。どちらも **重い処理はロックの外**(§5.4.4)。Driveの現場・階・日付フォルダの「探して無ければ作る」は、並行リクエストで同名フォルダが重複しないよう `LockService.getUserLock()` で短時間(最大10秒待ち・フォルダ特定の間だけ)直列化する。ユーザーロックが取れなくても処理は続行してよく、重複フォルダができた場合は **作成日時が最古のもの** を以後の特定に使う(写真は `driveFileId` で参照するので影響しない)。ユーザーロックを持ったまま、スクリプトロックを取らない。(推奨・契約外: 特定したフォルダIDを `CacheService` に短期保存して再探索を省いてよい。そのフォルダがゴミ箱/削除済みで書込みに失敗したら、キャッシュを捨てて1回だけ探し直す。)
 
 ### 7.4 Driveフォルダ構造
 ルート = `Config.driveRootFolderId`(`setupSheets()` が `RCCREATE 型枠検査` という名前で作成)。
@@ -1210,31 +1261,44 @@ PDF: `generateReport` `listReports`
 
 ### 8.3 outboxの操作
 - 1つのユーザー操作 = 1行。`clientId` は行の作成時に生成して **行に保存**(再送でも同じ値)。`params` は §5.4 の `params` そのもの。
-- 写真: 1枚 = 1行(`action=uploadPhotoChunk`、`params` はメタのみ、`photo.nextIndex` で進捗を保持。本体は `photoBlobs`)。チャンクごとの冪等性は `(photoId,index)`。
+- 写真: 1枚 = 1行(`action=uploadPhotoChunk`、`params` はメタのみ、`photo={photoId,total,nextIndex}` で進捗を保持。本体は `photoBlobs`)。`photo.total=1` は単発モード(§7.3。`nextIndex` は0のまま成功で行ごと削除)、`total>1` は分割モード。冪等性は `photoId`(分割の途中チャンクは `(photoId,index)`)。**写真の削除(版1.4.2)**: その写真の行が `pending`(未着手)ならローカル削除(行と `photoBlobs` の破棄)を即時に行ってよい。`sending`(送信中。分割の途中も含む)の間は **削除ボタンを無効**にし、送信完了(サーバーに載った後)に削除を受け付けて `deletePhoto` を積む(サーバーに載る途中の写真を消して孤児・不整合を作らないため)。`failed`/`blocked` の行は従来どおり S20 の「破棄」で扱う。
 - `status`: `pending`(送信待ち)/ `sending`(送信中)/ `failed`(確定失敗。ユーザー対応待ち)/ `blocked`(前段の失敗や認証待ちで保留。理由は行の `blockReason`: `auth`/`locked`/`outdated`/`record`)。成功した行は削除する。
 - **saveDraftの統合**: 同一 `recordId` の `pending`(`sending` でない)な `saveDraft` が既にあれば、新しい変更を `params.items`/`params.header` にマージして1行にまとめ、**`clientId` を新しく採番**(内容が変わるため)。`saveQaDraft` も同様。
-- 優先度: `priority=1`(`stopPour`)を先頭に。同優先度は `seq` 昇順(FIFO)。**同一 `recordId` の操作は順序を保つ**(`createRecord` → 写真/`saveDraft` の順)。
+- 優先度: `priority=1`(`stopPour`)を先頭に。同優先度は `seq` 昇順(FIFO)。**同一 `recordId` の操作の順序保証は §8.4 の「送信可否規則」** に従う(`createRecord` → 写真/`saveDraft` の順を保つ。写真の行どうしは順不同・並行可)。
 - **不変条件(統合と送信の競合。必ず守る)**:
   1. **送信直前に行を読み直す**: 送信ループは「`pending` → `sending` へ更新する」のと同じトランザクションで行を読み直し、その時点の `params`・`clientId`(統合後のもの)を送る。ループが行を選んだ後に統合が起きても、古い内容や古い `clientId` を送らない。
   2. **`sending` の行には統合しない**: 送信中(`sending`)の行へは変更をマージせず、新しい `pending` 行(新しい `clientId`)として積む。つまり**送信中に入った変更は次回の送信分に回る**。
   3. 成功時に削除するのは **送った行(`seq`)だけ**。送信中に積まれた同じ `recordId` の別行・統合済みの変更を消さない。
   4. 統合(§8.3)は読み取り→マージ→書き込みを1つのトランザクションで行い、2回の変更が互いを上書きしない(後の変更が先の変更を失わせない)。
+  5. **送信行の選択は `pending` → `sending` へ更新するのと同じトランザクション**で、その時点の行集合に対して §8.4 の送信可否規則(a)〜(d)を再評価して行う(複数の送信スロットが同じ行・同じ `photoId`・規則違反の行を同時に取らない)。選択後に他の行が追加・統合されても、選んだ行の内容は不変条件1のとおり読み直す。
+  6. 応答でローカル `records` キャッシュを更新するとき、**並行して返った古い応答で新しい応答の内容を巻き戻さない**(同じ記録のキャッシュは `version` が大きい方を残す)。
 
-### 8.4 送信ループ(同時実行は1本)
-起動時・`online`イベント・`visibilitychange`(前景化)・操作追加時・30秒ごとに実行:
-1. `pending` で `nextTryAt <= now` の最優先行を1つ取り `sending` にして送る(`deviceToken` と `clientId` を付ける)。
-2. 成功 → 行削除。応答でローカル `records` キャッシュを更新。続けて次の行へ。
-3. 通信失敗(fetch例外・タイムアウト)・`LOCK_TIMEOUT`・`INTERNAL`・`DRIVE_ERROR` → `pending` に戻し `tries+1`、`nextTryAt = now + [2,5,15,30,60,60…]秒`。連続3回通信失敗でオフライン表示(ヘッダのインジケータ)にして `online` イベント/30秒まで待つ。
+### 8.4 送信ループ(スケジューラは1本。送信中の要求は複数可)
+起動時・`online`イベント・`visibilitychange`(前景化)・操作追加時・30秒ごと・**送信中の要求が1件終わるたび**に実行する。スケジューラ(行を選ぶ処理)は同時に1本だけ動き、選んだ行の送信要求は下の規則の範囲で **同時に複数** 走ってよい。
+
+0. **並行数** `P` = サーバーが `int` として返した `bootstrap.config.photoParallel` を **クライアントが1〜6に収めた値**(6超は6)。キーが無い(旧サーバー)・`null`・0以下は `P=1`(従来どおり直列)。小数の丸めは規定しない(サーバーは整数しか返さない)。§2.14・§5.4.2 も同じ解釈。
+1. **送信可否規則**: `status=pending` かつ `nextTryAt <= now` の行を `priority` 降順 → `seq` 昇順に見て、空きがある限り、次の **(a)〜(d)をすべて満たす行** を `sending` にして送る(`deviceToken` と `clientId` を付ける)。写真の行 = `action=uploadPhotoChunk`、非写真の行 = それ以外。`stopPour` の行は (b)(c) の判定で「同じ記録の他の行」として数えず、他の行の完了も待たない(異常時の停止を最優先にする。§8.1)。
+   - (a) **非写真の行は全体で同時に1件まで**(直列)。
+   - (b) **写真の行は全体で同時に `P` 件まで**。写真の行が `backoff` 待ち(`pending` で `nextTryAt` 未到来)でも、他の写真の行を止めない。
+   - (c) **同じ `recordId` の順序保証**(`seq` の小さい行を「先行」と呼ぶ。先行の行が `pending`/`sending`/`failed`/`blocked` のいずれかで残っている間は「未完了」。成功して削除された行だけが「完了」):
+     1. **写真の行は、先行する未完了の非写真の行(`createRecord`・`saveDraft`・`saveQaDraft`・`deletePhoto`・`addNote` 等)が1件でもあるうちは送らない。**(記録が先にサーバーに作られ、`side` 別の編集可能状態になってから写真が届く)
+     2. **非写真の行は、先行する未完了の写真の行が1件でもあるうちは送らない。**(写真の行が全て完了してから `saveDraft` 等を送る。`submitRecord` はキューに入らないが同じ理由で §8.6 により、その記録の写真の行が全て完了するまで呼ばない。サーバーの提出検査 `PHOTO_REQUIRED` を通すため)
+     3. 非写真の行は、先行する未完了の非写真の行があるうちは送らない(従来のFIFO)。
+     4. 写真の行どうしに順序は無い(`seq` に関わらず同時に送ってよい)。
+   - (d) **同じ `photoId` の行は同時に1件だけ**(その `photoId` の行が `sending` なら選ばない。「再送」操作で同じ `photoId` の行が重複した場合も同じ)。
+   - (e) **失敗の影響範囲**: 写真の行が(再試行待ち・確定失敗のいずれでも)止まっても、**他の写真の行は止めない**。止まった写真の行は (c)-2 により同じ記録の **後続の非写真の行** を待たせる(確定失敗のときは下の表のとおりそれらを `blocked`)。非写真の行が確定失敗したときは従来どおり同じ記録の後続の行(写真の行を含む)を `blocked` にする。**ただし `stopPour` の行は、他の行の確定失敗(写真・非写真とも)の波及で `blocked` にしない**(異常時の停止は常に送る)。`stopPour` 自身が確定失敗したときの扱いは従来どおり(その行を `failed` にし、同一 `recordId` の後続行を `blocked`)。他の記録の行は常に続行。
+2. 成功 → その行(送った `seq` だけ)を削除。応答でローカル `records` キャッシュを更新。続けて 1 に戻って空いたスロットを埋める。
+3. 通信失敗(fetch例外・タイムアウト)・`LOCK_TIMEOUT`・`INTERNAL`・`DRIVE_ERROR` → その行だけ `pending` に戻し `tries+1`、`nextTryAt = now + [2,5,15,30,60,60…]秒`。**連続3回の通信失敗**(並行して送っている全要求を通算して数える。応答が1つでも成功したら0に戻す)でオフライン表示(ヘッダのインジケータ)にして、新しい送信を始めず `online` イベント/30秒まで待つ(送信中の要求は完了またはタイムアウトまで待つ)。
 4. 確定エラー → 下表。
 
 | エラー | 扱い |
 |---|---|
-| `UNAUTHENTICATED` / `DEVICE_REVOKED` | 全行を `blocked` にしてキュー停止、`deviceToken` を消去してS01へ。同一ユーザーで再登録できたら `pending` に戻して再開 |
+| `UNAUTHENTICATED` / `DEVICE_REVOKED` | 全行を `blocked` にしてキュー停止(送信中の要求の結果は捨てず、確定エラーなら同じ扱い)、`deviceToken` を消去してS01へ。同一ユーザーで再登録できたら `pending` に戻して再開 |
 | `USER_LOCKED` | キュー停止(`blocked`)。`me` ポーリングで `active` になったら `pending` に戻す |
 | `USER_DISABLED` | キュー停止。S01へ(再登録不可の旨を表示) |
 | `CLIENT_OUTDATED` | キュー停止(`blocked`・`blockReason='outdated'`)。更新バナーと「更新」ボタン(Service Worker更新)を表示。更新後のリロードで自動再開(§8.10) |
-| `CHUNK_MISSING` | 写真行の `nextIndex=0` に戻し即再送 |
-| `RECORD_LOCKED` / `STATE_CONFLICT` / `FORBIDDEN_*` / `NOT_FOUND` / `VALIDATION_FAILED` / `ALREADY_EXISTS` / `PHOTO_*` / `NOT_CLAIMER` / `NOT_CLAIMED` / `IDEMPOTENCY_CONFLICT` / `BAD_REQUEST` | その行を `failed` にし、同一 `recordId` の後続行を `blocked`。他の記録の行は続行。S20で内容とエラーを表示し「破棄」(行と、その行専用のローカル写真を削除し、記録をサーバーから再取得)か「再送」(原因が解消した場合)を選ばせる。**自動では破棄しない**(入力を黙って失わない) |
+| `CHUNK_MISSING` | (分割モードのみ)写真行の `nextIndex=0` に戻し即再送 |
+| `RECORD_LOCKED` / `STATE_CONFLICT` / `FORBIDDEN_*` / `NOT_FOUND` / `VALIDATION_FAILED` / `ALREADY_EXISTS` / `PHOTO_*` / `NOT_CLAIMER` / `NOT_CLAIMED` / `IDEMPOTENCY_CONFLICT` / `BAD_REQUEST` | その行を `failed` にし、**非写真の行なら** 同一 `recordId` の後続行(写真の行を含む。ただし `stopPour` の行は除く)を、**写真の行なら** 同一 `recordId` の後続の **非写真の行だけ**(`stopPour` の行は除く)を `blocked`(`blockReason='record'`)にする(他の写真の行・他の記録の行は続行)。S20で内容とエラーを表示し「破棄」(行と、その行専用のローカル写真を削除し、記録をサーバーから再取得)か「再送」(原因が解消した場合)を選ばせる。**自動では破棄しない**(入力を黙って失わない)。「破棄」「再送」で `failed` が解消したら、その行が原因で `blocked` にした行は `pending` に戻す |
 
 ### 8.5 滞留の上限
 - outboxの行が作成(端末への保存)から30日(`Idem`保持期間)を超えたら、`status=failed`・`lastError={code:'EXPIRED',message:'expired'}` にして「期限切れ」(`outbox.expired`)を表示する。`EXPIRED` は端末内だけの印で、§5.3 のAPIエラーコードではない(`err.*` 辞書には入れず `outbox.expired` を使う)。起動時・送信ループ実行時・S20表示時に `pending`/`blocked` の行を判定する。
@@ -1242,7 +1306,7 @@ PDF: `generateReport` `listReports`
 - `failed`/`blocked` が1件でもあれば、ヘッダのoutboxインジケータを警告色にし、S20へ誘導する。
 
 ### 8.6 提出前の同期保証
-`submitRecord` の前に、その `recordId` の `outbox` 行が0件であること(全て送信済み)をクライアントが確認する。残っていれば送信ループを即時実行して完了を待ち、終わるまで「提出する」ボタンを無効化し「送信中(残りN件)」を表示する。圏外ならボタン無効+`msg.offline_required`。
+`submitRecord` の前に、その `recordId` の `outbox` 行が0件であること(全て送信済み)をクライアントが確認する。**0件には `sending`(並行送信中の写真の行を含む)・`failed`・`blocked` が残っていないことを含む**。残っていれば送信ループを即時実行して完了を待ち、終わるまで「提出する」ボタンを無効化し「送信中(残りN件)」を表示する。圏外ならボタン無効+`msg.offline_required`。
 
 ### 8.7 競合処理
 | 場面 | 振る舞い |
@@ -1296,11 +1360,11 @@ PDF: `generateReport` `listReports`
 | S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
 | S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
 | S05 | `#/site/:siteId/new` | 職長 | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(v1は「打設前」固定表示)、打設予定日時(`datetime-local`、提出時必須)、再検査のとき元記録の表示 | 「作成して入力へ」→`createRecord`(Q)→S06。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
-| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目をグループ見出し付きで列挙。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
+| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目をグループ見出し付きで列挙。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
 | S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階・打設予定日時** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
 | S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5、「打設を止める」(`stopPour`)→M4、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
 | S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
-| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真)。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
+| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
 | S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
 | S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17 |
 | S13 | `#/join?site=&k=&n=` | 職長 | `requestJoin` | 「『{n}』に参加申請しますか」。承認後に有効になる旨 | 「申請する」→`requestJoin`→「承認待ち」表示。未登録端末は `pendingJoin` を保存しS01→登録後ここへ戻る。アプリ内読み取り(`BarcodeDetector`対応端末)と、URL/合言葉の貼り付け入力の両方を用意。標準カメラでQRを読んでURLを開く方法も案内(P-27) |
@@ -1410,12 +1474,12 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 ### 11.3 ロジック(§1.6のdispatcher順を同一に実装)
 - 全43 actionを実装し、権限(§4。`authorize` と同名関数)・検証(§5.3.1)・状態遷移(§6)・エラーコード/`error.data`(§5.3)を本書通りに返す。
-- **ロック**: 更新系は1本のFIFOミューテックスで直列化し、「冪等キー確認→authorize→PIN→更新→Events→Idem保存」を原子的に行う(同時claimで先着のみ成功する)。`--latency` は直列化の前に適用する(並行到着を再現)。
+- **ロック**: 更新系は1本のFIFOミューテックスで直列化し、「冪等キー確認→authorize→PIN→更新→Events→Idem保存」を原子的に行う(同時claimで先着のみ成功する)。`--latency` は直列化の前に適用する(並行到着を再現)。**例外 `uploadPhotoChunk`(版1.4)**: 認証・検証・仮想Drive保存はミューテックスの **外**、再認証〜既存行確認〜上限確認〜Photos追記〜touchだけをミューテックスの **内** で行い(§5.4.4)、ミューテックスの前後で必ずイベントループに制御を返す(`await`)こと(別リクエストが間に割り込める。`/__mock/interleave` もこの境界で適用する)。仮想Driveに作ったファイルは、ロック内で `Photos` 行にならなかった場合に削除(ゴミ箱扱い)する。
 - **冪等キー**: §5.2 通り(`replayed:true`、`IDEMPOTENCY_CONFLICT`、RecordDetail系の再構築)。
 - **PIN/トークン**: §3 通り。`pinHash`/`tokenHash` は同アルゴリズムで保持(ペッパー=`mock-pepper`)。状態ダンプ(`/__mock/state`)に `pinHash`/`pinSalt`/`tokenHash`/招待`codeHash` を出さない。
 - **時計**: すべての時刻・期限・エスカレーションはモックの仮想時計 `now()` を使う(初期値=起動時の実時刻。`/__mock/clock` で変更)。`meta.serverTime` も仮想時計。
 - **エスカレーション**: `escalationTick` を **各リクエスト処理の直前に遅延実行**し、`/__mock/tick` でも実行可。送信メールは送らず記録だけ(`/__mock/mails`)。
-- **写真**: チャンクをメモリのキャッシュ(仮想時計で6時間TTL。`/__mock/evictChunks` で全消去)に保存し、最終チャンクで §5.4.4 の検証→「仮想Drive」(メモリのMap。パスは§7.4の構造)に保存。`/__mock/drive` で一覧。`getPhotoThumbs`/`getPhoto` は保存したバイト列を `data:` URLで返す。
+- **写真**: 単発(`total=1`)はキャッシュを使わず、1リクエストで §5.4.4 の検証→「仮想Drive」(メモリのMap。パスは§7.4の構造)に保存→ロック内で Photos 追記。分割は、チャンクをメモリのキャッシュ(仮想時計で6時間TTL。`/__mock/evictChunks` で全消去)に保存し、最終チャンクで検証→仮想Driveに保存。仮想Driveの作成・削除は `lockHeld` 付きで履歴に残す(`/__mock/driveLog`)。`/__mock/drive` は **削除(ゴミ箱)されていない** ファイルの一覧。`getPhotoThumbs`/`getPhoto` は保存したバイト列を `data:` URLで返す。参照シートのキャッシュ(§2.15)はモックでは実装しなくてよい(常に最新を返すのは契約に適合する)。
 - **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status}` の行を含む、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
 - **メール**: 送らず `mails` 配列に `{to,subject,body,at}` を追記(§6.6の宛先規則通り)。
 - **Idem/Events/Notes**: 追記専用の挙動(更新・削除しない)を本物と同じに。
@@ -1431,11 +1495,14 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | `/__mock/issueDevice` | `{ "userId" }` | PIN検証なしで端末を発行し `{deviceId,deviceToken}` を返す(テストの高速化用) |
 | `/__mock/fail` | `{ "next":n, "mode":"http500|network|timeout|error", "code"?:"INTERNAL", "match"?:"action名", "after"?:true }` | 次のn件(`match` 指定時はそのactionのみ)の処理を失敗させる。`network`=接続を切断、`timeout`=応答しない(10秒)、`error`=`code` のエラー応答、`http500`=HTTP 500。**`after:true` は「処理(状態更新・冪等キー保存)を完了した後に」応答を返さず切断する**(応答喪失の再現。再送で二重実行にならないことの検証用。省略時は処理前に失敗させる) |
 | `/__mock/evictChunks` | `{}` | 写真チャンクのキャッシュを全消去(`CHUNK_MISSING` 再現) |
-| `/__mock/patch` | `{ "sheet":"Users", "key":"u_tanaka", "set":{…} }` または `{ "sheet":"Assignments", "insert":{…} }` | **スプレッドシート直接編集の再現**(Users/Sites/Assignments/Items/Config/Absences のみ可。列名・型はSCHEMA準拠で検証) |
+| `/__mock/patch` | `{ "sheet":"Users", "key":"u_tanaka", "set":{…}, "keepCache"?:true }` または `{ "sheet":"Assignments", "insert":{…}, "keepCache"?:true }` | **スプレッドシート直接編集の再現**(Users/Sites/Assignments/Items/Config/Absences/**Devices** のみ可。列名・型はSCHEMA準拠で検証。`Devices` は端末の `status` 等を `set` する用途。`tokenHash` は指定不可)。**既定では参照シートのキャッシュ(§2.15)を破棄する**(テストを決定的にするため)。`keepCache:true` のときだけ破棄せず、「直接編集がキャッシュ期限(60秒)まで反映されない」状況を再現する(harnessのみ有効。モックは無視) |
 | `/__mock/state` | `{ "sheet"?:"Records" }` | 状態ダンプ(秘密列を除く)。`sheet` 省略で全シートの行数 |
 | `/__mock/mails` | `{}` | 記録したメール一覧 |
 | `/__mock/drive` | `{}` | 仮想Driveのパス一覧 |
 | `/__mock/meta` | `{}` | `{ actions:[…], errorCodes:[…], violationRules:[…], configKeys:[…], schema:{sheet:[columns]}, itemsSeedHash }`(spec-syncテスト用) |
+| `/__mock/driveLog` | `{}` | 仮想Driveの書込履歴 `{ "log":[{ "op":"create|trash", "path", "fileId", "lockHeld":bool, "at":"dt" }] }`(reset で空に戻る)。`lockHeld` はその操作の時点で **スクリプトロック(モックは更新系ミューテックス)を保持していたか**。`/__mock/drive` は `create` から `trash` 済みを除いたもの |
+| `/__mock/interleave` | `{ "action":"uploadPhotoChunk", "next":1, "patches":[ <patch本文> ] }` | 次のn件の該当リクエストについて、**ロック外処理(Drive保存)の完了後・ロック取得の直前**に `patches` を順に適用する(別リクエストが間に割り込んだ状態の再現)。`patches` の各要素は `/__mock/patch` と同形式で、加えて `{ "sheet":"Records","key":"r_…","set":{…} }` と `{ "sheet":"Photos","insert":{…SCHEMA準拠の全必須列…} }` も許可する。許可シートは `Records`/`Photos`/`Users`/`Assignments`/`Devices`(`Devices` は `status=revoked` への変更でロック内の再認証 `DEVICE_REVOKED` を再現できる)適用でキャッシュは破棄しない |
+| `/__mock/cacheStats` | `{}` | 参照シートキャッシュ(§2.15)の状態 `{ "enabled":bool, "entries":[{ "key", "expiresAt" }], "hits":int, "misses":int, "skippedTooLarge":int }`。モックは `enabled:false` 固定(他は0/空)。harnessはCacheServiceの1値上限(100KB=102,400バイト)とTTL(仮想時計)をGASと同じに実装する |
 
 ### 11.5 シードデータ(`/__mock/reset` の既定。時刻は reset 時の `now` を基準にした相対値)
 元請アカウントは作らない(元請はPDFのみ)。値は **全てテストが前提にする確定値**。
@@ -1491,7 +1558,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 ### 12.1 テストの層と実行
 - 契約テスト(`tests/contract/*.test.js`、`node --test`、Node 22のグローバル `fetch`): 相手は `API_URL`(既定 `http://127.0.0.1:8787/api` = mock、`http://127.0.0.1:8788/api` = harness)。`/__mock/*` を使うテストは `@mock-only`(実GASではスキップ)。
-- ユニットテスト(`tests/unit/*.test.js`): フロントの純関数(`validate.js`・outboxの統合/バックオフ・`time.js`・チャンク分割・スタンプ文字列・i18n)とmock/harness共通の純関数(canonicalJSON・ハッシュ)。
+- ユニットテスト(`tests/unit/*.test.js`): フロントの純関数(`validate.js`・outboxの統合/バックオフ/送信可否規則・`time.js`・単発/分割の選択とチャンク分割・スタンプ文字列・i18n)とmock/harness共通の純関数(canonicalJSON・ハッシュ)。
 - E2E(`tests/e2e/*.spec.js`。**`playwright` 本体(`chromium` API)+ `node:test`(`node --test`)で実行し、`@playwright/test` と `playwright.config.js` は使わない**。`tests/package.json` の devDependency は `playwright` のみ。**ブラウザ未導入環境では `npx playwright install chromium` が必要**(環境メモ))。静的サーバー(`tests/helpers/static-server.js`)で `frontend/` を配り、`config.js` の `API_URL` をmock(またはharness)へ向ける。Chromium起動引数 `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`、モバイル(375×667、`isMobile`、`hasTouch`)、ロケールja-JP/id-IDの両方。**コンソールエラー・未処理例外・失敗リクエスト(想定外)があれば全テストで失敗**とする共通フィクスチャ。
 - 構文: `tests/check-syntax.js` が `backend/*.gs`(一時`.js`コピー)・`frontend/**/*.js`・`mock/**/*.js`・`tests/**/*.js` に `node --check`。
 - **SPEC同期** `tests/spec-sync.test.js`: SPEC.md から §5.5の action名・§5.3のエラーコード・§5.3.1のrule・§2.14のConfigキー・§2の全シート列名・§2.6.1の項目を抽出し、`/__mock/meta`、`backend/Schema.gs`+`Seed.gs`+`Code.gs`(vmで評価)、`frontend/i18n.js` のキー(`err.*`/`rule.*`/`ev.*`/`st.*`)と一致することを検査する(= 「実装がSPECと一致」)。
@@ -1511,6 +1578,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | スマホ幅375pxで崩れない、ja/idで欠けがない | E-07, E-08, U-I18N-01 |
 | スタンプ付き写真、NGは写真と備考必須 | C-STATE-05, C-PHOTO-*, U-PHOTO-*, E-03 |
 | コンソールエラー0、`node --check`、テスト全通過 | 共通フィクスチャ, `check-syntax.js`, `run-all.js` |
+| 写真送信の高速化(単発・並行・ロック範囲・参照キャッシュ。版1.4) | C-PHOTO-01,03,07〜12, C-CONC-04,05, C-CACHE-01,02, U-PHOTO-03, U-OUTBOX-04, E-13 |
+| 写真送信・応答時間の性能目標(版1.5。**自動テストではなく手動確認**) | §12.6(実GASで手動。`run-all.js` の対象外) |
 | 実装がSPECと一致 | `spec-sync.test.js` |
 
 ### 12.3 契約テスト(C-)
@@ -1560,6 +1629,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-CONC-01: 佐藤と鈴木が同時(`Promise.all`、`--latency` 付き)に同じ submitted 記録へ `claimReview` → ちょうど1件成功、他方 `ALREADY_CLAIMED`(`claimedBy` が成功者)。20回繰り返して常に1:1。
 - C-CONC-02(引き継ぎ): claim中の記録を、鈴木が30分未満で `takeoverReview`→`TAKEOVER_NOT_ALLOWED`(`availableAt`)。(mock-only)時計+31分→成功。責任者は即時可。claim者が不在登録中なら即時可。
 - C-CONC-03: 同一記録の `saveDraft`(同班2人)が交互に届いても項目×列の後勝ちで欠落しない。
+- C-CONC-04(ロック分離): 同一記録に対し `uploadPhotoChunk` 単発3本と `saveDraft` 1本を `Promise.all`(`--latency` 付き)→ 全て成功し、写真3行・`saveDraft` の項目が欠落せず、`Records.version` が開始値+4(更新の取りこぼしなし)。
+- C-CONC-05: (mock-only)別の記録への `claimReview` と `uploadPhotoChunk` 単発を同時に送っても双方成功し、`claimReview` の先着規則(C-CONC-01)は崩れない。
 
 **冪等**
 - C-IDEM-01: 同じ `clientId`+同内容で `submitRecord`/`submitVerdict`/`recordPrimeSign` を2回 → 2回目 `meta.replayed=true`・同一 `data`・Events の件数は1回分・`round` 不変。
@@ -1569,12 +1640,20 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-IDEM-05: (mock-only)`/__mock/fail`(`mode:"network"`,`after:true`)で応答喪失を1回起こし、同じ `clientId` で再送 → 2回目は `replayed:true` で成功し、状態・Events・Notesが二重にならない。
 
 **写真**
-- C-PHOTO-01: 3チャンクで1枚アップロード → 最終で `complete:true`+`PhotoMeta`、`getPhotoThumbs`/`getPhoto` が返る(`getPhoto` のバイト列のSHA-256が申告値と一致)。再送(全チャンク)→成功・重複行なし。
+- C-PHOTO-01(単発): `total=1,index=0`(`data`=本体全体、`thumb` 同梱)の **1回の** `uploadPhotoChunk` で `complete:true`+`received:[0]`+`PhotoMeta`、`getPhotoThumbs`/`getPhoto` が返る(`getPhoto` のバイト列のSHA-256が申告値と一致)。同じ内容の再送 → 成功・`Photos` 重複行なし・仮想Driveの有効ファイルは本体1+サムネ1のまま。`data` が `photoChunkChars`(90,000)を超える(例 400,000文字)単発も成功。**分割(後方互換)**: 3チャンク(`total=3`)でも従来どおり最終で `complete:true`、全チャンク再送も成功。`getBootstrap.config` に `photoSingleMaxChars=1200000`・`photoParallel=3` が含まれる。
 - C-PHOTO-02: 欠けチャンク→`CHUNK_MISSING`(`missing`)。(mock-only)`/__mock/evictChunks` 後の最終チャンク→`CHUNK_MISSING`→0から再送で成功。
-- C-PHOTO-03: SHA不一致/JPEGでない/サムネ欠落→`PHOTO_INVALID`、600,000バイト超→`PHOTO_TOO_LARGE`、6枚目→`PHOTO_LIMIT`。
+- C-PHOTO-03: SHA不一致/JPEGでない/サムネ欠落/`bytes` とデコード後長さの不一致→`PHOTO_INVALID`、600,000バイト超(`bytes` 申告も実長も)→`PHOTO_TOO_LARGE`、6枚目→`PHOTO_LIMIT`。**単発の上限超過**: `data` が `photoSingleMaxChars+4` 文字(有効なbase64)→ `PHOTO_INVALID` で、`Photos` に行が増えず `/__mock/driveLog` に `create` が無い。分割モードで1チャンクが `photoChunkChars` 超 → `PHOTO_INVALID`。`total=1,index=1` / `total=13` → `VALIDATION_FAILED`(`FIELD_INVALID`)。
 - C-PHOTO-04: 権限(`side` 別。職長はqa/prime不可、QAは未claimでqa不可、primeはqa_okのみ)。提出後の職長の撮影は `RECORD_LOCKED`。
 - C-PHOTO-05: `deletePhoto` は撮影者本人・同ラウンドのみ。再提出後に前ラウンドの写真は消せない。論理削除後は `PhotoMeta` に出ず提出検査の枚数にも数えない。削除済みの `photoId` への再度の `deletePhoto`(別 `clientId`)は `NOT_FOUND`。
 - C-PHOTO-06: (mock-only)未来の `takenAt` は `clockSuspect` が立つ。Driveパスが §7.4 の構造(現場/階/日付)。
+- C-PHOTO-MULTI-01(1項目に複数枚): 同じ項目×sideに別 `photoId` で `photoMaxPerItem`(5)枚まで順に(単発で)登録でき、`RecordDetail` の当該項目に5枚とも `PhotoMeta` として出る。6枚目は `PHOTO_LIMIT`(`max=5`)。1枚を `deletePhoto` すると未削除が4枚になり、再度1枚追加できる。他の項目×sideの枚数は影響を受けない。
+- C-PHOTO-07: (mock-only)単発は `/__mock/evictChunks` の影響を受けず成功する(Cache不使用)。分割は従来どおり `CHUNK_MISSING`。
+- C-PHOTO-08(並行・上限): 同じ項目×sideに4枚ある状態で、別 `photoId` の単発3枚を `Promise.all` で送る → **ちょうど1枚成功・2枚 `PHOTO_LIMIT`**(未削除5枚を超えない)。別項目の3枚の `Promise.all` は全て成功し `Photos` は3行増える。どちらも終了後、有効な仮想Drive本体ファイル数 = `Photos` の未削除行数(孤児なし。サムネも同様)。
+- C-PHOTO-09(並行再送の冪等): 同一 `photoId`・同一内容の単発を `Promise.all` で3本 → 全て `complete:true` で同じ `photo`、`Photos` は1行、有効な仮想Driveファイルは本体1+サムネ1(余分は削除済み)。**他ユーザー**(同じ記録を編集できる同班の別職長など)が、既存の `photoId` で同じ内容(`recordId/itemId/side/sha256` 一致)を送っても `PHOTO_INVALID`(`takenBy` 不一致。成功応答を得られず、`Photos` も増えない)。同一ユーザーで `sha256` だけ違う再送も `PHOTO_INVALID`。
+- C-PHOTO-10: (mock-only・`/__mock/interleave`)ロック外処理とロック取得の間に状態が変わった場合の後始末。いずれも `/__mock/driveLog` で、そのリクエストが作った本体・サムネが `create` の後に `trash` され、`/__mock/drive` に増分が無いこと:
+  a) 記録を `submitted` に変更 → `RECORD_LOCKED`。b) 同項目の `Photos` を4→5枚にする行を挿入 → `PHOTO_LIMIT`。c) 同じ `photoId`(別 `driveFileId`、同じ `recordId/itemId/side/sha256`)の `Photos` 行を挿入 → `complete:true` で挿入済みの `photo` を返す・`Photos` は1行・挿入済み行のファイルは削除されない。d) c) で `sha256` だけ違う行 → `PHOTO_INVALID`。e) 当該ユーザーの `Users.status` を `disabled` に変更 → `USER_DISABLED`。
+- C-PHOTO-11: 正常な単発・分割(最終チャンク)の Drive 書込み(`driveLog` の `create`)は全て `lockHeld=false`(重い処理はロックの外)。(harnessでは実際のスクリプトロックの保持状態、mockでは更新系ミューテックスの保持状態で判定)
+- C-PHOTO-12(touch): 写真の追加後、`listRecords`(`since`=追加前の`serverTime`の5秒前)にその記録が現れ、`RecordDetail` の `version` が1増える。`Events` は増えない。
 
 **時間ルール・通知**
 - C-TIME-01: シードの a2(40分)=`escLevel` 1、c2(70分)=2。(mock-only)時計を進めると 0→1→2。claimされた時点で凍結。
@@ -1584,6 +1663,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 **マスタ・名簿・PDF**
 - C-ITEM-01: `getBootstrap.items`=§2.6.1の有効16項目(`itemsHash` あり。無効のi17〜i49は含まれない)。(mock-only)`patch` で i48 を `active=TRUE` にしても `stage=post_demold` のため `getBootstrap.items` にも新規記録にも含まれない。(mock-only)`patch` で i17 を `active=TRUE` にすると新規記録に含まれ、既存記録の項目は変わらない(スナップショット)。`audience=qa` の項目は職長の提出検査対象外。
+- C-CACHE-01(キャッシュが権限を跨がない): 事前に `getBootstrap` などで参照キャッシュを温めた状態で、`/__mock/patch`(`keepCache:true`)により ①田中の `Users.status=disabled` → **直後の** 田中のtokenでの任意のaction(`me` 以外)が `USER_DISABLED` ②田中の s_a の `Assignments` を `active=FALSE` → **直後の** `listRecords(siteId=s_a)` が `FORBIDDEN_SITE`、`getBootstrap.sites` から s_a が消える ③佐藤の `Absences` を挿入 → **直後の** `listAssignments.absentToday=true`、鈴木が主担当の代行として `decideJoin` 可 ④`adminRevokeDevice` 直後に当該端末が `DEVICE_REVOKED` いずれも遅延が許されない。(mock/harness共通。モックは常に最新なので自明に通る)
+- C-CACHE-02: (harness-only。`/__mock/cacheStats.enabled=true` のときだけ実行)①温めた後 `Config.photoMaxPerItem` を `keepCache:true` で変更 → 直後の `getBootstrap.config.photoMaxPerItem` は旧値(`hits` が増える)、`/__mock/clock` で+61秒後は新値 ②`keepCache` 無しの `patch` は直後に新値 ③`adminRotateJoinKey` の直後に旧 `joinKey` の `requestJoin` が `JOIN_KEY_INVALID`(`Sites` 破棄+`joinKey` 照合はキャッシュを使わない) ④`Config` に1行120,000文字の `description` を持つ行を `patch` で追加し、キャッシュ値が100KB(102,400バイト)を超える状態で `getBootstrap` が正常応答・`skippedTooLarge` が増え、`Items`/`Sites` のキャッシュは影響を受けない ⑤`Sites` を `keepCache:true` で `status=closed` に変更 → +61秒後は `createRecord` が `SITE_CLOSED`(60秒以内は成功/`SITE_CLOSED` のどちらも許す=assertしない)。
 - C-ROSTER-01: `adminValidateRoster` はシードで `problems` にerrorなし。(mock-only)`patch` で `qa_sub` を外す→`SITE_NO_QA_SUB`、`qa_main==qa_sub`→`QA_MAIN_EQ_SUB`、職長のUserにQA担当→`ROLE_MISMATCH`。
 - C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
@@ -1593,8 +1674,10 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-OUTBOX-01: 同一recordIdの `saveDraft` 統合で `clientId` が新規採番され内容がマージされる。`sending` 中の行は統合せず、その間の変更は別の `pending` 行(次回送信分)になる。送信直前の再読込で、統合後の `params`・新しい `clientId` が送られる(§8.4 の不変条件)。
 - U-OUTBOX-02: 順序(同一record内FIFO・`stopPour` 優先)、バックオフ列(2,5,15,30,60,60…秒)、確定エラーで後続行が `blocked`、`CHUNK_MISSING` で `nextIndex=0`、認証エラーで全停止→同一ユーザー再登録で再開。
 - U-OUTBOX-03: 作成から30日超の行が `failed`(`lastError.code='EXPIRED'`)になり、送信ループは送らず、S20 は「破棄」のみ出す(「再送」「今すぐ送信」を出さない・呼んでも送信しない)。29日の行は通常どおり送る。
-- U-PHOTO-01: base64分割: 連結=元、各チャンク≤90,000文字かつ4の倍数、`total=ceil(len/90000)`、最大12。
+- U-OUTBOX-04(送信可否規則 §8.4。フロントは `outbox.js` に純関数 `selectSendable(rows, {now, photoParallel})`(送る行の `seq` 配列を返す。**契約として確定。テストが直接呼ぶ**)を置く。`claimSendable`・`normParallel` などの内部関数は実装の自由でSPEC外(テストは依存しない)。データ駆動 `tests/fixtures/outbox-schedule-cases.json`): ①写真の行3件(先行の非写真の行なし)で `photoParallel=3` → 3件、`=2` → 2件、`=9` → 6件を上限、設定なし/`null`/0以下 → 1件(入力は整数のみ。小数・文字列の丸めは検査しない) ②同じ記録に先行する `createRecord`(`pending`/`sending`/`failed`/`blocked`)があるうちは写真の行を選ばない(完了して行が消えたら選ぶ) ③`seq` が 写真A・写真B・`saveDraft`・写真C の順 → A,B は同時に選ばれ、`saveDraft` は A,B が両方消えるまで選ばれず(`sending` 中・`failed` でも)、C は `saveDraft` が消えるまで選ばれない ④別の記録の `saveDraft` 2件 → 同時に1件だけ ⑤別の記録の写真の行と非写真の行は同時に選べる ⑥同じ `photoId` の行が2件 → 1件だけ ⑦写真Aが `failed` でも同じ記録の写真B,Cは選ばれ続け、後続の `saveDraft` は選ばれない(確定失敗の通知で `blocked`)。非写真の行が `failed` なら同じ記録の後続の写真の行も `blocked` ⑧`stopPour` は写真の行の完了を待たず最優先で選ばれる。写真の行・非写真の行(`saveDraft` 等)が `failed` になっても、同じ記録の `pending` の `stopPour` は `blocked` にならず選ばれる(`stopPour` 自身が `failed` のときだけ後続が `blocked`) ⑨写真の行が backoff 待ちでも他の写真の行は選ばれる ⑩連続通信失敗カウントは並行する要求を通算し、成功1件でリセット(3回でオフライン)。
+- U-PHOTO-01: base64分割(分割モードに入ったときのみ): 連結=元、各チャンク≤90,000文字かつ4の倍数、`total=ceil(len/90000)`、最大12(超えたら `err.photo_too_large`)。
 - U-PHOTO-02: `stampText` 生成が §7.2 通り(工区あり/なし、JST固定、`skewMs` 補正)。圧縮の段階的再エンコード(400KB超→0.6→0.5→0.85倍)。
+- U-PHOTO-03(モード選択。対象は `planUpload`): `L ≤ photoSingleMaxChars` → `total=1`(`photoMaxBytes` 600,000 の最大 `L=800,000` も単発)。`L > photoSingleMaxChars` → 分割。`config` に `photoSingleMaxChars` が無い → 常に分割(旧サーバー互換)。送信直前(`nextIndex=0`)に config を見て決め直せるが、`nextIndex>0` では変えない。
 - U-TIME-01: JST整形が端末TZ(UTC/America/Los_Angeles/Asia/Jakarta)に依らず同一。
 - U-I18N-01: ja/idのキー集合が一致・値が空でない・コード内の `t('…')` の参照キーが全て存在・`err.*`/`rule.*`/`ev.*`/`st.*` が網羅。HTML/JSに日本語リテラルが無い(`i18n.js`・コメント除く)。
 - U-HASH-01: PINハッシュ・招待ハッシュ・`paramsHash`・`canonicalJSON` が `tests/fixtures/hash-vectors.json`(テスト担当がNodeで生成して固定)と mock・harness の双方で一致。
@@ -1613,6 +1696,21 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-10 参加: 職長がQR(URL)から参加申請→「承認待ち」→主担当QAが承認(班名入力)→職長の現場一覧に出る。旧QR(合言葉更新後)では申請できない。
 - E-11 打設停止: `approved` の記録で職長が「打設を止める」(理由)→`fix`・停止バナー・責任者のボードに表示。
 - E-12 管理: 責任者が招待コード発行(コードは1回だけ表示)・端末登録解除(解除された端末はS01へ)・不在登録・QR表示/合言葉更新。
+- E-13 写真の単発・並行送信(mockを `--latency 300` で起動): オンラインで5枚を続けて撮影(別項目)→ Playwright のリクエスト監視で ①各 `photoId` につき `uploadPhotoChunk` が **ちょうど1回**(`total=1`) ②同時に進行する `uploadPhotoChunk` の最大が 2 以上かつ `photoParallel`(3)以下 ③全て完了後にoutboxバッジ0、サーバーの `Photos` が5行・仮想Driveの有効ファイルが本体5+サムネ5。さらに写真送信中は「提出する」が無効で「送信中(残りN件)」が出て、全完了後に提出でき `PHOTO_REQUIRED` にならない(§8.6)。写真の1枚が確定失敗(`/__mock/fail` の `mode:"error",code:"PHOTO_INVALID",match:"uploadPhotoChunk"`)しても他の4枚は送られ、S20 に失敗1件が出る。
+
+### 12.6 性能の受け入れ基準(版1.5。実GASでの目標。手動確認項目)
+
+自動テストにはしない(`run-all.js`・mock・harness は対象外。通信と GAS の実行時間は環境で変わるため)。**本番相当のデプロイ(実GAS + 実スマホ)でバックエンド/フロント担当(または責任者)が手動で測り、結果を日付つきで `docs/OPERATIONS.md` の「性能確認」欄に残す**(バックエンド担当)。
+
+| # | 項目 | 目標(各3回測って中央値) | 測り方 |
+|---|---|---|---|
+| PERF-01 | `GET {API_URL}?action=ping` | 約1.5秒以内 | 2回目以降(ウォーム状態)。ブラウザの開発者ツールのネットワーク時間、または端末のクライアント側タイマー |
+| PERF-02 | 写真1枚(約300KB)の送信(`uploadPhotoChunk` 1回) | 約10秒以内(撮影確定〜サーバー応答までではなく、リクエスト送信〜応答) | `total=1` の1リクエストで完了していること(ネットワークタブで同じ `photoId` のリクエストが1回) |
+| PERF-03 | 写真10枚(各約300KB、別項目)の送信完了 | 約40秒以内(3並列=`photoParallel` 既定) | 10枚撮影してから outbox バッジが0になるまで。同時に進行するリクエストが最大3であること |
+
+- 前提: モバイル回線またはWi-Fiで通常の電波状態。GASのコールドスタート直後の1回目は除く(別途「初回は遅い」ことを許容)。
+- 目標を満たさないとき: ①ネットワークタブで同一 `photoId` の複数リクエスト(分割になっていないか)・並列数を確認 ②Apps Script の実行ログで `uploadPhotoChunk` の所要時間を確認し、§2.16(重複読込・全件読込)と §1.6 の7(`uploadPhotoChunk` のロック範囲)の実装漏れを探す ③それでも届かなければ実測値を添えて設計担当へ「SPEC変更要望」(目標値や方式の見直し)。**目標未達は不具合ではなく、原因が実装漏れか目標の見直しかを分類する**(CLAUDE.md §5 の5)。
+- 数値は目安(「約」)。10〜20%程度の超過は、再測定のうえ許容するかを責任者が判断する。
 
 ---
 
@@ -1629,7 +1727,7 @@ katawaku-inspection/
 │   ├─ Code.gs        doGet/doPost・封筒検査・dispatcher(§1.6)・エラー変換・ACTIONS表
 │   ├─ Util.gs        now()/newId(prefix)/JST整形/canonicalJSON/SHA-256/HMAC/base64/入力検査ヘルパ
 │   ├─ Schema.gs      SCHEMA(§2の全シート・列・型)・setupSheets()・setupSecrets()・setupTriggers()
-│   ├─ Repo.gs        シート読み書き(一括読み・型変換・短期キャッシュ・追記専用の保護)
+│   ├─ Repo.gs        シート読み書き(一括読み・型変換・参照シート(Config/Items/Sites)のみ60秒キャッシュ §2.15・追記専用の保護)
 │   ├─ Seed.gs        SEED_ITEMS(§2.6.1)・初期Config(§2.14)
 │   ├─ Auth.gs        registerDevice・PIN/招待・deviceToken・stepUp検証・ロック(§3)
 │   ├─ Authz.gs       authorize()・siteAccess/isAbsent/effectiveQaMain/allowedActions/escLevel/computeTiming(§4.2,§6)
@@ -1642,7 +1740,7 @@ katawaku-inspection/
 │   ├─ Notify.gs      メール・escalationTick・dailyMaintenance(§6.4,§6.6,§6.7)
 │   └─ harness/       GAS互換ハーネス(Node)
 │       ├─ server.js  vmで *.gs を読み込み、shimを注入して POST/GET /api と /__mock/*(§11.4)を port 8788 で提供
-│       └─ shims.js   SpreadsheetApp/DriveApp/LockService/CacheService/PropertiesService/Utilities/ContentService/MailApp/HtmlService/Session のインメモリ実装(`HtmlService`のPDF変換はスタブ)
+│       └─ shims.js   SpreadsheetApp/DriveApp/LockService(getScriptLock/getUserLock。`lockHeld` を `/__mock/driveLog` 用に記録)/CacheService(1値100KB制限・TTLは仮想時計)/PropertiesService/Utilities/ContentService/MailApp/HtmlService/Session のインメモリ実装(`HtmlService`のPDF変換はスタブ)
 ├─ frontend/                                    … 【フロント担当】(ビルド不要・外部CDN不使用)
 │   ├─ index.html  manifest.webmanifest  sw.js  config.js  styles.css  i18n.js
 │   ├─ icons/                                   仮アイコン(192/512px PNG)
@@ -1677,7 +1775,7 @@ katawaku-inspection/
 
 | 担当 | 作るもの | 触ってよい場所 | 完了条件(共通: CLAUDE.md §5 + 下記) |
 |---|---|---|---|
-| バックエンド | `backend/`・`docs/DEPLOY_GAS.md`・`docs/OPERATIONS.md` | `backend/`,上記docs | harness経由で契約テスト全通過。`node --check`。**全ての時刻は `Util.now()`、乱数/ID は `Util.newId()` 経由**(`new Date()`/`Math.random` を他で直接使わない。harnessが時計を差し替えるため)。権限判定は `Authz.gs` の `authorize` のみ。シークレット・PIN平文をログ/シートに残さない |
+| バックエンド | `backend/`・`docs/DEPLOY_GAS.md`・`docs/OPERATIONS.md` | `backend/`,上記docs | harness経由で契約テスト全通過。`node --check`。**全ての時刻は `Util.now()`、乱数/ID は `Util.newId()` 経由**(`new Date()`/`Math.random` を他で直接使わない。harnessが時計を差し替えるため)。権限判定は `Authz.gs` の `authorize` のみ。シークレット・PIN平文をログ/シートに残さない。**読み込みは §2.16 に従う(リクエスト内メモ・必要な行/列だけ読む。可変データはリクエストをまたいでキャッシュしない)**。性能目標 §12.6 を実GASで手動確認し結果を `docs/OPERATIONS.md` に残す |
 | フロント | `frontend/`・`docs/DEPLOY_PWA.md` | `frontend/`,上記docs | mock相手にE2E全通過。権限判定をフロントに書かない(`actions` のみ)。直書き文字列なし。375pxで崩れない |
 | モック | `mock/` | `mock/` | 契約テスト全通過。§11の全機能(`/__mock/*` 含む)。SPECとの同期テスト通過 |
 | テスト | `tests/` | `tests/` | §12の全ケースを実装。`run-all.js` で一括実行できる。失敗時は原因がどの担当かわかる出力 |
@@ -1738,6 +1836,9 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-33 | 写真のDrive権限 | 非公開(オーナーのみ)。閲覧はアプリ経由のみ |
 | P-34 | 端末上限と保持 | 1人3台まで(超過は最古を自動解除)。iOSはホーム画面追加を案内、トークン消失時は氏名+PINで再登録 |
 | P-35 | `Idem`/`Events` の保持 | Idemは30日、Eventsは削除しない |
+| P-37 | 写真送信の高速化パラメータ(版1.4。孤児ファイルの扱いは1.4.1で確定) | 単発モード上限 `photoSingleMaxChars=1,200,000`、並行数 `photoParallel=3`【確定】(実測: 1リクエストの固定処理が約6秒、サーバーは並行可、ロック直列化が律速)。Drive保存後にサーバー実行が強制終了(6分超など)した場合の孤児ファイルは救済しない(**自動掃除しない**=確定。ファイル名に `photoId` を含むので手動で特定できる)。**版1.5**: `photoChunkChars` は 90000 のまま(700000 等へは上げない。分割モードのCacheService 100KB制限のため。§2.14)。単発に寄せる効果は `photoSingleMaxChars`(≥ `photoMaxBytes` のbase64長)で実現済み |
+| P-38 | 参照シートの読み取りキャッシュ(版1.4。1.5でTTL上限60秒固定を明記) | `Config`/`Items`/`Sites` のみ最大60秒。直接編集の反映は最大60秒遅れる(§2.15。**確定**)。権限判定に使うシートはキャッシュしない |
+| P-39 | 性能の目標値と手動確認(版1.5) | ping 約1.5秒以内 / 写真1枚(約300KB)約10秒以内 / 写真10枚約40秒以内(3並列)。手動確認で自動テストにしない(§12.6)。1リクエスト内の読み込み最小化(§2.16)は設計担当の追加判断で、結果が素朴な実装と同じであることを条件に実装裁量。目標値は本番実測(1往復1.3〜2.8秒、写真1枚6秒/リクエスト)からの推定で、実機測定後に見直す可能性あり |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -1750,6 +1851,8 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 8. **P-23 氏名一覧が未認証で見える**点、**P-32 PDFリンク共有**(組織のGoogle共有ポリシー)。
 9. 現場名・管理者・職長・代行者の初期データ、インドネシア語の訳確認(P-22。i32〜i49 の訳を含む)。元資料xlsxとの項目突合(P-26)は済。
 10. **SPEC変更要望(Items検証)**: 名簿の `adminValidateRoster` と同様の、責任者向け Items 整合チェック(例 `adminValidateItems`。`itemId`/`seq` の重複・`tol` と `measure` の整合・enum値・`groupKey` ごとのグループ名一致)が無い。v1は目視確認(§2.6.2)。追加するなら action 追加(43→44)・§4.1・§5.4.7・S12 相当の画面・C-ITEM テストが必要。要否の判断を求める。
+11. **版1.4の確認(1.4.1で①②は確定済み。参考として残す)**: ①P-38 直接編集の反映が最大60秒遅れる運用(責任者への周知)で良いか ②P-37 実行強制終了時の孤児ファイルを自動掃除しない扱いで良いか ③参照キャッシュの対象に `Sites` を含めたが、`joinKey` を扱う `requestJoin`/`adminGetJoinInfo`/`adminRotateJoinKey` は `Sites` をキャッシュなしで読む(設計担当の追加判断)。
+12. **版1.5の確認**: ①性能目標(§12.6 / P-39)の数値で良いか。実機で測って乖離すれば見直す ②`Config`/`Items`/`Sites` のキャッシュTTLは60秒のまま(依頼にあった「5分まで」は採らず、直接編集の反映遅れを最大60秒に留めた)。延ばしたい場合は §2.15-10 のとおり本書を先に直す ③`photoChunkChars` を 700000 にする案は、分割モードのCache 100KB制限のため採用しなかった(§2.14)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
@@ -1767,3 +1870,8 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-07 | 1.1 | レビュー反映(決定12件。既存の列名・action名・エラーコードは変更なし)。①§5.4.3 `submitVerdict`・§5.3.1 `COMMENT_REQUIRED`・§12.3 C-STATE-06: `comment` 未指定なら `saveQaDraft` 保存済み `qaComment` を使い、両方空で `minor`/`major` なら `COMMENT_REQUIRED`。②§6.6 メール件名の `{種別}` を実装どおりの6語(提出/30分経過/60分経過/重大な不適合/打設停止/参加申請)に固定。③§5.4.4 `deletePhoto`・§4.1・§12.3 C-PHOTO-05: 削除済み写真は `NOT_FOUND`。④§5.4.3 `createRecord`・§6.2・§14.1 P-31・§12.3 C-STATE-08: `reinspectOf` の元記録が `approved` でなければ `STATE_CONFLICT`。⑤§1.6 の6・7、§4.2、§12.3 C-ENV-04: 検査順序を 認証→`BAD_REQUEST`(契約外キー)→`FORBIDDEN_ROLE`→範囲(現場→班)→状態→個別条件に明記(§4.2 の項番は1〜6から1〜7に変更)。⑥§4.1・§5.1 masked形・§5.4.3 `stopPour`・§9.2 S04/S11/M4・§12.3 C-STATE-07: 他班(`masked`)の記録から `stopPour` だけ到達可(理由必須。内容はマスクのまま、masked形の `actions` は `["stopPour"]` になり得る)。⑦§5.2・§8.5・§9.2 S20・§12.4 U-OUTBOX-03: 30日超のoutbox行は自動送信も再送もせず「破棄」のみ(`lastError.code='EXPIRED'` は端末内の印)。⑧§8.2: ユーザー切替時は `records`/`bootstrap`/`photoCache` を必ず消去、未送信があれば「送信してから切替(オンライン時のみ)」「破棄して切替」の2択、破棄の消去は `registerDevice` 成功後。⑨§12.5 E-05 の文言修正、§12.1・§13.1 の Playwright は `playwright` 本体+`node:test`(`@playwright/test`・`playwright.config.js` を使わない)。⑩§8.10: シェルは precache のみ・`SW_VERSION` 更新で更新・同一バージョン内の実行時上書きなし(ナビゲーションのみ stale-while-revalidate)、`CLIENT_OUTDATED` 時の更新ボタンと更新後の `blocked('outdated')` 自動解除(§8.2 outbox に `blockReason` を明記、§8.4)。⑪§8.3: 送信ループの不変条件(送信直前に行を読み直す/送信中の統合は次回送信分/成功時は送った行だけ削除)、§12.4 U-OUTBOX-01。⑫§9.1・§12.5 E-07: S06/S07/S08/S10/S12/S13 は読み込み中・エラー時も現場名(不明なら `siteId` でなく「現場不明」=`app.site_unknown`)、タップ領域44px以上は全操作要素(バッジ・言語ボタン・リンク含む)。 |
 | 2026-10-07 | 1.2 | 項目マスタの元Excel突合を反映(ユーザー決定8件。既存の列名・action名・エラーコードは変更なし)。①§2.6.1・§11.5・§12.3 C-ITEM-01・§12.4 U-SEED-01: SEED_ITEMS を i1〜i49 の49行に(active は i1〜i16 のみ。i32〜i49 の18項目を `active=FALSE` で追加、全項目 `audience=both`、i45=「型枠の締付け状況(固め)」`group=tie`、i48・i49=`stage=post_demold`で v1 は作成不可と明記。i4・i7・統合粒度は変更なし)。②§2.6.2 新設: 項目マスタ編集ルール(責任者のみ編集・新IDで追加+旧ID無効化・新規記録から反映・編集後検証・id訳はP-22)。③§7 冒頭: 1項目に複数枚登録可(`photoMaxPerItem`)を明記。④§14.1 P-26 更新(突合済)・P-36 追加、§14.2 の9更新・10 追加(Items検証のSPEC変更要望)。全数/抽出の列は追加しない。 |
 | 2026-10-07 | 1.3 | 最初の責任者の作成手段を追加(既存の列名・action名・エラーコードは変更なし。action数は43のまま)。①§3.6.1 新設: GASエディタ専用関数 `setupFirstLead(name, loginId?)`(責任者のみ作成・二重作成禁止・招待コード6桁/72時間・Webのactionにしない)。②§0.5: 招待コード平文をログに出さない規則の唯一の例外として、`setupFirstLead` の `Logger` 表示を明記。 |
+| 2026-10-08 | 1.4 | 写真送信の高速化(本番実測: 写真1枚≒35秒。固定処理時間とスクリプトロックによる直列化が原因)。既存の列名・action名・エラーコード・action数(43)は変更なし。①§5.4.4・§7.3・§5.2・§5.3・§1.4・§1.6: `uploadPhotoChunk` に **単発モード**(`total=1,index=0`。`data` 上限=新Config `photoSingleMaxChars`(既定1,200,000)。Cache不使用・1リクエストで検証〜Drive保存〜`Photos` 追記まで完了。`thumb` 同梱)を追加。分割(`total>1`、上限 `photoChunkChars`)は後方互換で残す。クライアントは base64長 ≤ `photoSingleMaxChars` なら必ず単発、超過または config に無い旧サーバーのときだけ分割。②§2.14・§5.4.2・§8.4・§8.3・§8.6: 新Config `photoParallel`(既定3、1〜6)。outbox は写真の行を最大 `photoParallel` 件同時送信し、順序保証を「送信可否規則」(非写真の行は直列、記録内の先行未完了の非写真の行→写真の行、写真の行→後続の非写真の行(`submitRecord` の前提 §8.6)、同一 `photoId` は1件、写真の行の失敗は他の写真の行を止めない)として明文化。③§1.4・§1.6の7・§5.4.4: `uploadPhotoChunk` のみロック範囲を縮小(認証・検証・デコード・ハッシュ・Drive保存はロック外、ロック内は再認証・状態/上限確認・`Photos` 追記・touch)。ロック内で失敗した場合と冪等成功時は先に作ったDriveファイルをゴミ箱へ。同一 `photoId` の並行再送はロック内で既存行を再確認して1行に。`PHOTO_INVALID` の意味を拡張(上限超過・`bytes` 不一致・既存 `photoId` と不整合)。④§2.15 新設・§1.4・§2・§2.6.2: `Config`/`Items`/`Sites` のみ60秒の読み取りキャッシュ可(権限判定に使うシートは不可・書込時に破棄・直接編集は最大60秒遅れ・100KB超は通常読み込みにフォールバック)。⑤§11.3・§11.4・§13.1: モックのロック範囲、`/__mock/driveLog`・`/__mock/interleave`・`/__mock/cacheStats` の追加、`/__mock/patch` の `keepCache`。⑥§12: C-PHOTO-01/03 更新、C-PHOTO-07〜12・C-CONC-04,05・C-CACHE-01,02・U-PHOTO-03・U-OUTBOX-04・E-13 を追加、§12.2 に対応行。⑦§14: P-37・P-38、§14.2 の11。 |
+| 2026-10-08 | 1.4.1 | 1.4 への実装担当の指摘への決定(既存の列名・action名・エラーコード・action数は変更なし)。①§8.4-0・§2.14・§5.4.2: `photoParallel` の解釈を統一(四捨五入して1〜6に収める。null/空/非数/0以下は1)。②§7.3・§12.4 U-PHOTO-03・U-OUTBOX-04: フロントの契約関数名を確定(`photo.js` の `planUpload(b64,cfg,lockedTotal)`→`{single,total,chunks,tooLarge}`、`outbox.js` の `selectSendable(rows,{now,photoParallel})`)。`claimSendable`/`normParallel` 等はSPEC外。③§12.3: C-PHOTO-MULTI-01(1項目に複数枚)を追加。④§5.4.4 ロック内手順2・§5.3 `PHOTO_INVALID`・§12.3 C-PHOTO-09: 既存 `photoId` の冪等成功の条件に **`takenBy` が認証済みユーザーと同一** を追加(`recordId/itemId/side/sha256` の4項目と合わせて5条件。他ユーザーの `photoId` では成功も存在も示さず `PHOTO_INVALID`)。⑤§2.15: 書込み前に読んだ古い値がキャッシュに最大60秒残る競合は許容と明記。⑥§14 P-37(孤児ファイルは自動掃除しない)・P-38(直接編集は最大60秒遅れ)を確定、§14.2 の11を更新。 |
+| 2026-10-08 | 1.4.2 | レビュー指摘への修正(既存の列名・action名・エラーコード・action数は変更なし)。①§8.4(e)・確定エラー表・§12.4 U-OUTBOX-04 ⑧: `stopPour` の行は他の行の確定失敗の波及で `blocked` にしない(`stopPour` 自身の確定失敗は従来どおり)。②§8.3・§9 S06/S10: 送信中(`sending`)の写真は削除ボタンを無効にし、送信完了後に `deletePhoto` を積む。`pending` の写真のローカル削除は即時可。③§2.14・§5.4.2・§8.4-0: `photoParallel` は「サーバーが `int` で返した値をクライアントが1〜6に収める(null/欠落/0以下は1)」に整理し、小数の四捨五入の記述を削除。U-OUTBOX-04 ①は整数入力のみ検査(丸めケースを削除)。④§2.14・§5.4.4: サーバー専用Config `photoThumbMaxChars`(既定100000。公開Configに入れない)を追加し、`thumb` が超えたら `PHOTO_INVALID`。⑤§2.15-8: `Sites.status` 閉鎖の直接編集後、最大60秒 `createRecord` が通りうることを許容と明記。 |
+| 2026-10-08 | 1.4.3 | §11.4: `/__mock/patch` の許可シートに `Devices` を追加(`tokenHash` は指定不可)。`/__mock/interleave` の許可シートを `Records`/`Photos`/`Users`/`Assignments`/`Devices` と明記(ロック内の再認証 `DEVICE_REVOKED` のテスト用)。 |
+| 2026-10-10 | 1.5.0 | 写真送信のさらなる高速化の確認と固定処理の削減(本番実測: 1往復≒1.3〜2.8秒、本文400KBでも約1.6秒、4件同時でも全体約3.2秒、写真300KBを90KB×5分割で約35秒=1回約6秒)。既存の列名・action名・エラーコード・action数(43)・Config キーは変更なし。**依頼のうち単発送信(`total=1`)、`uploadPhotoChunk` の最大3並列(`photoParallel`)、ロック範囲の縮小(Drive書込みはロック外)、`Config`/`Items`/`Sites` の60秒キャッシュは、版1.4〜1.4.3で既に記載済みのため再記述せず整合のみ確認**(本番が旧実装のまま分割送信になっている可能性が高い。実装の反映状況の確認が必要)。①§2.14: `photoChunkChars` は 90000 のまま(700000 へ上げない。分割モードは CacheService の1値100KB制限があるため。単発の上限 `photoSingleMaxChars=1200000` は `photoMaxBytes` のbase64長800,000以上で整合済みと明記)。②§2.16 新設・§1.4・§13.2: 1リクエスト内の同一シート再読込禁止(リクエスト内メモ)、ロック取得後は読み直し、端末認証などで必要な行/列だけ読む、可変データのリクエストまたぎキャッシュ禁止(結果は素朴な実装と同一)。③§2.15-10: キャッシュTTL上限を60秒固定と明記(5分は採らない)。④§12.6 新設・§12.2: 性能の受け入れ基準 PERF-01〜03(ping 約1.5秒、写真1枚約10秒、10枚約40秒・3並列)を手動確認項目として追加。⑤§7.3・§14 P-37/P-38/P-39・§14.2 の12: 整合。 |

@@ -71,6 +71,34 @@ async function setup() {
   };
 }
 
+// ---- 別ポートに遅延付きのAPIサーバーを起動する環境(E-13: `--latency 300`) ----
+// E2E_API_URL が harness(:8788)を指しているときは harness を、そうでなければ mock を起動する。
+// 戻り値の env は setup() と同じ形(baseUrl/browser/teardown)に、api(mock制御)を足したもの。
+async function setupWithLatency({ port = 8797, latencyMs = 300 } = {}) {
+  const useHarness = /:8788(\/|$)/.test(process.env.E2E_API_URL || '');
+  const script = useHarness ? path.join(__dirname, '..', '..', 'backend', 'harness', 'server.js') : path.join(__dirname, '..', '..', 'mock', 'server.js');
+  const args = [script, '--port', String(port), '--latency', String(latencyMs)];
+  const apiBase = `http://localhost:${port}`;
+  const apiUrl = `${apiBase}/api`;
+  const child = spawn(process.execPath, args, { stdio: 'ignore', env: { ...process.env, MOCK_PORT: String(port), HARNESS_PORT: String(port), MOCK_LATENCY_MS: String(latencyMs) } });
+  const up = () => new Promise((res) => { http.get(`${apiUrl}?action=ping`, (r) => { r.resume(); res(r.statusCode === 200); }).on('error', () => res(false)); });
+  for (let i = 0; i < 80 && !(await up()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(await up(), `遅延付きAPIサーバーを起動できません(${useHarness ? 'harness' : 'mock'}:${port})`);
+  const ctl = async (p, body = {}) => {
+    const r = await fetch(`${apiBase}/__mock/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(`mock/${p}: ${JSON.stringify(j.error)}`);
+    return j.data;
+  };
+  const st = await startStatic({ apiUrl });
+  const browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--no-sandbox'] });
+  return {
+    baseUrl: st.url, browser, apiUrl, kind: useHarness ? 'harness' : 'mock',
+    mock: ctl, reset: (o) => ctl('reset', o || {}), stateRows: async (sheet) => (await ctl('state', { sheet })).rows,
+    async teardown() { await browser.close(); await st.close(); child.kill(); },
+  };
+}
+
 // ---- セッション(= 1端末) ----
 // 【既知の不具合の回避(テスト側のみ。frontend/ は変更しない)】
 // frontend/js/ui/s06.js が読込時に KW.app.* を参照するが、KW.app は後から読まれる app.js で作られるため
@@ -147,4 +175,4 @@ async function settle(s, ms = 600) {
 /** 横スクロールが無いこと */
 const noHScroll = (s) => s.page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth);
 
-module.exports = { setup, newSession, login, tab, goHash, shoot, enterPin, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };
+module.exports = { setup, setupWithLatency, newSession, login, tab, goHash, shoot, enterPin, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };

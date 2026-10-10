@@ -114,7 +114,10 @@ function setupSheets() {
     }
     Repo.resetCache();
 
-    // Config 初期値(既存キーは上書きしない)
+    // Config 初期値(既存キーは上書きしない=不足キーだけ追記。版アップで増えたキーもここで補われる)
+    // 参照キャッシュ(§2.15)を使わず最新のシートで判定する
+    Repo.fresh('Config');
+    Repo.fresh('Items');
     DEFAULT_CONFIG.forEach(function (c) {
       if (!Repo.get('Config', c.key)) {
         Repo.append('Config', { key: c.key, value: c.value, type: c.type, description: c.description });

@@ -73,7 +73,7 @@ async function handleApiPost(req, res) {
   try { const o = JSON.parse(raw); if (o && typeof o.action === 'string') action = o.action; } catch { /* BAD_REQUEST は engine が返す */ }
   const f = takeFailure(action);
   if (f && !f.after) return applyFailure(f, req, res);
-  const out = engine.handle(raw, { baseUrl: baseUrlOf(req) });
+  const out = await engine.handleAsync(raw, { baseUrl: baseUrlOf(req) });
   scheduleSave();
   if (f && f.after) return applyFailure(f, req, res);
   if (REDIRECT) {

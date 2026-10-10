@@ -148,6 +148,7 @@
         if (p.local) {
           KW.outbox.forRecord(id).then(function (rs) {
             var row = rs.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
+            if (row && row.status === 'sending') return null; // 送信中は削除できない(完了後に削除)
             var tasks = [KW.data.delPhotoBlob(p.photoId)]; if (row) tasks.push(KW.outbox.remove(row.seq));
             return Promise.all(tasks);
           }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redraw(it.itemId); drawVerdict(); });
@@ -326,6 +327,7 @@
       reload();
 
       ctx.on('outbox:counts', function () {
+        C.syncDeleteButtons(el);
         if (!detail) return;
         KW.outbox.forRecord(id).then(function (rs) {
           rows = rs;

@@ -28,7 +28,7 @@ let cur = { actor: { userId: 'system', role: 'system' }, deviceId: null, clientI
 function emptyState() {
   const t = {};
   for (const s of Object.keys(SCHEMA)) t[s] = [];
-  return { t, mails: [], drive: new Map(), driveIdx: new Map(), chunks: new Map(), reports: new Map() };
+  return { t, mails: [], driveFiles: new Map(), driveLog: [], driveSeq: 0, chunks: new Map(), reports: new Map() };
 }
 const table = (s) => S.t[s];
 function blankRow(sheet) {
@@ -59,15 +59,25 @@ function cfg(key) {
 const hashPin = (salt, userId, pin) => U.hmac(PEPPER, `${salt}:${userId}:${pin}`);
 const hashInvite = (userId, code) => U.hmac(PEPPER, `invite:${userId}:${code}`);
 
+// 仮想Drive(§11.3)。ファイルは fileId で管理する(同じパスのファイルが複数あり得る=GASのDriveと同じ)。
+// 作成・ゴミ箱は lockHeld(更新系ミューテックスを保持していたか)付きで履歴に残す(/__mock/driveLog)。
+let lockHeld = false;
 function driveSave(path, buf) {
-  S.drive.set(path, buf);
-  const id = 'drv_' + U.sha256(path).slice(0, 20);
-  S.driveIdx.set(id, path);
+  S.driveSeq += 1;
+  const id = 'drv_' + U.sha256(`${path}#${S.driveSeq}`).slice(0, 20);
+  S.driveFiles.set(id, { fileId: id, path, buf, trashed: false });
+  S.driveLog.push({ op: 'create', path, fileId: id, lockHeld, at: nowDt() });
   return id;
 }
+function driveTrash(fileId) {
+  const f = S.driveFiles.get(fileId);
+  if (!f || f.trashed) return;
+  f.trashed = true;
+  S.driveLog.push({ op: 'trash', path: f.path, fileId, lockHeld, at: nowDt() });
+}
 function driveGet(fileId) {
-  const path = S.driveIdx.get(fileId);
-  return path ? S.drive.get(path) || null : null;
+  const f = S.driveFiles.get(fileId);
+  return f ? f.buf : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -659,8 +669,8 @@ function handle(raw, rc = {}) {
   }
 }
 
-function dispatch(raw, rc) {
-  // 1 封筒
+/** §1.6 の1〜2(封筒検査・契約外キー・clientId・CLIENT_OUTDATED)。 */
+function parseEnvelope(raw) {
   let req;
   try { req = JSON.parse(raw); } catch { fail('BAD_REQUEST', 'JSONを解析できません'); }
   if (!isPlainObj(req)) fail('BAD_REQUEST', '封筒が不正です');
@@ -676,13 +686,11 @@ function dispatch(raw, rc) {
   if (def.star && (typeof req.clientId !== 'string' || !/^c_[A-Za-z0-9]{16,48}$/.test(req.clientId))) fail('BAD_REQUEST', 'clientId が必要です');
   // 2 CLIENT_OUTDATED
   if (action !== 'ping' && action !== 'me' && U.cmpVersion(req.appVersion, cfg('minClientVersion')) < 0) fail('CLIENT_OUTDATED', 'アプリが古いため更新してください', { minClientVersion: cfg('minClientVersion') });
-  // 3 公開action
-  if (def.pub) {
-    if (action === 'registerDevice') cur.clientId = null;
-    const data = handlers[action]({ actor: null, params, pin: req.pin, action, baseUrl: rc.baseUrl, ctx: { params } });
-    return okRes(data);
-  }
-  // 4 端末認証
+  return { req, action, def, params };
+}
+
+/** §1.6 の4〜5(端末認証・ユーザー状態)。常に最新の Devices/Users を読む。 */
+function authDevice(req, action) {
   const token = req.deviceToken;
   if (typeof token !== 'string') fail('UNAUTHENTICATED', 'トークンがありません');
   const dot = token.indexOf('.');
@@ -691,10 +699,22 @@ function dispatch(raw, rc) {
   if (device.status === 'revoked') fail('DEVICE_REVOKED', '端末登録が解除されています');
   const actor = user(device.userId);
   if (!actor) fail('UNAUTHENTICATED', 'ユーザーがいません');
-  // 5 ユーザー状態
   if (actor.status === 'disabled') fail('USER_DISABLED', 'アカウントが停止されています');
   if (actor.status === 'locked' && action !== 'me' && action !== 'logoutDevice') fail('USER_LOCKED', 'ロック中です');
   if (!device.lastSeenAt || nowMs() - U.parseDt(device.lastSeenAt) >= 600000) device.lastSeenAt = nowDt();
+  return { device, actor };
+}
+
+function dispatch(raw, rc) {
+  const { req, action, def, params } = parseEnvelope(raw);
+  // 3 公開action
+  if (def.pub) {
+    if (action === 'registerDevice') cur.clientId = null;
+    const data = handlers[action]({ actor: null, params, pin: req.pin, action, baseUrl: rc.baseUrl, ctx: { params } });
+    return okRes(data);
+  }
+  // 4〜5 端末認証・ユーザー状態
+  const { device, actor } = authDevice(req, action);
   cur = { actor, deviceId: device.deviceId, clientId: def.star ? req.clientId : null };
   const rcx = { actor, device, params, pin: req.pin, clientId: req.clientId, action, baseUrl: rc.baseUrl };
   // 6 参照系
@@ -702,7 +722,7 @@ function dispatch(raw, rc) {
     rcx.ctx = doAuthorize(actor, action, params, rc);
     return okRes(handlers[action](rcx));
   }
-  // 7 更新系(モックは同期実行=ロック内と同義)
+  // 7 更新系(同期実行。呼び出し側 handleAsync がミューテックスで直列化する=ロック内と同義)
   let paramsHash = null;
   if (def.star) {
     paramsHash = U.sha256(U.canonicalJSON({ action, params }));
@@ -722,10 +742,92 @@ function dispatch(raw, rc) {
 }
 
 // ---------------------------------------------------------------------------
+// 非同期dispatcher(§11.3)。更新系は1本のFIFOミューテックスで直列化する。
+// uploadPhotoChunk だけは「ロック外(認証・検証・仮想Drive保存)→await→ロック内(再認証〜Photos追記〜touch)→ロック解放→await」。
+// ---------------------------------------------------------------------------
+let mutexTail = Promise.resolve();
+function withLock(fn) {
+  const run = mutexTail.then(() => {
+    lockHeld = true;
+    try { return fn(); } finally { lockHeld = false; }
+  });
+  mutexTail = run.catch(() => {});
+  return run;
+}
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+const toErrRes = (e) => {
+  if (e instanceof ApiError) return errRes(e.code, e.message, e.data);
+  console.error('[mock] INTERNAL', e && e.stack);
+  return errRes('INTERNAL', '内部エラー');
+};
+
+let interleaveQueue = []; // { action, n, patches }
+function applyInterleave(action) {
+  for (const q of interleaveQueue) {
+    if (q.action === action && q.n > 0) {
+      q.n -= 1;
+      for (const patch of q.patches) applyPatch(patch);
+      break;
+    }
+  }
+  interleaveQueue = interleaveQueue.filter((q) => q.n > 0);
+}
+
+async function handleUpload(raw, rc) {
+  escalationTick();
+  cur = { actor: { userId: 'system', role: 'system' }, deviceId: null, clientId: null };
+  let prep;
+  try {
+    // ②【ロック外】封筒検査・手順4,5・一次 authorize → ③入力検証・組立・デコード・検査・仮想Drive保存
+    const { req, action, params } = parseEnvelope(raw);
+    const { device, actor } = authDevice(req, action);
+    cur = { actor, deviceId: device.deviceId, clientId: null };
+    const rcx = { actor, device, params, pin: req.pin, action, baseUrl: rc.baseUrl };
+    rcx.ctx = doAuthorize(actor, action, params, rc);
+    prep = handlers.uploadPhotoChunk$prepare(rcx);
+    if (prep.response) return okRes(prep.response); // 分割モードの中間チャンク(ロックを取らない)
+    prep.req = req; prep.action = action; prep.params = params;
+  } catch (e) {
+    return toErrRes(e);
+  }
+  // ロック取得の前でイベントループに制御を返す(別リクエストが割り込める)
+  await tick();
+  let out; let keep = false;
+  try {
+    applyInterleave('uploadPhotoChunk');
+    out = await withLock(() => {
+      // ⑤【ロック内】手順4,5 と authorize を最新の状態で再評価
+      const { device, actor } = authDevice(prep.req, prep.action);
+      cur = { actor, deviceId: device.deviceId, clientId: null };
+      const rcx = { actor, device, params: prep.params, action: prep.action };
+      rcx.ctx = doAuthorize(actor, prep.action, prep.params, rc);
+      const r = handlers.uploadPhotoChunk$commit(rcx, prep);
+      keep = r.created;
+      return okRes(r.data);
+    });
+  } catch (e) {
+    out = toErrRes(e);
+  }
+  // ⑥ ロック解放後、Photos 行にならなかった全経路でDriveファイルをゴミ箱へ
+  if (!keep) for (const id of prep.fileIds) driveTrash(id);
+  await tick();
+  return out;
+}
+
+async function handleAsync(raw, rc = {}) {
+  let action = null;
+  try { const o = JSON.parse(raw); if (o && typeof o.action === 'string' && Object.prototype.hasOwnProperty.call(ACTIONS, o.action)) action = o.action; } catch { /* handle() が BAD_REQUEST を返す */ }
+  if (action === 'uploadPhotoChunk') return handleUpload(raw, rc);
+  if (action && ACTIONS[action].write) return withLock(() => handle(raw, rc));
+  return handle(raw, rc);
+}
+
+// ---------------------------------------------------------------------------
 // シード(§11.5)
 // ---------------------------------------------------------------------------
 function resetState(opts = {}) {
   S = emptyState();
+  interleaveQueue = [];
   if (opts.now) U.setNow(U.parseDt(opts.now)); else U.resetClock();
   cur = { actor: { userId: 'system', role: 'system' }, deviceId: null, clientId: null };
   const n = nowMs();
@@ -844,6 +946,7 @@ function resetState(opts = {}) {
   seedRecord({ key: 'c1', id: 'r_seedc10000000000', siteId: 's_c', floor: '1F', zone: '東', status: 'qa_ok', owner: 'u_sugiant', team: 'スギアント班', qa: 'u_suzuki', createdAt: n - 2 * DAY, submittedAt: n - DAY, claimedAt: n - DAY + 10 * MIN, verdict: 'ok', verdictAt: n - DAY + 30 * MIN, selfFill: okAll, qaFill: okAll });
   seedRecord({ key: 'c2', id: 'r_seedc20000000000', siteId: 's_c', floor: '2F', zone: '西', status: 'submitted', owner: 'u_sugiant', team: 'スギアント班', createdAt: n - 3 * 3600000, submittedAt: n - 70 * MIN, selfFill: okAll });
   S.t.Events.sort((a, b) => U.parseDt(a.at) - U.parseDt(b.at));
+  S.driveLog.length = 0; // シードの仮想Drive作成は履歴に残さない(reset で空に戻る)
   return nowDt();
 }
 
@@ -869,6 +972,57 @@ function coerce(col, v, sheet) {
     default: return v;
   }
 }
+// /__mock/patch の本体。interleave の patches にも使う(Records の set と Photos の insert も許可)。
+const INTERLEAVE_EXTRA = new Set(['Records', 'Photos', 'Devices']);
+const PHOTO_REQUIRED_COLS = ['photoId', 'recordId', 'side', 'round', 'takenBy', 'takenAt', 'receivedAt', 'mime', 'bytes', 'width', 'height', 'sha256', 'driveFileId', 'thumbFileId'];
+function applyPatch(b, { extra = true } = {}) {
+  const sheet = b.sheet;
+  if (!PATCHABLE.has(sheet) && !(extra && INTERLEAVE_EXTRA.has(sheet))) throw new Error('patch できないシートです');
+  const cols = SCHEMA[sheet];
+  const apply = (obj) => {
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const col = cols.find((c) => c.name === k);
+      if (!col) throw new Error(`${sheet}: 未知の列 ${k}`);
+      if (PATCH_FORBIDDEN[sheet] && PATCH_FORBIDDEN[sheet].has(k)) throw new Error(`${sheet}.${k} は手編集禁止`);
+      if (sheet === 'Config' && k === 'value') out[k] = String(v);
+      else out[k] = coerce(col, v, sheet);
+    }
+    return out;
+  };
+  if (b.insert) {
+    const o = apply(b.insert);
+    const pk = PK[sheet];
+    if (sheet === 'Photos') {
+      for (const k of PHOTO_REQUIRED_COLS) if (o[k] === undefined || o[k] === null) throw new Error(`Photos.${k} は必須`);
+      if (find('Photos', o.photoId)) throw new Error('キーが重複しています');
+      return { row: insert('Photos', Object.assign({ itemId: null, stampText: '', clockSuspect: false, deleted: false }, o)) };
+    }
+    if (sheet === 'Records') throw new Error('Records は insert できません');
+    const prefix = { Users: 'u', Sites: 's', Assignments: 'a', Absences: 'b' }[sheet];
+    if (!o[pk]) { if (!prefix) throw new Error('キーが必要'); o[pk] = U.newId(prefix); }
+    if (find(sheet, o[pk])) throw new Error('キーが重複しています');
+    const n = nowDt();
+    const defaults = {
+      Users: { status: 'invited', lang: 'ja', qaQualified: false, failedCount: 0, createdAt: n, updatedAt: n },
+      Sites: { status: 'active', joinKey: U.randStr(16), createdAt: n, updatedAt: n },
+      Assignments: { active: true, validFrom: '2026-01-01', createdBy: 'system', createdAt: n, updatedAt: n },
+      Absences: { registeredBy: 'u_lead', createdAt: n },
+      Items: { stage: 'pre_pour', audience: 'both', measure: 'none', minMeasures: 0, unit: 'mm', active: true },
+      Config: {},
+    }[sheet];
+    const row = insert(sheet, Object.assign({}, defaults, o));
+    return { row };
+  }
+  if (b.key !== undefined && b.set) {
+    const row = find(sheet, b.key);
+    if (!row) throw new Error('key が見つかりません');
+    Object.assign(row, apply(b.set));
+    if ('updatedAt' in row && !('updatedAt' in b.set)) row.updatedAt = nowDt();
+    return { row };
+  }
+  throw new Error('insert または key+set が必要');
+}
 const controls = {
   reset: (b) => {
     if (b.now !== undefined && !U.isDtInput(b.now)) throw new Error('now はISO8601');
@@ -888,47 +1042,14 @@ const controls = {
     return issueDevice(u, { label: 'mock-issued' });
   },
   evictChunks: () => { const n = S.chunks.size; S.chunks.clear(); return { evicted: n }; },
-  patch: (b) => {
-    const sheet = b.sheet;
-    if (!PATCHABLE.has(sheet)) throw new Error('patch できないシートです');
-    const cols = SCHEMA[sheet];
-    const apply = (obj, forInsert) => {
-      const out = {};
-      for (const [k, v] of Object.entries(obj)) {
-        const col = cols.find((c) => c.name === k);
-        if (!col) throw new Error(`${sheet}: 未知の列 ${k}`);
-        if (PATCH_FORBIDDEN[sheet] && PATCH_FORBIDDEN[sheet].has(k)) throw new Error(`${sheet}.${k} は手編集禁止`);
-        if (sheet === 'Config' && k === 'value') out[k] = String(v);
-        else out[k] = coerce(col, v, sheet);
-      }
-      return out;
-    };
-    if (b.insert) {
-      const o = apply(b.insert, true);
-      const pk = PK[sheet];
-      const prefix = { Users: 'u', Sites: 's', Assignments: 'a', Absences: 'b' }[sheet];
-      if (!o[pk]) { if (!prefix) throw new Error('キーが必要'); o[pk] = U.newId(prefix); }
-      if (find(sheet, o[pk])) throw new Error('キーが重複しています');
-      const n = nowDt();
-      const defaults = {
-        Users: { status: 'invited', lang: 'ja', qaQualified: false, failedCount: 0, createdAt: n, updatedAt: n },
-        Sites: { status: 'active', joinKey: U.randStr(16), createdAt: n, updatedAt: n },
-        Assignments: { active: true, validFrom: '2026-01-01', createdBy: 'system', createdAt: n, updatedAt: n },
-        Absences: { registeredBy: 'u_lead', createdAt: n },
-        Items: { stage: 'pre_pour', audience: 'both', measure: 'none', minMeasures: 0, unit: 'mm', active: true },
-        Config: {},
-      }[sheet];
-      const row = insert(sheet, Object.assign({}, defaults, o));
-      return { row };
-    }
-    if (b.key !== undefined && b.set) {
-      const row = find(sheet, b.key);
-      if (!row) throw new Error('key が見つかりません');
-      Object.assign(row, apply(b.set, false));
-      if ('updatedAt' in row && !('updatedAt' in b.set)) row.updatedAt = nowDt();
-      return { row };
-    }
-    throw new Error('insert または key+set が必要');
+  patch: (b) => applyPatch(b, { extra: false }),
+  interleave: (b) => {
+    if (b.action !== 'uploadPhotoChunk') throw new Error('action は uploadPhotoChunk のみ');
+    if (!Number.isInteger(b.next) || b.next < 1) throw new Error('next は1以上の整数');
+    if (!Array.isArray(b.patches) || !b.patches.length) throw new Error('patches は1件以上の配列');
+    for (const x of b.patches) if (!x || typeof x !== 'object' || !x.sheet) throw new Error('patches の要素に sheet が必要');
+    interleaveQueue.push({ action: b.action, n: b.next, patches: b.patches });
+    return { queued: interleaveQueue.reduce((a2, q) => a2 + q.n, 0) };
   },
   state: (b) => {
     const hidden = { Users: ['pinSalt', 'pinHash'], Devices: ['tokenHash'], Invites: ['codeHash'] };
@@ -938,7 +1059,12 @@ const controls = {
     return { sheet: b.sheet, rows };
   },
   mails: () => ({ mails: S.mails.map((m) => ({ ...m })) }),
-  drive: () => ({ paths: [...S.drive.keys()].sort(), files: [...S.drive.entries()].map(([path, buf]) => ({ path, bytes: buf.length })) }),
+  drive: () => {
+    const live = [...S.driveFiles.values()].filter((f) => !f.trashed);
+    return { paths: live.map((f) => f.path).sort(), files: live.map((f) => ({ path: f.path, fileId: f.fileId, bytes: f.buf.length })) };
+  },
+  driveLog: () => ({ log: S.driveLog.map((x) => ({ ...x })) }),
+  cacheStats: () => ({ enabled: false, entries: [], hits: 0, misses: 0, skippedTooLarge: 0 }),
   meta: () => ({
     actions: Object.keys(ACTIONS), errorCodes: ERROR_CODES, violationRules: VIOLATION_RULES,
     configKeys: CONFIG_ROWS.map((c) => c.key),
@@ -951,15 +1077,16 @@ const controls = {
 function dumpState() {
   return {
     offset: U.getOffset(), t: S.t, mails: S.mails,
-    drive: [...S.drive.entries()].map(([k, v]) => [k, v.toString('base64')]),
+    drive: [...S.driveFiles.values()].map((f) => [f.fileId, f.path, f.buf.toString('base64'), f.trashed]),
+    driveSeq: S.driveSeq,
     reports: [...S.reports.entries()].map(([k, v]) => [k, v.toString('base64')]),
   };
 }
 function loadState(d) {
   S = emptyState();
   S.t = d.t; S.mails = d.mails;
-  S.drive = new Map(d.drive.map(([k, v]) => [k, Buffer.from(v, 'base64')]));
-  for (const k of S.drive.keys()) S.driveIdx.set('drv_' + U.sha256(k).slice(0, 20), k);
+  S.driveFiles = new Map((d.drive || []).map(([fileId, path, b64, trashed]) => [fileId, { fileId, path, buf: Buffer.from(b64, 'base64'), trashed: !!trashed }]));
+  S.driveSeq = d.driveSeq || S.driveFiles.size;
   S.reports = new Map(d.reports.map(([k, v]) => [k, Buffer.from(v, 'base64')]));
   U.setOffset(d.offset);
 }
@@ -969,11 +1096,11 @@ const C = {
   user, userName, siteRow, splitCsv, effAssigns, siteAccess, visibleSiteIds, myAssign, teamOf, isAbsent, effectiveQa, leads, qaRecipients, siteQaUsers,
   recordRow, itemsOf, photosOf, photoCount, canViewDetail, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
   meView, publicItem, enabledItems, siteView, photoMeta, summaryView, detailView, noteView, membershipView, assignmentView, absenceView, reportView,
-  countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
+  countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
   ROLES_QL, ISOK: okRes,
 };
 handlers = require('./actions')(C);
 
 resetState({});
 
-module.exports = { handle, resetState, controls, dumpState, loadState, escalationTick, getReport: (name) => S.reports.get(name) || null, ApiError, API_VERSION };
+module.exports = { handle, handleAsync, resetState, controls, dumpState, loadState, escalationTick, getReport: (name) => S.reports.get(name) || null, ApiError, API_VERSION };

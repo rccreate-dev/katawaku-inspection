@@ -110,6 +110,14 @@
       h('span', { class: 'chips' }, C.statusChip(r.status), stopBtn));
   };
 
+  /* 送信状況が変わったとき、画面を作り直さずに削除ボタンの有効/無効だけ更新する */
+  C.syncDeleteButtons = function (root) {
+    var sp = KW.state.sendingPhotos || {};
+    Array.prototype.forEach.call((root || document).querySelectorAll('button.x[data-pid]'), function (b) {
+      b.disabled = !!sp[b.getAttribute('data-pid')] && !!b.closest('.thumbwrap').querySelector('.up');
+    });
+  };
+
   /* 写真ストリップ(サムネは getPhotoThumbs/キャッシュ。ローカル未送信はBlob) */
   C.photoStrip = function (photos, opts) {
     opts = opts || {};
@@ -124,7 +132,8 @@
       }, img, p.local ? h('span', { class: 'up' }, t('photo.uploading')) : null);
       var wrap = h('span', { class: 'thumbwrap' }, btn);
       if (opts.onDelete && p.canDelete !== false) {
-        wrap.appendChild(h('button', { type: 'button', class: 'x', 'aria-label': t('act.delete'), on: { click: function () { opts.onDelete(p); } } }, '×'));
+        // 送信中(sending)の写真は削除ボタンを無効にする(送信完了後に削除でき、そのとき deletePhoto を積む。SPEC §8.3)
+        wrap.appendChild(h('button', { type: 'button', class: 'x', 'data-pid': p.photoId, 'aria-label': t('act.delete'), disabled: !!(p.local && KW.state.sendingPhotos && KW.state.sendingPhotos[p.photoId]), on: { click: function () { opts.onDelete(p); } } }, '×'));
       }
       box.appendChild(wrap);
       if (p.local && p.blob) img.src = C.blobUrl(p.thumbBlob || p.blob);

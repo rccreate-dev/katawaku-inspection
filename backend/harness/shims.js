@@ -25,8 +25,15 @@ function createShims(state) {
   state.logs = [];
   state.loggerLines = [];
   state.triggers = [];
-  state.lockHeld = false;
+  state.lockHeld = false;        // スクリプトロックの保持状態
+  state.userLockHeld = false;    // ユーザーロックの保持状態
+  state.lockOrderViolation = 0;  // ユーザーロックを持ったままスクリプトロックを取った回数(0であるべき)
   state.lockWaits = 0;
+  state.beforeScriptLock = null; // スクリプトロック取得の直前に呼ぶフック(interleave 用)
+  state.driveLog = [];           // 仮想Driveの書込履歴 {op, path, fileId, lockHeld, at}
+  state.driveFail = null;        // テスト用: { createFile: n } で n 回目の createFile を例外にする
+  state.rootName = '';           // 仮想Driveのルートフォルダ名(パス表示用)
+  state.cacheStats = { hits: 0, misses: 0, skippedTooLarge: 0 };
 
   /* ---------- Blob ---------- */
   class Blob {
@@ -164,17 +171,23 @@ function createShims(state) {
     constructor(name, parent) {
       this.id = 'fo' + (++seq).toString(36) + crypto.randomBytes(4).toString('hex');
       this.name = name; this.parent = parent; this.folders = []; this.files = []; nodes.set(this.id, this);
+      this.created = state.nowMs();
     }
     getId() { return this.id; }
     getName() { return this.name; }
+    getDateCreated() { return new Date(this.created); }
     createFolder(name) { const f = new Folder(name, this); this.folders.push(f); return f; }
     getFoldersByName(name) { return iter(this.folders.filter((f) => f.name === name)); }
     getFilesByName(name) { return iter(this.files.filter((f) => f.name === name)); }
     getFiles() { return iter(this.files.slice()); }
     createFile(blobOrName, content, mime) {
+      if (state.driveFail && state.driveFail.createFile > 0 && --state.driveFail.createFile === 0) {
+        throw new Error('Service error: Drive (注入された失敗)');
+      }
       const blob = blobOrName instanceof Blob ? blobOrName : new Blob(content, mime, blobOrName);
       const f = new File(blob.getName() || blobOrName, blob, this);
       this.files.push(f);
+      state.driveLog.push({ op: 'create', path: state.driveRel(f), fileId: f.id, lockHeld: state.lockHeld, at: state.nowIso() });
       return f;
     }
     path() { return this.parent ? [...this.parent.path(), this.name] : []; }
@@ -183,13 +196,21 @@ function createShims(state) {
     constructor(name, blob, parent) {
       this.id = 'fi' + (++seq).toString(36) + crypto.randomBytes(4).toString('hex');
       this.name = name; this.blob = blob; this.parent = parent; this.sharing = null; this.trashed = false; nodes.set(this.id, this);
+      this.created = state.nowMs();
     }
     getId() { return this.id; }
     getName() { return this.name; }
     getBlob() { return new Blob(this.blob._buf, this.blob._ct, this.name); }
     getSize() { return this.blob._buf.length; }
     setSharing(access, perm) { this.sharing = { access, perm }; return this; }
-    setTrashed(t) { this.trashed = t; return this; }
+    getDateCreated() { return new Date(this.created); }
+    setTrashed(t) {
+      if (t && !this.trashed) {
+        state.driveLog.push({ op: 'trash', path: state.driveRel(this), fileId: this.id, lockHeld: state.lockHeld, at: state.nowIso() });
+      }
+      this.trashed = !!t;
+      return this;
+    }
     getUrl() {
       const p = this.parent.path();
       if (p.includes('reports')) return `${state.baseUrl}/files/reports/${encodeURIComponent(this.name)}`;
@@ -205,10 +226,15 @@ function createShims(state) {
     getFolderById(id) { const n = nodes.get(id); if (!n || !(n instanceof Folder)) throw new Error('No item with the given ID could be found'); return n; },
     getFileById(id) { const n = nodes.get(id); if (!n || !(n instanceof File)) throw new Error('No item with the given ID could be found'); return n; },
   };
+  /** ルートフォルダからの相対パス(/__mock/drive と同じ表記) */
+  state.driveRel = (f) => {
+    const p = f.parent.path(); const i = p.indexOf(state.rootName);
+    return [...p.slice(i + 1), f.name].join('/');
+  };
   state.driveListPaths = (rootName) => {
     const out = [];
     const walk = (folder) => {
-      folder.files.forEach((f) => { const p = f.parent.path(); const i = p.indexOf(rootName); out.push([...p.slice(i + 1), f.name].join('/')); });
+      folder.files.forEach((f) => { if (!f.trashed) { const p = f.parent.path(); const i = p.indexOf(rootName); out.push([...p.slice(i + 1), f.name].join('/')); } });
       folder.folders.forEach(walk);
     };
     walk(driveRoot);
@@ -228,27 +254,68 @@ function createShims(state) {
   const LockService = {
     getScriptLock() {
       return {
-        waitLock() { state.lockWaits++; if (state.lockHeld) throw new Error('Lock timeout: ロックを取得できませんでした'); state.lockHeld = true; },
+        waitLock() {
+          // interleave: ロック外処理の完了後・ロック取得の直前に別リクエストの割り込みを再現する
+          if (state.beforeScriptLock) { const f = state.beforeScriptLock; state.beforeScriptLock = null; f(); }
+          state.lockWaits++;
+          if (state.userLockHeld) state.lockOrderViolation++;
+          if (state.lockHeld) throw new Error('Lock timeout: ロックを取得できませんでした');
+          state.lockHeld = true;
+        },
         tryLock() { if (state.lockHeld) return false; state.lockHeld = true; return true; },
         releaseLock() { state.lockHeld = false; },
         hasLock() { return state.lockHeld; },
       };
     },
+    getUserLock() {
+      return {
+        waitLock() { if (state.userLockHeld) throw new Error('Lock timeout: ユーザーロックを取得できませんでした'); state.userLockHeld = true; },
+        tryLock() { if (state.userLockHeld) return false; state.userLockHeld = true; return true; },
+        releaseLock() { state.userLockHeld = false; },
+        hasLock() { return state.userLockHeld; },
+      };
+    },
   };
+  /* CacheService: 1値の上限は GAS と同じ 100KB(=102,400バイト、UTF-8)。TTL は仮想時計。最長6時間 */
+  const CACHE_MAX_BYTES = 102400;
   const cacheMap = new Map();
+  const isRef = (k) => String(k).startsWith('ref:');
   const cache = {
-    get(k) { const e = cacheMap.get(k); if (!e) return null; if (e.exp <= state.nowMs()) { cacheMap.delete(k); return null; } return e.v; },
+    get(k) {
+      const e = cacheMap.get(k);
+      if (e && e.exp <= state.nowMs()) cacheMap.delete(k);
+      const live = e && e.exp > state.nowMs() ? e : null;
+      if (isRef(k)) { if (live) state.cacheStats.hits++; else state.cacheStats.misses++; }
+      return live ? live.v : null;
+    },
     getAll(keys) { const o = {}; keys.forEach((k) => { const v = cache.get(k); if (v !== null) o[k] = v; }); return o; },
     put(k, v, ttl) {
       if (typeof v !== 'string') throw new Error('値は文字列のみ');
-      if (v.length > 100000) throw new Error('Argument too large: value');
+      if (String(k).length > 250) throw new Error('Argument too large: key');
+      if (Buffer.byteLength(v, 'utf8') > CACHE_MAX_BYTES) {
+        if (isRef(k)) state.cacheStats.skippedTooLarge++;
+        throw new Error('Argument too large: value');
+      }
       cacheMap.set(k, { v, exp: state.nowMs() + Math.min(ttl === undefined ? 600 : ttl, 21600) * 1000 });
     },
     remove(k) { cacheMap.delete(k); },
     removeAll(keys) { keys.forEach((k) => cacheMap.delete(k)); },
   };
   const CacheService = { getScriptCache: () => cache };
+  state.cacheKeyList = () => [...cacheMap.keys()];
   state.cacheClearChunks = () => { for (const k of [...cacheMap.keys()]) if (k.startsWith('pc:') || k.startsWith('pt:')) cacheMap.delete(k); };
+  /** 参照シートキャッシュ(ref:*)の一覧(期限切れを除く) */
+  state.cacheRefEntries = () => {
+    const now = state.nowMs();
+    return [...cacheMap.entries()].filter(([k, e]) => isRef(k) && e.exp > now)
+      .map(([k, e]) => ({ key: k, expiresAt: new Date(e.exp).toISOString(), _exp: e.exp }));
+  };
+  /** patch(keepCache) 用: ref:* を保存/復元(復元は「保存時点と完全に同じ」にする) */
+  state.cacheRefSnapshot = () => [...cacheMap.entries()].filter(([k]) => isRef(k)).map(([k, e]) => [k, { v: e.v, exp: e.exp }]);
+  state.cacheRefRestore = (snap) => {
+    for (const k of [...cacheMap.keys()]) if (isRef(k)) cacheMap.delete(k);
+    snap.forEach(([k, e]) => cacheMap.set(k, e));
+  };
   const propMap = new Map();
   const props = {
     getProperty: (k) => (propMap.has(k) ? propMap.get(k) : null),

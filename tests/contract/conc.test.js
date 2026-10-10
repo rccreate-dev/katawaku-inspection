@@ -1,4 +1,4 @@
-// C-CONC-01〜03: 同時操作
+// C-CONC-01〜05: 同時操作(版1.4: 写真アップロードのロック分離)
 'use strict';
 const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -98,5 +98,46 @@ describe('C-CONC 同時操作', () => {
     await t2.ok('saveDraft', { recordId, items: [{ itemId: 'i9', result: 'ng' }] });
     rec = await h.getRecord(t1, recordId);
     assert.equal(get('i9').note, 'メモ'); assert.equal(get('i9').result, 'ng');
+  });
+
+  it('C-CONC-04(ロック分離): 同一記録に uploadPhotoChunk 単発3本と saveDraft 1本を同時に送る → 全て成功。写真3行・saveDraftの項目が欠落せず、version は開始値+4', async () => {
+    const t = await h.login('u_tanaka');
+    const { recordId } = await h.createRecordFor(t, { lot: 'CC4' });
+    const v0 = (await h.getRecord(t, recordId)).version;
+    const jpeg = (n) => Buffer.concat([h.SAMPLE, Buffer.from([n, 4, 4])]);
+    const calls = [
+      h.uploadPhoto(t, { recordId, itemId: 'i4', side: 'self', buf: jpeg(1) }),
+      h.uploadPhoto(t, { recordId, itemId: 'i5', side: 'self', buf: jpeg(2) }),
+      h.uploadPhoto(t, { recordId, itemId: 'i6', side: 'self', buf: jpeg(3) }),
+      t.call('saveDraft', { recordId, items: [{ itemId: 'i1', result: 'ng', note: '同時保存', values: [] }, { itemId: 'i2', result: 'ok' }] }),
+    ];
+    const rs = await Promise.all(calls);
+    assert.ok(rs.every((r) => r.ok), JSON.stringify(rs.map((r) => r.ok || r.error)));
+    const rec = await h.getRecord(t, recordId);
+    const photos = (id) => rec.items.find((i) => i.itemId === id).self.photos.length;
+    assert.deepEqual([photos('i4'), photos('i5'), photos('i6')], [1, 1, 1], '写真3行');
+    assert.equal(rec.items.find((i) => i.itemId === 'i1').self.result, 'ng');
+    assert.equal(rec.items.find((i) => i.itemId === 'i1').self.note, '同時保存');
+    assert.equal(rec.items.find((i) => i.itemId === 'i2').self.result, 'ok');
+    assert.equal(rec.version, v0 + 4, '更新の取りこぼしなし(写真3+saveDraft1)');
+  });
+
+  h.mockOnly(it, 'C-CONC-05(mock/harness): 別の記録への claimReview と uploadPhotoChunk 単発を同時に送っても双方成功し、claimReview の先着規則は崩れない', async () => {
+    const t = await h.login('u_tanaka');
+    const sato = await h.login('u_sato');
+    const suzuki = await h.login('u_suzuki');
+    const { recordId: draftId } = await h.createRecordFor(t, { lot: 'CC5D' });
+    for (let i = 0; i < 5; i++) {
+      const { recordId } = await h.makeSubmitted(t, { siteId: 's_a', floor: '1F' });
+      const [a, b, up] = await Promise.all([
+        sato.call('claimReview', { recordId, round: 1 }),
+        suzuki.call('claimReview', { recordId, round: 1 }),
+        h.uploadPhoto(t, { recordId: draftId, itemId: 'i' + (i + 1), side: 'self', buf: Buffer.concat([h.SAMPLE, Buffer.from([i, 5, 5])]) }),
+      ]);
+      assert.equal(up.ok, true, `回${i}: 写真は成功 ${JSON.stringify(up.error)}`);
+      assert.equal([a, b].filter((r) => r.ok).length, 1, `回${i}: claim の成功はちょうど1件`);
+      const loser = [a, b].find((r) => !r.ok);
+      assert.equal(loser.error.code, 'ALREADY_CLAIMED');
+    }
   });
 });

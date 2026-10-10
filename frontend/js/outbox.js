@@ -55,6 +55,57 @@
     return ok[0] || null;
   }
 
+  /* 写真の同時送信数: 整数として受け取り1〜6に収める。欠落/null/0以下は1(SPEC §8.4-0) */
+  function normParallel(v) {
+    if (typeof v !== 'number' || !isFinite(v) || Math.floor(v) !== v || v < 1) return 1; // 欠落/null/0以下/小数/文字列は1(丸めない)
+    return Math.min(6, v);
+  }
+  function isPhotoRow(r) { return r.action === 'uploadPhotoChunk'; }
+
+  /*
+   * 送信可否規則(SPEC §8.4-1)。いま送ってよい行の seq 配列を返す純関数。
+   * rows: outboxの全行 / opts: {now, photoParallel}
+   *  (a) 非写真の行は全体で同時に1件 (b) 写真の行は全体で同時に P 件
+   *  (c) 同じ recordId では、写真の行は先行する未完了の非写真の行があるうちは送らない。
+   *      非写真の行は先行する未完了の行(写真・非写真とも)があるうちは送らない。stopPour は他の行の判定に数えず、他の行も待たない
+   *  (d) 同じ photoId は同時に1件
+   * 未完了 = rows に残っている行(pending/sending/failed/blocked)。成功した行は削除済みでここに無い
+   */
+  function selectSendable(rows, opts) {
+    opts = opts || {};
+    var now = opts.now != null ? opts.now : Date.now();
+    var P = normParallel(opts.photoParallel);
+    var photoActive = 0, nonPhotoActive = 0, pids = {};
+    rows.forEach(function (r) {
+      if (r.status !== 'sending') return;
+      if (isPhotoRow(r)) { photoActive++; if (r.photo && r.photo.photoId) pids[r.photo.photoId] = 1; }
+      else nonPhotoActive++;
+    });
+    var cands = rows.filter(function (r) { return r.status === 'pending' && (r.nextTryAt || 0) <= now; })
+      .sort(function (a, b) { return (b.priority || 0) - (a.priority || 0) || a.seq - b.seq; });
+    var out = [];
+    cands.forEach(function (r) {
+      var prior = (r.recordId && r.action !== 'stopPour')
+        ? rows.filter(function (o) { return o.recordId === r.recordId && o.seq < r.seq && o.action !== 'stopPour'; })
+        : [];
+      if (isPhotoRow(r)) {
+        if (photoActive >= P) return;
+        if (prior.some(function (o) { return !isPhotoRow(o); })) return;
+        var pid = r.photo && r.photo.photoId;
+        if (pid && pids[pid]) return;
+        photoActive++;
+        if (pid) pids[pid] = 1;
+        out.push(r.seq);
+      } else {
+        if (nonPhotoActive >= 1) return;
+        if (prior.length) return;
+        nonPhotoActive++;
+        out.push(r.seq);
+      }
+    });
+    return out;
+  }
+
   function isExpired(row, now) { return now - (row.createdAt || now) > EXPIRE_MS; }
 
   /* ---- 永続化操作(IndexedDB) ---- */
@@ -116,6 +167,21 @@
       });
     });
   }
+  /* 送信行の選択と pending → sending を同じトランザクションで行う(SPEC §8.3 不変条件5)。
+   * その時点の全行に対して selectSendable を評価するので、並行する複数スロットが同じ行・同じ photoId・規則違反の行を取らない。
+   * 返す行は更新後(sending)の読み直した内容(統合後の params/clientId。不変条件1) */
+  function claimSendable(opts) {
+    return db().tx(['outbox'], 'readwrite', function (s) {
+      return db().reqP(s.outbox.getAll()).then(function (rows) {
+        var seqs = selectSendable(rows, opts);
+        var picked = rows.filter(function (r) { return seqs.indexOf(r.seq) >= 0; });
+        return Promise.all(picked.map(function (r) {
+          r.status = 'sending';
+          return db().reqP(s.outbox.put(r));
+        })).then(function () { return picked; });
+      });
+    });
+  }
   function remove(seq) { return db().del('outbox', seq).then(changed); }
 
   /* ブロックの掛け外し */
@@ -133,10 +199,17 @@
       }));
     }).then(changed);
   }
-  function blockRecord(recordId, exceptSeq) {
+  /* 確定失敗の影響範囲(SPEC §8.4-4)。非写真の行が失敗 → 同じ記録の後続の全ての pending 行。
+   * 写真の行が失敗(afterSeq 指定) → 同じ記録の、それより後の非写真の pending 行だけ(他の写真の行は止めない) */
+  function blockRecord(recordId, exceptSeq, photoFailed) {
     return all().then(function (rows) {
-      return Promise.all(rows.filter(function (r) { return r.recordId === recordId && r.seq !== exceptSeq && r.status === 'pending'; }).map(function (r) {
-        return update(r.seq, function (x) { x.status = 'blocked'; x.blockReason = 'record'; });
+      return Promise.all(rows.filter(function (r) {
+        if (r.recordId !== recordId || r.seq === exceptSeq || r.status !== 'pending') return false;
+        if (r.action === 'stopPour') return false; // 打設停止は他の行の失敗で保留にしない(§8.4(e))
+        if (photoFailed) return r.seq > exceptSeq && !isPhotoRow(r);
+        return true;
+      }).map(function (r) {
+        return update(r.seq, function (x) { if (x.status === 'pending') { x.status = 'blocked'; x.blockReason = 'record'; } });
       }));
     });
   }
@@ -158,8 +231,8 @@
 
   KW.outbox = {
     BACKOFF_SEC: BACKOFF_SEC, EXPIRE_MS: EXPIRE_MS,
-    backoffSec: backoffSec, classify: classify, mergeParams: mergeParams, pickNext: pickNext, isExpired: isExpired,
-    enqueue: enqueue, all: all, forRecord: forRecord, update: update, claim: claim, remove: remove,
+    backoffSec: backoffSec, classify: classify, mergeParams: mergeParams, pickNext: pickNext, selectSendable: selectSendable, normParallel: normParallel, isExpired: isExpired,
+    enqueue: enqueue, all: all, forRecord: forRecord, update: update, claim: claim, claimSendable: claimSendable, remove: remove,
     blockAll: blockAll, unblock: unblock, blockRecord: blockRecord, unblockRecord: unblockRecord, recoverSending: recoverSending
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = KW.outbox;

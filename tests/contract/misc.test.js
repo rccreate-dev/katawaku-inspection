@@ -18,8 +18,8 @@ describe('C-ITEM 項目マスタ', () => {
     assert.deepEqual(b.items, SEED_ITEMS.filter((i) => i.active).map(pick));
     assert.match(b.itemsHash, /^[0-9a-f]{64}$/);
     assert.equal(b.items.length, 16);
-    assert.deepEqual(Object.keys(b.config).sort(), ['claimTakeoverMin', 'enabledStages', 'escalationMin1', 'escalationMin2', 'minClientVersion', 'photoChunkChars', 'photoJpegQuality', 'photoMaxBytes', 'photoMaxEdge', 'photoMaxPerItem', 'photoThumbEdge', 'pinMaxFail', 'pollIntervalSec', 'qaLeadMinutes', 'qaOpenHour', 'selfDeadlineHour']);
-    assert.equal(b.config.pinMaxFail, 5); assert.equal(b.config.photoChunkChars, 90000); assert.equal(b.config.enabledStages, 'pre_pour');
+    assert.deepEqual(Object.keys(b.config).sort(), ['claimTakeoverMin', 'enabledStages', 'escalationMin1', 'escalationMin2', 'minClientVersion', 'photoChunkChars', 'photoJpegQuality', 'photoMaxBytes', 'photoMaxEdge', 'photoMaxPerItem', 'photoParallel', 'photoSingleMaxChars', 'photoThumbEdge', 'pinMaxFail', 'pollIntervalSec', 'qaLeadMinutes', 'qaOpenHour', 'selfDeadlineHour']);
+    assert.equal(b.config.pinMaxFail, 5); assert.equal(b.config.photoChunkChars, 90000); assert.equal(b.config.photoSingleMaxChars, 1200000); assert.equal(b.config.photoParallel, 3); assert.equal(b.config.enabledStages, 'pre_pour');
     assert.equal(b.user.userId, 'u_tanaka');
   });
 

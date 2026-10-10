@@ -43,6 +43,7 @@ var RECORD_STATUSES = ['draft', 'submitted', 'fix', 'qa_ok', 'approved'];
 /**
  * ACTIONS: action名 -> 定義
  *   pub: 公開(端末認証なし) / w: 更新系(ロック内で実行) / idem: ★clientId必須 /
+ *   ownLock: 更新系だがロックはハンドラが自分で取る(uploadPhotoChunk だけ。重い処理をロックの外に出す。SPEC §1.6 の7の例外) /
  *   pin: 'always' | 'ok' | 'current' (封筒pinを使うaction) / replay: 冪等再生を現在状態から再構築 /
  *   roles: 実行可能な役割(authorize が参照) / params: 契約上のparams(型検査と未知キー拒否に使う)
  */
@@ -125,7 +126,7 @@ var ACTIONS = {
   },
 
   uploadPhotoChunk: {
-    w: true, roles: ALL_ROLES,
+    w: true, ownLock: true, roles: ALL_ROLES,
     params: {
       photoId: { t: 'str', req: 1, max: 40 }, recordId: { t: 'id', p: 'r', req: 1 }, itemId: { t: 'itemId', nullable: true },
       side: { t: 'enum', req: 1, values: ['self', 'qa', 'prime'] }, index: { t: 'int', req: 1, min: 0, max: 11 },
@@ -228,11 +229,6 @@ function handleRequest(bodyText) {
     var req = parseEnvelope_(bodyText);
     action = req.action;
     var def = ACTIONS[action];
-    var unknown = Object.keys(req.params).filter(function (k) { return !Util.has(def.params, k); });
-    if (unknown.length) throw new ApiError('BAD_REQUEST', '契約外のparamsキー: ' + unknown.join(','));
-    if (def.idem && !(typeof req.clientId === 'string' && /^c_[A-Za-z0-9]{16,48}$/.test(req.clientId))) {
-      throw new ApiError('BAD_REQUEST', 'clientId が必要です(c_ + 英数16〜48桁)');
-    }
     if (action !== 'ping' && action !== 'me') {
       var minV = Cfg.get('minClientVersion');
       if (Util.semverLt(req.appVersion, minV)) {
@@ -266,6 +262,15 @@ function parseEnvelope_(bodyText) {
   };
 }
 
+/** 契約外のparamsキー・clientId欠落 → BAD_REQUEST(SPEC §1.6 の6・7。端末認証(4・5)とCLIENT_OUTDATED(2)より後) */
+function checkParamKeys_(req, def) {
+  var unknown = Object.keys(req.params).filter(function (k) { return !Util.has(def.params, k); });
+  if (unknown.length) throw new ApiError('BAD_REQUEST', '契約外のparamsキー: ' + unknown.join(','));
+  if (def.idem && !(typeof req.clientId === 'string' && /^c_[A-Za-z0-9]{16,48}$/.test(req.clientId))) {
+    throw new ApiError('BAD_REQUEST', 'clientId が必要です(c_ + 英数16〜48桁)');
+  }
+}
+
 function makeCtx_(req, def, auth) {
   var ctx = {
     req: req, def: def, action: req.action, params: req.params, clientId: req.clientId || '',
@@ -287,6 +292,8 @@ function withLock_(fn) {
     Repo.resetCache();
     return fn();
   } finally {
+    // 書込みを確定してからロックを手放す(次のロック保持者が直前の書込みを確実に読めるようにする)
+    try { if (typeof SpreadsheetApp !== 'undefined' && SpreadsheetApp.flush) SpreadsheetApp.flush(); } catch (e1) { /* 無視 */ }
     try { lock.releaseLock(); } catch (e2) { /* 無視 */ }
   }
 }
@@ -299,6 +306,7 @@ function runAction_(req, def) {
 
   // 公開action
   if (def.pub) {
+    checkParamKeys_(req, def);
     var pctx = makeCtx_(req, def, null);
     if (def.w) return { data: withLock_(function () { validateParams_(def, req.params); return handler(pctx); }), replayed: false };
     validateParams_(def, req.params);
@@ -307,10 +315,19 @@ function runAction_(req, def) {
 
   // 端末認証(ロック外)
   var auth = Auth.authenticate(req.deviceToken, action);
+  checkParamKeys_(req, def);
   if (!def.w) {
     var rctx = makeCtx_(req, def, auth);
     validateParams_(def, req.params);
     return { data: handler(rctx), replayed: false };
+  }
+
+  // 例外 uploadPhotoChunk(SPEC §1.6 の7): 端末認証・検証・Drive保存はロックの外、ロック内は絞る。
+  // 処理全体をロックで覆わず、ハンドラ(PhotoUpload.gs)が withLock_ を必要な範囲だけで呼ぶ。他のactionはこの分岐に入らない
+  if (def.ownLock) {
+    var octx = makeCtx_(req, def, auth);
+    validateParams_(def, req.params);
+    return { data: handler(octx), replayed: false };
   }
 
   // 更新系: ロック内で 冪等キー→(再認証)→検証→authorize→PIN→更新→Events→冪等キー保存
