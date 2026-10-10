@@ -170,6 +170,22 @@
         var left = rows.length;
         verdictBox.appendChild(h('h3', null, t('scr.S10.verdict')));
         verdictBox.appendChild(h('div', { class: 'card' }, C.chip(sug === 'ok' ? 'good' : (sug === 'minor' ? 'warn' : 'bad'), t('scr.S10.suggest', { v: t('verdict.' + sug) })), h('p', { class: 'sub' }, t('scr.S10.suggest_note'))));
+        // 判定の前に必要なこと(判定ボタンが押せない理由を、まとめて先に見せる)
+        var todoBox = h('div', { class: 'card' }, h('b', null, t('scr.S10.todo_title')));
+        var todoViol = KW.validate.validateVerdict(rec, sug, work.qaComment);
+        var order = allItems().map(function (i) { return i.itemId; });
+        var byRule = {}, ruleOrder = [];
+        todoViol.forEach(function (x) {
+          if (!byRule[x.rule]) { byRule[x.rule] = []; ruleOrder.push(x.rule); }
+          if (x.itemId) byRule[x.rule].push(order.indexOf(x.itemId) + 1);
+        });
+        if (!ruleOrder.length) todoBox.appendChild(h('p', { class: 'sub' }, t('scr.S10.todo_ok')));
+        ruleOrder.forEach(function (r) {
+          var nums = byRule[r].sort(function (m, n) { return m - n; });
+          todoBox.appendChild(h('p', { class: 'sub' }, '・' + t('rule.' + r) + (nums.length ? '(' + t('scr.S10.todo_items') + ' ' + nums.join(', ') + ')' : '')));
+        });
+        todoBox.appendChild(h('p', { class: 'sub' }, t('scr.S10.howto')));
+        verdictBox.appendChild(todoBox);
         if (!online) verdictBox.appendChild(C.msg('warn', t('msg.offline_required')));
         if (left > 0) verdictBox.appendChild(C.msg('warn', t('scr.S07.sending', { n: left })));
         if (serverViol && serverViol.length) {
