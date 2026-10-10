@@ -231,3 +231,6 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .mrow{display:flex;gap:6px;align-items:center;margin-top:6px}
 .mrow .inp{flex:1}
 .mrow .btn{white-space:nowrap;min-height:48px}
+
+/* 差し戻し: 是正する項目の一覧 */
+.fixlist .fixrow { display: block; width: 100%; text-align: left; margin-top: 6px; white-space: normal; height: auto; }
