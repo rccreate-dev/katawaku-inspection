@@ -208,6 +208,7 @@
     ['photo.count', '{n}/{max}枚', '{n}/{max} foto'],
     ['photo.pick_file', 'ファイルを選ぶ(テスト用)', 'Pilih berkas (uji)'],
     ['photo.retake', '撮り直す', 'Ulangi'],
+    ['photo.rotate', '回転', 'Putar'],
     ['photo.landscape_hint', 'スマホを横向きにして撮影してください(PDFの写真枠が横長のため)', 'Ambil foto dengan ponsel posisi horizontal (bingkai foto di PDF melebar)'],
     ['photo.shutter', '撮影', 'Ambil foto'],
     ['photo.thumb_only', '縮小画像を表示しています', 'Menampilkan gambar kecil'],
