@@ -140,7 +140,7 @@
       // 端末情報
       var devBox = h('div', { class: 'sub' });
       el.appendChild(h('div', { class: 'card' }, h('h3', null, t('scr.S19.device')), devBox,
-        h('div', { class: 'sub' }, t('scr.S19.app_version') + ': ' + KW.config.APP_VERSION),
+        h('div', { class: 'sub' }, t('scr.S19.app_version') + ': ' + KW.config.APP_VERSION + (KW.config.APP_BUILD ? ' (build ' + KW.config.APP_BUILD + ')' : '')),
         h('div', { class: 'sub' }, t('scr.S19.last_sync') + ': ' + (KW.state.lastSyncAt ? C.fmt(KW.state.lastSyncAt) : '-'))));
       function drawDev(label) { KW.clear(devBox).appendChild(document.createTextNode(t('scr.S19.device_name') + ': ' + (label || '-'))); }
       drawDev(null);
