@@ -123,7 +123,7 @@ test('C-STATE-06 判定検査', () => {
   sato('saveQaDraft', { recordId: sub, items: [{ itemId: 'i9', result: 'ng', severity: 'minor' }] });
   r = sato('submitVerdict', { recordId: sub, round: 1, verdict: 'ok' }, { pin: '3333' });
   assert.ok(rules(r).includes('VERDICT_OK_WITH_NG'));
-  assert.ok(rules(r).includes('PHOTO_REQUIRED'));
+  assert.ok(!rules(r).includes('PHOTO_REQUIRED'), 'QA側は写真任意(SPEC 1.5.1)');
   assert.ok(rules(r).includes('NOTE_REQUIRED'));
   sato('saveQaDraft', { recordId: sub, items: [{ itemId: 'i9', severity: 'major', note: 'x' }] });
   r = sato('submitVerdict', { recordId: sub, round: 1, verdict: 'minor', comment: 'c' });

@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.5.0 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
+- 版: 1.5.1 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -875,9 +875,9 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 |---|---|---|
 | FIELD_INVALID | 型・範囲・列挙値・未知キー | `path` |
 | ANSWER_MISSING | 結果が未入力 | `itemId` |
-| PHOTO_REQUIRED | 写真が必要(`ng` または `key` 項目の `ok`) | `itemId` |
-| NOTE_REQUIRED | NGにコメントがない | `itemId` |
-| SEVERITY_REQUIRED | QAのNGに重さがない | `itemId` |
+| PHOTO_REQUIRED | 写真が必要(**職長提出 `submitRecord` のみ**。`selfResult=ng`、または `key` 項目の `selfResult=ok`)。**`submitVerdict`(QA側)では出さない**(版1.5.1) | `itemId` |
+| NOTE_REQUIRED | NGにコメントがない(職長=`foremanNote`、QA=`qaNote`) | `itemId` |
+| SEVERITY_REQUIRED | QAのNGに重さがない(`submitVerdict`) | `itemId` |
 | MEASURE_REQUIRED | `measure=required` で測定点数が `minMeasures` 未満(`na`は除く) | `itemId` |
 | MEASURE_OVER_TOL_OK | `|値|の最大 > tol` なのに `ok` | `itemId` |
 | POUR_PLAN_REQUIRED | 提出時に打設予定日時がない(`stage=pre_pour`) | |
@@ -901,7 +901,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 検査ルール(QA判定 `submitVerdict`):
 - 対象=`audience∈{both,qa}` の全項目に `qaResult` が必要(`ANSWER_MISSING`)。**QA欄の事前入力はしない**(P-12)。
-- `qaResult=ng` → 写真(side=qa・未削除)≥1・`qaNote`非空・`qaSeverity` 必須。`qaResult=ok` かつ `key` → 写真(side=qa)≥1。測定・許容超過も職長側と同じルール(`qaValues` で判定)。
+- `qaResult=ng` → `qaNote`非空(`NOTE_REQUIRED`)・`qaSeverity` 必須(`SEVERITY_REQUIRED`)。**QA側は写真を必須にしない**(版1.5.1。ユーザー決定: 管理者の確認では写真は任意。`PHOTO_REQUIRED` を出さない。`qaResult=ng` でも `key` 項目の `qaResult=ok` でも、side=qa の写真が0枚で通る)。QA側でも写真の撮影・添付・削除(`uploadPhotoChunk` の `side=qa`、`deletePhoto`)は従来どおり可能(任意)。測定・許容超過は職長側と同じルール(`qaValues` で判定)。
+- 写真必須は職長の自己点検(`submitRecord`)のみ。
 - 判定の整合: `ok` ⇒ QA入力に `ng` なし(`VERDICT_OK_WITH_NG`)/ `minor` ⇒ `ng` ≥1 かつ `severity=major` なし / `major` ⇒ `severity=major` の `ng` ≥1 / `minor`・`major` ⇒ 総合コメント必須(`comment` があればそれ、未指定なら `saveQaDraft` 保存済みの `qaComment`。両方空なら `COMMENT_REQUIRED`)。
 - 合否は人が決める: サーバーは上記の **整合性検査のみ**行い、判定を自動決定しない。UIの「提案」表示は画面側の補助(§9)。
 
@@ -1228,7 +1229,7 @@ PDF: `generateReport` `listReports`
 ### 7.6 表示とキャッシュ
 - 一覧・詳細のサムネは `getPhotoThumbs`(1回20枚まで)で取得し、IndexedDB `photoCache` に保存(LRU 300枚)。未送信の写真は `photoBlobs` のローカルサムネを使う。
 - 拡大表示は `getPhoto`(本体)を都度取得し、`photoCache` に最大30枚保持。拡大画面にスタンプ文字列(`stampText`)を文字としても表示する。
-- 写真ルール: NG項目は写真と備考が必須、重点項目(`key`)は `ok` でも写真必須(§5.3.1)。**送信前チェックはクライアントも同じ `rule` 名で行う**(提出ボタンの前に赤枠表示)。
+- 写真ルール: 職長の提出(S06/S07)では、NG項目は写真と備考が必須、重点項目(`key`)は `ok` でも写真必須(§5.3.1)。**QA側(S10)は写真任意**(NGは備考と重さが必須。写真が無くても判定できる)。**送信前チェックはクライアントも同じ `rule` 名で行う**(提出ボタンの前に赤枠表示)。
 
 ---
 
@@ -1364,7 +1365,7 @@ PDF: `generateReport` `listReports`
 | S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階・打設予定日時** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
 | S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5、「打設を止める」(`stopPour`)→M4、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
 | S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
-| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
+| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
 | S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
 | S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17 |
 | S13 | `#/join?site=&k=&n=` | 職長 | `requestJoin` | 「『{n}』に参加申請しますか」。承認後に有効になる旨 | 「申請する」→`requestJoin`→「承認待ち」表示。未登録端末は `pendingJoin` を保存しS01→登録後ここへ戻る。アプリ内読み取り(`BarcodeDetector`対応端末)と、URL/合言葉の貼り付け入力の両方を用意。標準カメラでQRを読んでURLを開く方法も案内(P-27) |
@@ -1576,7 +1577,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | 圏外で入力→復帰で自動送信、二重送信されない | C-IDEM-01〜04, U-OUTBOX-*, E-05 |
 | 2人のQAが同時に確認中→先着のみ | C-CONC-01, E-06 |
 | スマホ幅375pxで崩れない、ja/idで欠けがない | E-07, E-08, U-I18N-01 |
-| スタンプ付き写真、NGは写真と備考必須 | C-STATE-05, C-PHOTO-*, U-PHOTO-*, E-03 |
+| スタンプ付き写真、職長のNGは写真と備考必須(QA側は写真任意) | C-STATE-05, C-PHOTO-*, U-PHOTO-*, E-03 |
 | コンソールエラー0、`node --check`、テスト全通過 | 共通フィクスチャ, `check-syntax.js`, `run-all.js` |
 | 写真送信の高速化(単発・並行・ロック範囲・参照キャッシュ。版1.4) | C-PHOTO-01,03,07〜12, C-CONC-04,05, C-CACHE-01,02, U-PHOTO-03, U-OUTBOX-04, E-13 |
 | 写真送信・応答時間の性能目標(版1.5。**自動テストではなく手動確認**) | §12.6(実GASで手動。`run-all.js` の対象外) |
@@ -1619,8 +1620,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-STATE-02(軽微): `minor`→`fix`、`claimedBy` 空、田中が是正→`submitRecord`→`round=2`、QA列・判定列が空、`submitted`。
 - C-STATE-03(重大): `major`→`fix`・`major=TRUE`。再提出→再合格→`recordPrimeSign` までは `approved` にならない。`major` 時に責任者宛メールが記録される(mock-only)。
 - C-STATE-04(不正遷移): submittedへの `submitRecord`、draftへの `claimReview`/`submitVerdict`/`recordPrimeSign`、submittedへの `recordPrimeSign`、`round` 不一致 → `STATE_CONFLICT`/`RECORD_LOCKED`(`error.data.status`)。
-- C-STATE-05(提出検査): 未回答・NGの写真/備考欠落・重点項目okの写真欠落・許容超えok・`pourPlannedAt` なし → `VALIDATION_FAILED` で **violationsが全て列挙**(`ANSWER_MISSING`,`PHOTO_REQUIRED`,`NOTE_REQUIRED`,`MEASURE_OVER_TOL_OK`,`POUR_PLAN_REQUIRED`,`MEASURE_REQUIRED`)。データ駆動(`tests/fixtures/validation-cases.json`。ユニットと共用)。
-- C-STATE-06(判定検査): `ok` でQAにNGあり→`VERDICT_OK_WITH_NG`、`minor` でNGなし→`VERDICT_NEEDS_NG`、`major` で重大項目なし→`VERDICT_MAJOR_NEEDS_MAJOR_ITEM`、`minor` に重大項目→`VERDICT_MINOR_HAS_MAJOR_ITEM`、`minor/major` でコメントなし(`comment` 未指定かつ保存済み `qaComment` も空)→`COMMENT_REQUIRED`、`saveQaDraft` で `comment` を保存済みなら `submitVerdict` で `comment` 未指定でも成功し、`qaComment` と Notes にその値が入る、QA未回答→`ANSWER_MISSING`、QAのNGで写真/備考/重さ欠落→`PHOTO_REQUIRED`/`NOTE_REQUIRED`/`SEVERITY_REQUIRED`。
+- C-STATE-05(提出検査。職長 `submitRecord` のみ。`PHOTO_REQUIRED` はここだけで検査する): 未回答・NGの写真/備考欠落・重点項目okの写真欠落・許容超えok・`pourPlannedAt` なし → `VALIDATION_FAILED` で **violationsが全て列挙**(`ANSWER_MISSING`,`PHOTO_REQUIRED`,`NOTE_REQUIRED`,`MEASURE_OVER_TOL_OK`,`POUR_PLAN_REQUIRED`,`MEASURE_REQUIRED`)。データ駆動(`tests/fixtures/validation-cases.json`。ユニットと共用)。
+- C-STATE-06(判定検査): `ok` でQAにNGあり→`VERDICT_OK_WITH_NG`、`minor` でNGなし→`VERDICT_NEEDS_NG`、`major` で重大項目なし→`VERDICT_MAJOR_NEEDS_MAJOR_ITEM`、`minor` に重大項目→`VERDICT_MINOR_HAS_MAJOR_ITEM`、`minor/major` でコメントなし(`comment` 未指定かつ保存済み `qaComment` も空)→`COMMENT_REQUIRED`、`saveQaDraft` で `comment` を保存済みなら `submitVerdict` で `comment` 未指定でも成功し、`qaComment` と Notes にその値が入る、QA未回答→`ANSWER_MISSING`、QAのNGで備考/重さ欠落→`NOTE_REQUIRED`/`SEVERITY_REQUIRED`(**写真が無くても通る**。QA側で `PHOTO_REQUIRED` は返らない。NGでも `key` 項目のokでも `side=qa` の写真0枚で `submitVerdict` が成功することを必ず確認する。版1.5.1)。
 - C-STATE-07(打設停止): `approved` を田中(他班の職長でも同現場なら可)が `stopPour`→`fix`・`stopped=TRUE`・署名無効(`prime`/判定が空)。**他班の職長(`masked` の記録)の `listRecords` 行は `actions=["stopPour"]` で、`stopPour` は成功し応答 `record` は masked 形、同じ職長の `getRecord` は `FORBIDDEN_TEAM` のまま**。他現場の職長は `FORBIDDEN_SITE`、`draft` へは `STATE_CONFLICT`、理由なし→`REASON_REQUIRED`。停止後に是正・再提出・再合格・元請サインを経て初めて `approved`。
 - C-STATE-08(スロット): 同一(現場,階,工区,ロット,段階)の2件目→`ALREADY_EXISTS`。`approved` 記録には `reinspectOf` 付きでのみ追加可。`reinspectOf` の元記録が `approved` でなければ(例 `fix`/`qa_ok`)`STATE_CONFLICT`(`error.data` は元記録の `status`/`round`)。未有効段階→`STAGE_NOT_ENABLED`。閉鎖現場→`SITE_CLOSED`。
 - C-STATE-09(3者サイン): `signerName` 空→`PRIME_SIGNER_REQUIRED`。`qa_ok` 以外では `STATE_CONFLICT`。`approved` 後は `signatures` の3者が揃って返る。
@@ -1686,7 +1687,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 ### 12.5 E2Eテスト(E-。Playwright、375×667、ja/id)
 - E-01 登録: S01で田中を選びPIN→ホーム。リロードしてもPIN不要。誤PIN×5で S02。責任者が解除(別コンテキスト)→復帰。`invited` の氏名では招待コード欄が出る。
 - E-02 職長フロー: 現場A→2F→記録作成(ロット入力)→16項目入力(OK/NG/該当なし、実測、コメント)→NGと重点項目で写真撮影(fakeカメラ)→違反が赤枠で出てから修正→確認画面(現場・階・工区・ロット表示)→PIN→「確認待ち」。田中のホームに s_c が出ない。他班の記録が「他班が入力中」で無効。
-- E-03 QAフロー: 佐藤がボードで確認待ち(提出順・エスカレーション表示)→「確認中にする」→全項目入力(NGは写真・備考・重さ)→「合格」ボタンの有効条件→PIN→`qa_ok`→元請PDF生成(M6)→元請サイン記録(M5, PIN)→`approved`(打設可)。3者サイン欄が全て済。
+- E-03 QAフロー: 佐藤がボードで確認待ち(提出順・エスカレーション表示)→「確認中にする」→全項目入力(NGは備考・重さが必須、写真は任意=写真なしでも判定できる)→「合格」ボタンの有効条件→PIN→`qa_ok`→元請PDF生成(M6)→元請サイン記録(M5, PIN)→`approved`(打設可)。3者サイン欄が全て済。
 - E-04 差し戻し: 軽微な不適合→`fix`→職長は是正コメントを見て編集可→再提出(PIN)→`round2`。提出後の画面は読み取り専用(編集ボタンなし)。
 - E-05 オフライン(圏外で下書き・撮影 → 復帰で自動送信 → オンラインで提出(PIN)): `context.setOffline(true)` で下書き入力・撮影 → outboxバッジ件数・「圏外」表示・提出ボタン無効(`msg.offline_required`。圏外では提出できない) → 復帰で自動送信されバッジが0に → サーバー側に二重なし(`/__mock/state` の件数) → **オンラインになってから提出(PIN入力 M1)して `submitted`**。`/__mock/fail`(after:true)で応答喪失を起こしても二重にならない。リロードしても下書きとoutboxが残る。
 - E-06 同時操作: 2つのブラウザコンテキストで佐藤・鈴木が同時に「確認中にする」→片方のみ成功、他方に「◯◯が確認中」。佐藤で s_c の記録を開いても確認ボタンが出ない(権限なし)。
@@ -1875,3 +1876,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-08 | 1.4.2 | レビュー指摘への修正(既存の列名・action名・エラーコード・action数は変更なし)。①§8.4(e)・確定エラー表・§12.4 U-OUTBOX-04 ⑧: `stopPour` の行は他の行の確定失敗の波及で `blocked` にしない(`stopPour` 自身の確定失敗は従来どおり)。②§8.3・§9 S06/S10: 送信中(`sending`)の写真は削除ボタンを無効にし、送信完了後に `deletePhoto` を積む。`pending` の写真のローカル削除は即時可。③§2.14・§5.4.2・§8.4-0: `photoParallel` は「サーバーが `int` で返した値をクライアントが1〜6に収める(null/欠落/0以下は1)」に整理し、小数の四捨五入の記述を削除。U-OUTBOX-04 ①は整数入力のみ検査(丸めケースを削除)。④§2.14・§5.4.4: サーバー専用Config `photoThumbMaxChars`(既定100000。公開Configに入れない)を追加し、`thumb` が超えたら `PHOTO_INVALID`。⑤§2.15-8: `Sites.status` 閉鎖の直接編集後、最大60秒 `createRecord` が通りうることを許容と明記。 |
 | 2026-10-08 | 1.4.3 | §11.4: `/__mock/patch` の許可シートに `Devices` を追加(`tokenHash` は指定不可)。`/__mock/interleave` の許可シートを `Records`/`Photos`/`Users`/`Assignments`/`Devices` と明記(ロック内の再認証 `DEVICE_REVOKED` のテスト用)。 |
 | 2026-10-10 | 1.5.0 | 写真送信のさらなる高速化の確認と固定処理の削減(本番実測: 1往復≒1.3〜2.8秒、本文400KBでも約1.6秒、4件同時でも全体約3.2秒、写真300KBを90KB×5分割で約35秒=1回約6秒)。既存の列名・action名・エラーコード・action数(43)・Config キーは変更なし。**依頼のうち単発送信(`total=1`)、`uploadPhotoChunk` の最大3並列(`photoParallel`)、ロック範囲の縮小(Drive書込みはロック外)、`Config`/`Items`/`Sites` の60秒キャッシュは、版1.4〜1.4.3で既に記載済みのため再記述せず整合のみ確認**(本番が旧実装のまま分割送信になっている可能性が高い。実装の反映状況の確認が必要)。①§2.14: `photoChunkChars` は 90000 のまま(700000 へ上げない。分割モードは CacheService の1値100KB制限があるため。単発の上限 `photoSingleMaxChars=1200000` は `photoMaxBytes` のbase64長800,000以上で整合済みと明記)。②§2.16 新設・§1.4・§13.2: 1リクエスト内の同一シート再読込禁止(リクエスト内メモ)、ロック取得後は読み直し、端末認証などで必要な行/列だけ読む、可変データのリクエストまたぎキャッシュ禁止(結果は素朴な実装と同一)。③§2.15-10: キャッシュTTL上限を60秒固定と明記(5分は採らない)。④§12.6 新設・§12.2: 性能の受け入れ基準 PERF-01〜03(ping 約1.5秒、写真1枚約10秒、10枚約40秒・3並列)を手動確認項目として追加。⑤§7.3・§14 P-37/P-38/P-39・§14.2 の12: 整合。 |
+| 2026-10-10 | 1.5.1 | ユーザー決定: 管理者(QA)側の確認では写真は不要(任意)。写真必須は職長の自己点検(`submitRecord`)のみ。既存の列名・action名・エラーコード・action数(43)は変更なし。①§5.3.1: `PHOTO_REQUIRED` を職長提出時のみ(`selfResult=ng`、または `key` の `ok`)に限定し、`submitVerdict` では出さない(`NOTE_REQUIRED`/`SEVERITY_REQUIRED` は従来どおり必須)。QA側の写真の撮影・添付・削除は任意で可能。②§9.1(写真ルール)・§9.2 S10・§12.2 要件対応表・§12.3 C-STATE-05/C-STATE-06・§12 E-03: 整合。 |
