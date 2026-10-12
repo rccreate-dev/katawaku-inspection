@@ -17,6 +17,7 @@
     var msg = h('div');
     var card = h('div', { class: 'card' },
       h('div', { class: 'row' }, h('b', null, m.userName), C.chip(m.status === 'pending' ? 'warn' : (m.status === 'approved' ? 'good' : 'na'), t('join.' + m.status))),
+      m.userCompany ? h('div', { class: 'sub' }, m.userCompany) : null,
       h('div', { class: 'sub' }, m.siteName + ' / ' + C.fmt(m.requestedAt) + (m.team ? ' / ' + m.team : '')));
     if (m.note) card.appendChild(h('div', { class: 'sub' }, m.note));
     var btns = h('div', { class: 'gap' });

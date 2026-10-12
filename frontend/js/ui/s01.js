@@ -35,103 +35,107 @@
     });
   };
 
-  /* ---- S01 ---- */
+  /* ---- S01 ---- 招待コード先入力(SPEC §3.6)。氏名の一覧は出さない */
   KW.screens.S01 = {
     mount: function (ctx) {
       ctx.chrome({});
       var el = ctx.el;
-      var users = null, selected = null, forgot = false;
-      var flashBox = h('div'), listBox = h('div'), formBox = h('div');
+      var found = null, codeValue = '';
+      var flashBox = h('div'), body = h('div');
       el.appendChild(h('h2', null, t('scr.S01.title')));
       el.appendChild(h('p', { class: 'sub' }, t('scr.S01.sub')));
-      el.appendChild(flashBox); el.appendChild(listBox); el.appendChild(formBox);
+      el.appendChild(flashBox); el.appendChild(body);
 
       if (KW.app.flash) { flashBox.appendChild(C.banner(KW.app.flash.kind, KW.app.flash.text)); KW.app.flash = null; }
       KW.db.kvGet('pendingJoin').then(function (pj) {
         if (pj && ctx.alive()) flashBox.appendChild(C.banner('', t('scr.S01.pending_join', { name: pj.n || pj.site })));
       });
 
-      function loadUsers() {
-        KW.clear(listBox).appendChild(C.skeleton(3));
-        KW.api.call('listLoginUsers', {}).then(function (res) {
-          if (!ctx.alive()) return;
-          KW.clear(listBox);
-          if (!res.ok) {
-            listBox.appendChild(C.banner('warn', t(res.network ? 'err.network' : 'err.INTERNAL')));
-            listBox.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: loadUsers } }, t('act.retry')));
-            return;
-          }
-          users = res.data.users;
-          drawList();
-        });
+      function errMsg(res) {
+        if (res.network) return t('err.network');
+        var e = res.error || {};
+        if (e.code === 'RATE_LIMITED') {
+          var m = Math.max(1, Math.ceil(((e.data && e.data.retryAfterSec) || 60) / 60));
+          return t('err.RATE_LIMITED', { n: m });
+        }
+        return KW.errText(e);
       }
-      function drawList() {
-        KW.clear(listBox);
-        if (!users.length) { listBox.appendChild(C.empty('scr.S01.empty')); return; }
-        listBox.appendChild(h('h3', null, t('scr.S01.pick')));
-        var box = h('div', { class: 'userlist' });
-        users.forEach(function (u) {
-          var b = h('button', {
-            type: 'button', class: 'tap', 'aria-pressed': String(selected && selected.userId === u.userId),
-            on: { click: function () { selected = u; forgot = false; drawList(); drawForm(); } }
-          }, h('span', null, h('b', null, u.name)),
-          u.status !== 'active' ? h('span', { class: 'chip ' + (u.status === 'locked' ? 'bad' : 'warn') }, t('userst.' + u.status)) : null);
-          if (selected && selected.userId === u.userId) b.classList.add('sel');
-          box.appendChild(b);
-        });
-        listBox.appendChild(box);
+
+      /* ① 招待コードの入力 */
+      function drawCode() {
+        KW.clear(body);
+        found = null;
+        var inv = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', pattern: '[0-9]*', class: 'inp pin', 'aria-label': t('scr.S01.invite'), name: 'invite' });
+        var msg = h('div');
+        var next = h('button', { type: 'button', class: 'btn', disabled: true }, t('scr.S01.next'));
+        inv.addEventListener('input', function () { inv.value = inv.value.replace(/\D/g, '').slice(0, 6); next.disabled = !/^\d{6}$/.test(inv.value); });
+        next.addEventListener('click', C.guard(next, function () {
+          KW.clear(msg);
+          var cv = inv.value;
+          return KW.api.call('lookupInvite', { inviteCode: cv }).then(function (res) {
+            if (!ctx.alive()) return null;
+            if (!res.ok) { msg.appendChild(C.msg('', errMsg(res))); return null; }
+            found = res.data; codeValue = cv;
+            drawConfirm();
+            return null;
+          });
+        }));
+        body.appendChild(h('div', { class: 'card' },
+          h('label', { class: 'lbl' }, t('scr.S01.invite')), inv,
+          h('p', { class: 'sub' }, t('scr.S01.invite_hint')),
+          msg, h('div', { class: 'stack' }, next)));
       }
-      function drawForm() {
-        KW.clear(formBox);
-        if (!selected) return;
-        var needInvite = selected.status === 'invited' || forgot;
+
+      /* ② 本人確認 + PIN(4桁) */
+      function drawConfirm() {
+        KW.clear(body);
+        var isFirst = found.purpose === 'first';
         var pin = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '4', pattern: '[0-9]*', class: 'inp pin', 'aria-label': t('pin.label'), name: 'pin' });
-        var inv = needInvite ? h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', pattern: '[0-9]*', class: 'inp pin', 'aria-label': t('scr.S01.invite'), name: 'invite' }) : null;
         var msg = h('div');
         var go = h('button', { type: 'button', class: 'btn', disabled: true }, t('scr.S01.register'));
-        function sync() {
-          go.disabled = !/^\d{4}$/.test(pin.value) || (needInvite && !/^\d{6}$/.test(inv.value));
-        }
-        pin.addEventListener('input', function () { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); sync(); });
-        if (inv) inv.addEventListener('input', function () { inv.value = inv.value.replace(/\D/g, '').slice(0, 6); sync(); });
+        pin.addEventListener('input', function () { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); go.disabled = !/^\d{4}$/.test(pin.value); });
         go.addEventListener('click', C.guard(go, function () {
           KW.clear(msg);
-          var pv = pin.value, iv = inv ? inv.value : null;
-          return confirmSwitch(selected).then(function (sw) {
+          var pv = pin.value;
+          return confirmSwitch(found).then(function (sw) {
             if (!sw.go) { if (sw.incomplete) msg.appendChild(C.msg('', t('scr.S01.send_incomplete'))); return null; }
-            var params = { userId: selected.userId, pin: pv, deviceLabel: deviceLabel(), platform: platform(), appVersion: KW.config.APP_VERSION };
-            if (iv) params.inviteCode = iv;
-            pin.value = ''; if (inv) inv.value = '';
+            var params = { inviteCode: codeValue, pin: pv, deviceLabel: deviceLabel(), platform: platform(), appVersion: KW.config.APP_VERSION };
+            pin.value = ''; go.disabled = true;
             return KW.api.call('registerDevice', params).then(function (res) {
-              params = null; pv = null; iv = null;
+              params = null; pv = null;
               if (res.ok) return KW.app.afterRegister(res.data, { discard: !!sw.discard });
               var code = res.error && res.error.code;
-              if (res.network) { msg.appendChild(C.msg('', t('err.network'))); return null; }
-              if (code === 'USER_LOCKED') { KW.app.go('#/locked', true); return null; }
-              if (code === 'INVITE_REQUIRED') { selected.status = 'invited'; drawList(); drawForm(); }
-              msg.appendChild(C.msg('', KW.errText(res.error)));
-              sync();
+              if (!res.network && (code === 'INVITE_INVALID' || code === 'INVITE_EXPIRED')) {
+                // コードが使えなくなった(使用済み・失効)。最初からやり直す
+                drawCode();
+                body.insertBefore(h('div', null, C.msg('', errMsg(res))), body.firstChild);
+                return null;
+              }
+              msg.appendChild(C.msg('', errMsg(res)));
               return null;
             });
           });
         }));
-        formBox.appendChild(h('div', { class: 'card' },
-          h('h2', null, selected.name),
-          needInvite ? h('p', { class: 'sub' }, selected.status === 'invited' ? t('scr.S01.invite_first') : t('scr.S01.invite_reset')) : null,
-          needInvite ? h('label', { class: 'lbl' }, t('scr.S01.invite')) : null, inv,
-          h('label', { class: 'lbl' }, selected.status === 'invited' || forgot ? t('scr.S01.pin_new') : t('pin.label')), pin,
+        body.appendChild(h('div', { class: 'card' },
+          h('p', { class: 'sub' }, t('scr.S01.confirm_q')),
+          h('h2', null, t('scr.S01.confirm_name', { name: found.name })),
+          found.company ? h('div', { class: 'sub' }, found.company) : null,
+          h('p', { class: 'sub' }, isFirst ? t('scr.S01.invite_first') : t('scr.S01.invite_reset')),
+          h('label', { class: 'lbl' }, t('scr.S01.pin_new')), pin,
           msg,
           h('div', { class: 'stack' }, go,
-            (!needInvite && selected.status === 'active') ? h('button', { type: 'button', class: 'link', on: { click: function () { forgot = true; drawForm(); } } }, t('scr.S01.forgot')) : null)));
-        sync();
+            h('button', { type: 'button', class: 'link', on: { click: function () { codeValue = ''; drawCode(); } } }, t('scr.S01.not_me')))));
       }
+
       /* 別ユーザーで登録し直すとき、未送信があれば確認(SPEC §8.2)。結果 {go, discard?, incomplete?}
+       * コードから本人を特定するため、前のユーザーと同じ人かは「氏名と会社名の一致」で見る。
        * 選択肢は「送信してから切替」(旧ユーザーの token が残っていてオンラインのときだけ)と「破棄して切替」。
        * 破棄の消去はここでは行わず、registerDevice 成功後に app.afterRegister が行う(失敗時は何も消さない) */
       function confirmSwitch(u) {
-        return Promise.all([KW.db.kvGet('lastUserId'), KW.outbox.all()]).then(function (v) {
+        return Promise.all([KW.db.kvGet('me'), KW.outbox.all()]).then(function (v) {
           var last = v[0], rows = v[1];
-          if (!rows.length || !last || last === u.userId) return { go: true };
+          var same = last && last.name === u.name && (last.company || '') === (u.company || '');
+          if (!rows.length || !last || same) return { go: true };
           var canSend = !!KW.state.token && KW.isOnline();
           return KW.modal.choice({
             title: t('scr.S01.discard_title'), body: t('scr.S01.discard_body', { n: rows.length }),
@@ -149,7 +153,7 @@
           });
         });
       }
-      loadUsers();
+      drawCode();
     }
   };
 

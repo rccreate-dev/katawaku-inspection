@@ -3,7 +3,7 @@
 
 // 列定義 "name:type"。type = str|int|num|bool|dt|date|json|id または enum(a,b,c)
 const SCHEMA_SRC = {
-  Users: 'userId:str nameKana:str name:str role:enum(foreman,qa,lead) status:enum(invited,active,locked,disabled) lang:enum(ja,id) email:str qaQualified:bool pinSalt:str pinHash:str failedCount:int lockedAt:dt lastLoginAt:dt note:str createdAt:dt updatedAt:dt',
+  Users: 'userId:str nameKana:str name:str role:enum(foreman,qa,lead) status:enum(invited,active,locked,disabled) lang:enum(ja,id) email:str qaQualified:bool pinSalt:str pinHash:str failedCount:int lockedAt:dt lastLoginAt:dt note:str createdAt:dt updatedAt:dt company:str',
   Sites: 'siteId:str name:str status:enum(active,closed) floors:str zones:str primeContractor:str address:str joinKey:str driveFolderId:str startDate:date endDate:date createdAt:dt updatedAt:dt',
   Assignments: 'assignId:str siteId:str userId:str assignRole:enum(qa_main,qa_sub,foreman,subforeman) team:str validFrom:date validTo:date active:bool createdBy:str createdAt:dt updatedAt:dt',
   Memberships: 'membershipId:str siteId:str userId:str status:enum(pending,approved,rejected,revoked) requestedAt:dt requestClientId:str decidedBy:str decidedAt:dt assignRole:enum(foreman,subforeman) team:str note:str',
@@ -928,7 +928,7 @@ const CONFIG_ROWS = [
   ['escalationMin1', '30', 'int', ''], ['escalationMin2', '60', 'int', ''], ['majorReportMin', '30', 'int', ''],
   ['claimTakeoverMin', '30', 'int', ''], ['selfDeadlineHour', '15', 'int', ''], ['qaOpenHour', '16', 'int', ''],
   ['qaLeadMinutes', '120', 'int', ''], ['qaMaxSitesPerDay', '3', 'int', ''], ['pinMaxFail', '5', 'int', ''],
-  ['maxDevicesPerUser', '3', 'int', ''], ['inviteTtlHours', '72', 'int', ''], ['photoMaxEdge', '1280', 'int', ''],
+  ['maxDevicesPerUser', '3', 'int', ''], ['inviteTtlHours', '72', 'int', ''], ['inviteFailMax', '10', 'int', ''], ['inviteFailWindowMin', '10', 'int', ''], ['photoMaxEdge', '1280', 'int', ''],
   ['photoJpegQuality', '0.72', 'num', ''], ['photoThumbEdge', '320', 'int', ''], ['photoMaxPerItem', '5', 'int', ''],
   ['photoChunkChars', '90000', 'int', ''], ['photoMaxBytes', '600000', 'int', ''], ['photoSingleMaxChars', '1200000', 'int', ''], ['photoParallel', '3', 'int', ''], ['photoThumbMaxChars', '100000', 'int', ''], ['enabledStages', 'pre_pour', 'str', ''],
   ['pollIntervalSec', '60', 'int', ''], ['driveRootFolderId', 'mock_drive_root', 'str', ''], ['pdfShareMode', 'anyone_with_link', 'str', ''],

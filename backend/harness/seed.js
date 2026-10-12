@@ -36,7 +36,7 @@ function seed(ctx, nowMs, variant) {
     const salt = isInv ? '' : crypto.randomBytes(16).toString('hex');
     return {
       userId, name, nameKana: '', role, status: isInv ? 'invited' : 'active', lang, email, qaQualified,
-      pinSalt: salt, pinHash: isInv ? '' : Auth.hashPin(salt, userId, pin), failedCount: 0, createdAt: iso(-10000), updatedAt: iso(-10000),
+      pinSalt: salt, pinHash: isInv ? '' : Auth.hashPin(salt, userId, pin), failedCount: 0, createdAt: iso(-10000), updatedAt: iso(-10000), company: '',
     };
   }));
   if (invited) {

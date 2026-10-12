@@ -26,7 +26,7 @@ describe('フロント不具合の再現', () => {
   it('FE-01 起動時に未処理例外が出ない(s06.js が app.js より先に読まれ KW.app が未定義)', async () => {
     const s = await E.newSession(env, { workaround: false });
     await s.page.goto(s.base + '/#/register');
-    await s.page.locator('.userlist').waitFor();
+    await s.page.locator('input[name=invite]').waitFor();
     await s.page.waitForTimeout(300);
     s.assertClean();
     await s.close();

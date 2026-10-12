@@ -5,7 +5,7 @@
 
   var TIMEOUTS = { uploadPhotoChunk: 60000, getPhoto: 60000, generateReport: 120000 };
   var AUTH_CODES = { UNAUTHENTICATED: 1, DEVICE_REVOKED: 1, USER_DISABLED: 1, USER_LOCKED: 1, CLIENT_OUTDATED: 1 };
-  var PUBLIC = { ping: 1, listLoginUsers: 1, registerDevice: 1 };
+  var PUBLIC = { ping: 1, lookupInvite: 1, registerDevice: 1 };
   var savedSkew = 0;
 
   /*

@@ -40,12 +40,14 @@ async function mock(p, body = {}) {
 const stateRows = async (sheet) => (await mock('state', { sheet })).rows;
 const reset = (o) => mock('reset', o || {});
 // 契約外の直接API(PIN付きの管理操作など。テストの準備・検証用)
-async function api(action, params, { userId, pin, clientId } = {}) {
-  const { deviceToken } = await mock('issueDevice', { userId });
+async function api(action, params, { userId, pin, clientId, env } = {}) {
+  const ctl = env && env.mock ? env.mock : mock;
+  const url = env && env.apiUrl ? env.apiUrl : API_URL;
+  const { deviceToken } = await ctl('issueDevice', { userId });
   const body = { v: 1, action, appVersion: '1.0.0', deviceToken, params: params || {} };
   if (pin) body.pin = pin;
   body.clientId = clientId || ('c_' + require('node:crypto').randomBytes(12).toString('hex'));
-  const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
   return r.json();
 }
 
@@ -120,7 +122,7 @@ async function newSession(env, { lang = 'ja', storageState, workaround = !proces
   });
   if (workaround) await ctx.addInitScript(WORKAROUND_KWAPP);
   const page = await ctx.newPage();
-  const s = { ctx, page, base: env.baseUrl, errors: [], suppressed: 0, allowFail: false, lang };
+  const s = { ctx, page, env, base: env.baseUrl, errors: [], suppressed: 0, allowFail: false, lang };
   page.on('console', (m) => { if (m.type() === 'error') { if (s.allowFail) s.suppressed++; else s.errors.push('console.error: ' + m.text()); } });
   page.on('pageerror', (e) => s.errors.push('pageerror: ' + e.message));
   page.on('requestfailed', (r) => { const why = r.failure() && r.failure().errorText; if (why === 'net::ERR_ABORTED') return; /* リロード/遷移による中断 */ if (s.allowFail) { s.suppressed++; return; } if (true) s.errors.push(`requestfailed: ${r.method()} ${r.url()} ${r.failure() && r.failure().errorText}`); });
@@ -131,11 +133,28 @@ async function newSession(env, { lang = 'ja', storageState, workaround = !proces
   return s;
 }
 
-/** 氏名選択+PINで端末登録(S01)。ホーム表示まで待つ */
-async function login(s, name, pin = PINS[name]) {
+/** 氏名から userId を引く(テスト準備用) */
+async function userIdOf(name) { return (await stateRows('Users')).find((u) => u.name === name).userId; }
+/** 責任者として招待コードを発行する(active は pinReset、invited は first) */
+async function issueCode(name, env) {
+  const rows = env && env.stateRows ? await env.stateRows('Users') : await stateRows('Users');
+  const u = rows.find((x) => x.name === name);
+  const r = await api('adminIssueInvite', { userId: u.userId, purpose: u.status === 'invited' ? 'first' : 'pinReset' }, { userId: 'u_lead', env });
+  if (!r.ok) throw new Error('adminIssueInvite 失敗: ' + JSON.stringify(r.error));
+  return r.data.code;
+}
+/** S01 ①招待コード入力→次へ(②の確認画面まで) */
+async function enterCode(s, code) {
   const { page } = s;
   await page.goto(s.base + '/#/register');
-  await page.locator('.userlist button', { hasText: name }).click();
+  await page.locator('input[name=invite]').fill(code);
+  await page.getByRole('button', { name: s.t('scr.S01.next') }).click();
+}
+/** 招待コード→本人確認→PINで端末登録(S01)。ホーム表示まで待つ */
+async function login(s, name, pin = PINS[name]) {
+  const { page } = s;
+  await enterCode(s, await issueCode(name, s.env));
+  await page.locator('input[name=pin]').waitFor();
   await page.locator('input[name=pin]').fill(pin);
   await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
   await page.locator('#tabbar button').first().waitFor();
@@ -175,4 +194,4 @@ async function settle(s, ms = 600) {
 /** 横スクロールが無いこと */
 const noHScroll = (s) => s.page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth);
 
-module.exports = { setup, setupWithLatency, newSession, login, tab, goHash, shoot, enterPin, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };
+module.exports = { setup, setupWithLatency, newSession, login, issueCode, enterCode, tab, goHash, shoot, enterPin, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };

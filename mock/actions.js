@@ -21,19 +21,38 @@ module.exports = function install(C) {
   // ===== 公開 ===========================================================
   H.ping = () => ({ apiVersion: 1, schemaVersion: String(cfg('schemaVersion')), serverTime: nowDt() });
 
-  H.listLoginUsers = () => {
-    const rows = table('Users').filter((u) => u.status !== 'disabled')
-      .sort((a, b) => ((a.nameKana || a.name) + '\u0000' + a.name).localeCompare((b.nameKana || b.name) + '\u0000' + b.name, 'ja'));
-    return { users: rows.map((u) => ({ userId: u.userId, name: u.name, nameKana: u.nameKana || '', status: u.status })) };
-  };
-
-  function verifyInvite(u, purpose, code) {
-    const list = table('Invites').filter((i) => i.userId === u.userId && i.purpose === purpose && !i.usedAt);
-    const inv = list[list.length - 1];
-    if (!inv || !U.safeEq(C.hashInvite(u.userId, code), inv.codeHash)) C.countFailure(u, 'registerDevice', 'INVITE_INVALID');
-    if (U.parseDt(inv.expiresAt) < nowMs()) fail('INVITE_EXPIRED', '招待コードの期限が切れています');
-    inv.usedAt = nowDt();
+  // ---- 招待コード(SPEC §3.6)。コードから本人を特定する。氏名一覧は返さない ----
+  function findInvite(code) {
+    for (const inv of table('Invites')) {
+      if (!inv.usedAt && U.safeEq(C.hashInvite(inv.userId, code), inv.codeHash)) return { inv, u: user(inv.userId) };
+    }
+    return null;
   }
+  function throttleCheck() {
+    const st = C.state().inviteFail;
+    if (st && st.until > nowMs() && st.n >= cfg('inviteFailMax')) {
+      fail('RATE_LIMITED', 'しばらく待ってからやり直してください', { retryAfterSec: Math.max(1, Math.ceil((st.until - nowMs()) / 1000)) });
+    }
+  }
+  function throttleHit() {
+    const s = C.state();
+    if (!s.inviteFail || s.inviteFail.until <= nowMs()) s.inviteFail = { n: 0, until: nowMs() + cfg('inviteFailWindowMin') * 60000 };
+    s.inviteFail.n += 1;
+    ev('invite_failed', { actorUserId: null, actorRole: null, detail: { count: s.inviteFail.n } });
+  }
+  function resolveInvite(code) {
+    throttleCheck();
+    const hit = findInvite(code);
+    if (!hit || !hit.u || hit.u.status === 'disabled' || hit.u.status === 'locked') { throttleHit(); fail('INVITE_INVALID', '招待コードが違います'); }
+    if (U.parseDt(hit.inv.expiresAt) < nowMs()) fail('INVITE_EXPIRED', '招待コードの期限が切れています');
+    return hit;
+  }
+  H.lookupInvite = (rc) => {
+    const p = rc.params;
+    if (!/^\d{6}$/.test(p.inviteCode)) fieldInvalid('inviteCode');
+    const { inv, u } = resolveInvite(p.inviteCode);
+    return { name: u.name, company: u.company || '', purpose: inv.purpose };
+  };
   function setPin(u, pin) {
     u.pinSalt = U.randHex(16);
     u.pinHash = C.hashPin(u.pinSalt, u.userId, pin);
@@ -43,23 +62,13 @@ module.exports = function install(C) {
     const p = rc.params;
     const viol = C.shapeViolations(C.ACTIONS.registerDevice.shape, p);
     if (!viol.length && !/^\d{4}$/.test(p.pin)) viol.push({ rule: 'FIELD_INVALID', path: 'pin' });
-    if (!viol.length && p.inviteCode !== undefined && p.inviteCode !== null && !/^\d{6}$/.test(p.inviteCode)) viol.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
+    if (!viol.length && !/^\d{6}$/.test(p.inviteCode)) viol.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
     if (viol.length) vfail(viol);
-    const u = user(p.userId);
-    if (!u) fail('NOT_FOUND', 'ユーザーが見つかりません');
-    if (u.status === 'disabled') fail('USER_DISABLED', 'アカウントが停止されています');
-    if (u.status === 'locked') fail('USER_LOCKED', 'ロック中です');
-    const hasCode = p.inviteCode !== undefined && p.inviteCode !== null;
-    if (u.status === 'invited') {
-      if (!hasCode) fail('INVITE_REQUIRED', '招待コードが必要です');
-      verifyInvite(u, 'first', p.inviteCode);
-      setPin(u, p.pin);
-      u.status = 'active';
-    } else if (hasCode) {
-      verifyInvite(u, 'pinReset', p.inviteCode);
-      setPin(u, p.pin);
-      ev('pin_changed', { actorUserId: u.userId, actorRole: u.role, detail: { via: 'invite' } });
-    } else if (!C.verifyPin(u, p.pin)) C.countFailure(u, 'registerDevice', 'PIN_INVALID');
+    const { inv, u } = resolveInvite(p.inviteCode);
+    inv.usedAt = nowDt();
+    setPin(u, p.pin);
+    if (inv.purpose === 'first') u.status = 'active';
+    else ev('pin_changed', { actorUserId: u.userId, actorRole: u.role, detail: { via: 'invite' } });
     u.failedCount = 0; u.lockedAt = null; u.lastLoginAt = nowDt(); u.updatedAt = nowDt();
     const platform = ['android', 'ios', 'other'].includes(p.platform) ? p.platform : 'other';
     const dev = C.issueDevice(u, { label: p.deviceLabel, platform, appVersion: p.appVersion });
@@ -649,7 +658,7 @@ module.exports = function install(C) {
   // ===== 管理(責任者) ==================================================
   H.adminListUsers = () => ({
     users: table('Users').map((u) => ({
-      userId: u.userId, name: u.name, role: u.role, status: u.status, lang: u.lang, email: u.email || null, qaQualified: u.qaQualified, failedCount: u.failedCount || 0, lockedAt: u.lockedAt || null, lastLoginAt: u.lastLoginAt || null,
+      userId: u.userId, name: u.name, company: u.company || '', role: u.role, status: u.status, lang: u.lang, email: u.email || null, qaQualified: u.qaQualified, failedCount: u.failedCount || 0, lockedAt: u.lockedAt || null, lastLoginAt: u.lastLoginAt || null,
       devices: table('Devices').filter((d) => d.userId === u.userId).map((d) => ({ deviceId: d.deviceId, label: d.label || '', platform: d.platform, status: d.status, registeredAt: d.registeredAt, lastSeenAt: d.lastSeenAt || null })),
     })),
   });
@@ -662,7 +671,8 @@ module.exports = function install(C) {
     if (u.status === 'locked') fail('USER_LOCKED', 'ロック中です');
     if ((p.purpose === 'first' && u.status !== 'invited') || (p.purpose === 'pinReset' && u.status !== 'active')) fail('STATE_CONFLICT', '用途とユーザー状態が合いません', { status: u.status, round: 0 });
     for (const i of table('Invites')) if (i.userId === u.userId && !i.usedAt) i.usedAt = 'superseded';
-    const code = U.randStr(6, '0123456789');
+    let code = U.randStr(6, '0123456789');
+    for (let k = 0; k < 50 && findInvite(code); k++) code = U.randStr(6, '0123456789');
     const inv = insert('Invites', { inviteId: U.newId('i'), userId: u.userId, purpose: p.purpose, codeHash: C.hashInvite(u.userId, code), expiresAt: U.fmtDt(nowMs() + cfg('inviteTtlHours') * 3600000), usedAt: null, createdBy: rc.actor.userId, createdAt: nowDt() });
     ev('invite_issued', { detail: { userId: u.userId, purpose: p.purpose, inviteId: inv.inviteId } });
     return { inviteId: inv.inviteId, code, expiresAt: inv.expiresAt };

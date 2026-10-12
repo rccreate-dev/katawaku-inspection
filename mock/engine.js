@@ -11,7 +11,7 @@ const ROLES_ALL = ['foreman', 'qa', 'lead'];
 const ROLES_QL = ['qa', 'lead'];
 const SAMPLE_JPEG = Buffer.from(SAMPLE_JPEG_B64, 'base64');
 
-const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'INTERNAL'];
+const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
 const VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED', 'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG', 'VERDICT_MAJOR_NEEDS_MAJOR_ITEM', 'VERDICT_MINOR_HAS_MAJOR_ITEM', 'COMMENT_REQUIRED', 'PRIME_SIGNER_REQUIRED', 'REASON_REQUIRED'];
 
 class ApiError extends Error {
@@ -28,7 +28,7 @@ let cur = { actor: { userId: 'system', role: 'system' }, deviceId: null, clientI
 function emptyState() {
   const t = {};
   for (const s of Object.keys(SCHEMA)) t[s] = [];
-  return { t, mails: [], driveFiles: new Map(), driveLog: [], driveSeq: 0, chunks: new Map(), reports: new Map() };
+  return { t, mails: [], driveFiles: new Map(), driveLog: [], driveSeq: 0, chunks: new Map(), reports: new Map(), inviteFail: null };
 }
 const table = (s) => S.t[s];
 function blankRow(sheet) {
@@ -412,7 +412,7 @@ function membershipView(actor, m) {
   const site = siteRow(m.siteId);
   let canDecide = false;
   if (actor.role === 'qa' || actor.role === 'lead') canDecide = authorize(actor, 'decideJoin', { membership: m, siteId: m.siteId, params: {} }).ok;
-  return { membershipId: m.membershipId, siteId: m.siteId, siteName: site ? site.name : null, userId: m.userId, userName: userName(m.userId), status: m.status, requestedAt: m.requestedAt, decidedBy: m.decidedBy || null, decidedByName: m.decidedBy ? userName(m.decidedBy) : null, decidedAt: m.decidedAt || null, assignRole: m.assignRole || null, team: m.team || null, note: m.note || null, canDecide };
+  return { membershipId: m.membershipId, siteId: m.siteId, siteName: site ? site.name : null, userId: m.userId, userName: userName(m.userId), userCompany: (user(m.userId) || {}).company || '', status: m.status, requestedAt: m.requestedAt, decidedBy: m.decidedBy || null, decidedByName: m.decidedBy ? userName(m.decidedBy) : null, decidedAt: m.decidedAt || null, assignRole: m.assignRole || null, team: m.team || null, note: m.note || null, canDecide };
 }
 function assignmentView(a) {
   const site = siteRow(a.siteId);
@@ -542,8 +542,8 @@ function issueDevice(u, extra = {}) {
 const A = (roles, shape, extra = {}) => Object.assign({ roles, shape, handler: null }, extra);
 const ACTIONS = {
   ping: A(ROLES_ALL, {}, { pub: true }),
-  listLoginUsers: A(ROLES_ALL, {}, { pub: true }),
-  registerDevice: A(ROLES_ALL, { userId: 's', pin: 's', inviteCode: 's?', deviceLabel: 's?', platform: 's?', appVersion: 's?' }, { pub: true, write: true }),
+  lookupInvite: A(ROLES_ALL, { inviteCode: 's' }, { pub: true }),
+  registerDevice: A(ROLES_ALL, { inviteCode: 's', pin: 's', deviceLabel: 's?', platform: 's?', appVersion: 's?' }, { pub: true, write: true }),
   me: A(ROLES_ALL, {}), setLang: A(ROLES_ALL, { lang: 's' }, { write: true }),
   changePin: A(ROLES_ALL, { newPin: 's' }, { write: true, star: true, pin: true }),
   logoutDevice: A(ROLES_ALL, {}, { write: true }), getBootstrap: A(ROLES_ALL, {}),
@@ -1100,7 +1100,7 @@ const C = {
   user, userName, siteRow, splitCsv, effAssigns, siteAccess, visibleSiteIds, myAssign, teamOf, isAbsent, effectiveQa, leads, qaRecipients, siteQaUsers,
   recordRow, itemsOf, photosOf, photoCount, canViewDetail, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
   meView, publicItem, enabledItems, siteView, photoMeta, summaryView, detailView, noteView, membershipView, assignmentView, absenceView, reportView,
-  countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
+  state: () => S, countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
   ROLES_QL, ISOK: okRes,
 };
 handlers = require('./actions')(C);

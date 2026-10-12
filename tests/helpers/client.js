@@ -117,17 +117,21 @@ class Session {
 async function login(userId) {
   const key = `${epoch}:${userId}`;
   if (sessions.has(key)) return sessions.get(key);
-  const r = await call('registerDevice', { userId, pin: PINS[userId], deviceLabel: 'contract-test', platform: 'other' });
-  if (!r.ok) throw new Error(`registerDevice(${userId}) 失敗: ${JSON.stringify(r.error)}`);
-  const s = new Session(userId, r.data.deviceToken, r.data.deviceId);
+  // 版1.7: 端末登録は招待コード必須。ログイン済みセッションが要る契約テストでは、制御APIで端末を直接発行する
+  const d = await mock('issueDevice', { userId });
+  const s = new Session(userId, d.deviceToken, d.deviceId);
   sessions.set(key, s);
   return s;
 }
-/** キャッシュしない新しい端末(PIN誤りなどの検証用) */
-async function freshLogin(userId, pin = PINS[userId]) {
-  const r = await call('registerDevice', { userId, pin });
-  if (!r.ok) throw new Error(`registerDevice(${userId}) 失敗: ${JSON.stringify(r.error)}`);
-  return new Session(userId, r.data.deviceToken, r.data.deviceId);
+/** キャッシュしない新しい端末(別端末の検証用) */
+async function freshLogin(userId) {
+  const d = await mock('issueDevice', { userId });
+  return new Session(userId, d.deviceToken, d.deviceId);
+}
+/** 責任者として招待コードを発行する(userId の登録用) */
+async function issueCode(userId, purpose) {
+  const lead = await login('u_lead');
+  return (await lead.ok('adminIssueInvite', { userId, purpose })).code;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,4 +259,4 @@ async function makeQaOk(tanaka, qa, opts = {}) {
   return { recordId };
 }
 
-module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };
+module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, issueCode, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };

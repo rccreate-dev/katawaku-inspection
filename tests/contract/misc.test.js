@@ -166,15 +166,16 @@ describe('C-ADMIN 管理', () => {
     const ttl = Date.parse(i1.expiresAt) - (await h.serverNow());
     assert.ok(Math.abs(ttl - 72 * 3600000) < 60000, '有効期限72時間');
     const i2 = await lead.ok('adminIssueInvite', { userId: 'u_tanaka', purpose: 'pinReset' });
-    const old = await h.call('registerDevice', { userId: 'u_tanaka', pin: '7777', inviteCode: i1.code });
+    const old = await h.call('registerDevice', { pin: '7777', inviteCode: i1.code });
     assert.ok(i1.code === i2.code || old.error.code === 'INVITE_INVALID', '旧コードは失効');
-    const ok = await h.call('registerDevice', { userId: 'u_tanaka', pin: '7777', inviteCode: i2.code });
+    const ok = await h.call('registerDevice', { pin: '7777', inviteCode: i2.code });
     assert.equal(ok.ok, true, JSON.stringify(ok.error));
-    assert.equal((await h.call('registerDevice', { userId: 'u_tanaka', pin: '7777' })).ok, true, '新PINで登録できる');
-    assert.equal((await h.call('registerDevice', { userId: 'u_tanaka', pin: '1111' })).error.code, 'PIN_INVALID', '旧PINは不可');
+    assert.equal((await h.call('registerDevice', { pin: '7777', inviteCode: i2.code })).error.code, 'INVITE_INVALID', '使用済みコードは再使用不可');
+    const nt = ok.data.deviceToken;
+    assert.equal((await h.call('changePin', { newPin: '1234' }, { token: nt, pin: '7777' })).ok, true, '新PINが有効');
     const users = (await lead.ok('adminListUsers', {})).users;
     const u = users.find((x) => x.userId === 'u_tanaka');
-    assert.ok(u.devices.length >= 2);
+    assert.ok(u.devices.length >= 1);
     assert.ok(!('pinHash' in u) && !('pinSalt' in u));
   });
   h.mockOnly(it, 'C-ADMIN-01(mock-only): first は invited のみ・pinReset は invited に不可', async () => {
@@ -182,8 +183,8 @@ describe('C-ADMIN 管理', () => {
     const lead = await h.login('u_lead');
     assert.equal((await lead.call('adminIssueInvite', { userId: 'u_sugiant', purpose: 'pinReset' })).error.code, 'STATE_CONFLICT');
     const i = await lead.ok('adminIssueInvite', { userId: 'u_sugiant', purpose: 'first' });
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: '123456' })).error.code, 'INVITE_INVALID', '旧コード(シード)は新規発行で失効');
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: i.code })).ok, true);
+    assert.equal((await h.call('registerDevice', { pin: '5555', inviteCode: '123456' })).error.code, 'INVITE_INVALID', '旧コード(シード)は新規発行で失効');
+    assert.equal((await h.call('registerDevice', { pin: '5555', inviteCode: i.code })).ok, true);
   });
 
   it('C-ADMIN-01: adminSetUserStatus(disabled)→全actionが USER_DISABLED、自分自身は不可、復帰', async () => {
@@ -193,8 +194,6 @@ describe('C-ADMIN 管理', () => {
     assert.equal((await lead.call('adminSetUserStatus', { userId: 'u_suzuki', status: 'locked' })).error.code, 'VALIDATION_FAILED');
     assert.equal((await lead.ok('adminSetUserStatus', { userId: 'u_suzuki', status: 'disabled' })).status, 'disabled');
     for (const [a, p] of [['me', {}], ['listRecords', {}], ['getBootstrap', {}], ['listAbsences', {}]]) assert.equal((await s.call(a, p)).error.code, 'USER_DISABLED', a);
-    assert.equal((await h.call('registerDevice', { userId: 'u_suzuki', pin: '4444' })).error.code, 'USER_DISABLED');
-    assert.ok(!(await h.call('listLoginUsers')).data.users.some((u) => u.userId === 'u_suzuki'));
     assert.equal((await lead.ok('adminSetUserStatus', { userId: 'u_suzuki', status: 'active' })).status, 'active');
     assert.equal((await s.call('me', {})).ok, true);
   });

@@ -7,7 +7,7 @@ function membershipView_(actor, m) {
   var canDecide = m.status === 'pending' && authorize(actor, 'decideJoin', { siteId: m.siteId, membership: m, params: {} }).ok;
   return {
     membershipId: m.membershipId, siteId: m.siteId, siteName: site ? site.name : '', userId: m.userId,
-    userName: userName_(m.userId), status: m.status, requestedAt: m.requestedAt,
+    userName: userName_(m.userId), userCompany: userCompany_(m.userId), status: m.status, requestedAt: m.requestedAt,
     decidedBy: orNull_(m.decidedBy), decidedByName: userName_(m.decidedBy), decidedAt: orNull_(m.decidedAt),
     assignRole: orNull_(m.assignRole), team: orNull_(m.team), note: orNull_(m.note), canDecide: canDecide
   };
