@@ -11,7 +11,7 @@ function runRoster() {
 
     // 設定: appBaseUrl
     var cfg = Repo.get('Config', 'appBaseUrl');
-    if (cfg && !cfg.value) { Repo.update('Config', cfg, { value: 'https://rccreate-dev.github.io/katawaku-inspection', updatedAt: now }); log.push('Config.appBaseUrl を設定'); }
+    if (cfg && !cfg.value) { Repo.update('Config', cfg, { value: 'https://kensa.rccreate.net', updatedAt: now }); log.push('Config.appBaseUrl を設定'); }
 
     // ユーザー
     var lead = Repo.all('Users').filter(function (u) { return u.role === 'lead' && u.status !== 'disabled'; })[0];
