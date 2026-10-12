@@ -112,7 +112,7 @@ Apps Script エディタ上部の関数選択プルダウンで関数を選び�
 7. **コードを更新して再デプロイするとき**: 「デプロイ」→「デプロイを管理」→ 鉛筆(編集)→ バージョン「新バージョン」→「デプロイ」。URLを変えずに更新できます(要確認: 画面表記)。「新しいデプロイ」を押すとURLが変わり、`config.js` の書き換えが必要になります。
 
 ### 3-8. 最初にConfigシートで設定するもの
-スプレッドシートの `Config` シートで、`appBaseUrl` の行の `value` 列に **アプリの公開URL**(手順5で確定するURL。例 `https://rccreate-dev.github.io/katawaku-inspection`。**末尾の `/` は付けない**)を入れる。
+スプレッドシートの `Config` シートで、`appBaseUrl` の行の `value` 列に **アプリの公開URL**(手順5で確定するURL。例 `https://kensa.rccreate.net`。**末尾の `/` は付けない**)を入れる。
 - 空のままだと、参加用QRとメール内リンクのURLが `/#/join?...` だけになり使えません(Admin.gs `joinUrl_` は `appBaseUrl` を先頭に付けます)。
 - メールを使わない場合は `mailEnabled` を `FALSE` にしてもよい(既定は `TRUE`。メールは Users の `email` がある人にだけ送られます)。
 - そのほかのConfig値(30分/60分、PIN誤り5回、招待コード72時間、写真の大きさ等)は既定のままでよい。`timezone` は変更不可。`enabledStages` は `pre_pour`(打設前)のみ。
@@ -200,7 +200,7 @@ http://localhost:* http://127.0.0.1:*
 2. 「Build and deployment」の Source を **「GitHub Actions」** にする(「Deploy from a branch」ではない)。
 3. `main` ブランチに push する(すでに push 済みなら、Actions タブで上の「Run workflow」)。「Actions」タブで緑のチェックを確認。
    - 初回に「環境 `github-pages` へのデプロイが保護ルールで止まる」と出たら、Settings → Environments → `github-pages` の「Deployment branches」に `main` が許可されているか確認する(要確認)。
-4. 公開URL: `https://rccreate-dev.github.io/katawaku-inspection/`(組織名・リポジトリ名から推定。実際のURLは Settings → Pages と、Actions の実行結果に表示されるので確認)。
+4. 公開URL: `https://kensa.rccreate.net/`(組織名・リポジトリ名から推定。実際のURLは Settings → Pages と、Actions の実行結果に表示されるので確認)。
 5. このURL(末尾 `/` なし)を、3-8 の Config `appBaseUrl` と 4-1 の `APP_BASE_URL` に入れる。
 6. ブラウザでURLを開き、ログイン画面(端末の登録)が出れば成功。
 - HTTPS で配信されます(GitHub Pages の標準)。カメラとService Workerに必要です。
@@ -396,3 +396,9 @@ http://localhost:* http://127.0.0.1:*
 - 4-1: `config.js` の `APP_BASE_URL` をフロントが使っているか(使用箇所なし。要確認)
 - 4-2: `frame-ancestors` をGitHub Pagesで設定できるか(要確認)
 - 8: メール通知の実機確認(Gmail送信上限・迷惑メール判定などは未確認)
+
+## 独自ドメイン(kensa.rccreate.net)への切り替え
+1. DNS で `kensa` の CNAME レコードを `rccreate-dev.github.io` に向ける。
+2. GitHub の Settings → Pages → Custom domain に `kensa.rccreate.net` を入れて保存し、反映後に「Enforce HTTPS」をオンにする。
+3. スプレッドシート Config の `appBaseUrl` を `https://kensa.rccreate.net` にする。
+4. ドメインが変わると別アプリ扱いになるため、利用者はホーム画面に入れ直し、端末登録をやり直す。
