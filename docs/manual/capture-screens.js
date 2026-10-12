@@ -45,10 +45,11 @@ async function makeJpeg(page, w = 1200, h = 800) {
     const f = await E.newSession(env);
     const { page } = f;
     // --- 初回登録 ---
+    const code = await E.issueCode('田中', env);
     await page.goto(f.base + '/#/register');
-    await page.locator('.userlist button').first().waitFor();
+    await page.locator('input[name=invite]').fill(code);
     await shot(f, 'f01-register-list');
-    await page.locator('.userlist button', { hasText: '田中' }).click();
+    await page.getByRole('button', { name: f.t('scr.S01.next') }).click();
     await page.locator('input[name=pin]').fill('1111');
     await shot(f, 'f02-register-pin');
     await page.getByRole('button', { name: f.t('scr.S01.register') }).click();
