@@ -109,10 +109,24 @@
         if (!res.ok) return res;
         out = out.concat(res.data.records);
         if (res.data.nextCursor && out.length < 2000) return page(res.data.nextCursor);
-        return { ok: true, data: { records: out, serverTime: res.data.serverTime } };
+        return { ok: true, data: { records: out, serverTime: res.data.serverTime, complete: !res.data.nextCursor } };
       });
     }
     return page(null);
+  }
+  /* 全件取得の結果に無い記録を端末のキャッシュから消す(SPEC §8.9a)。未送信の操作・下書きがある記録は残す */
+  function pruneMissing(list) {
+    var alive = {};
+    list.forEach(function (s) { alive[s.recordId] = 1; });
+    return Promise.all([db().all('records'), KW.outbox.all(), db().all('drafts')]).then(function (v) {
+      var keep = {};
+      v[1].forEach(function (r) { if (r.recordId) keep[r.recordId] = 1; });
+      v[2].forEach(function (d) { if (d && d.recordId) keep[d.recordId] = 1; });
+      var gone = v[0].filter(function (r) { return !alive[r.recordId] && !keep[r.recordId]; }).map(function (r) { return r.recordId; });
+      return Promise.all(gone.map(removeRecord)).then(function () {
+        if (gone.length) KW.bus.emit('records:changed', gone);
+      });
+    });
   }
   /* 差分同期(SPEC §8.9)。成功で lastSyncAt 更新 */
   function syncRecords(force) {
@@ -125,6 +139,9 @@
         var st = KW.time.parse(res.data.serverTime);
         var next = st != null ? KW.time.toIso(st - 5000) : null;
         return putSummaries(res.data.records).then(function () {
+          // 全件取得が最後まで取れたときだけ、サーバーに無い記録を端末から消す(サーバー側で削除・非表示になった分)
+          return (!since || force) && res.data.complete && !params.since ? pruneMissing(res.data.records) : null;
+        }).then(function () {
           if (next) db().kvSet('recordsSince', next);
           KW.state.lastSyncAt = Date.now();
           db().kvSet('lastSyncAt', KW.state.lastSyncAt);
