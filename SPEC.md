@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.7.0 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
+- 版: 1.8.0 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -410,6 +410,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | escNotified | int | 必 | 通知済みエスカレーション段階 0/1/2(提出ごとに0へ戻す) |
 | createdAt / updatedAt | dt | 必 | |
 | version | int | 必 | 更新ごとに+1(UIの更新検知用。楽観ロックには使わない) |
+| ownerCompany | str | | **作成時の作成者の会社名の写し**(版1.8。`createRecord` 時に `Users.company` を写す。後で名簿が変わっても過去の記録は変わらない。**列は末尾に追加**(§2.9a)。この列が空の既存記録は、表示・PDFとも作成者の現在の `Users.company` で代用する) |
 
 一意制約: 同一 `(siteId,floor,zone,lot,stage)` に対し `reinspectOf` が空の記録は1件まで。2件目の作成は `ALREADY_EXISTS`。`approved` 済みスロットを再検査するときだけ `reinspectOf=その記録` で追加作成でき、その記録は元記録が `approved` であること(P-31)。
 
@@ -638,7 +639,7 @@ PIN検証:
 ### 3.6 端末登録フロー(`lookupInvite` → `registerDevice`)(版1.7で変更。ユーザー決定)
 **氏名一覧は未認証で返さない**(他社の職長も招待するため。`listLoginUsers` は廃止)。**招待コードを先に入力**し、コードから本人を特定する。
 
-UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ ②サーバーが返した **本人の氏名・会社名**(「○○さんですね」)を確認 → ③PIN4桁(新規)を入力 →「登録する」(`registerDevice`)。氏名を選ぶ操作はない。
+UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ ②サーバーが返した **本人の氏名・会社名**(「○○さんですね」)を確認 → ③**会社名**(責任者が名簿に入れた値があれば初期表示。本人が書き換えてよい。最大40文字)とPIN4桁(新規)を入力 →「登録する」(`registerDevice`)。**会社名は初回登録(`purpose=first`)では必須**(名簿に会社名があれば省略可)。再設定(`pinReset`)では任意。入力された会社名は前後の空白を除き連続空白を1つにして `Users.company` に保存する。氏名を選ぶ操作はない。
 
 | ケース | コードの `purpose` | サーバー処理 |
 |---|---|---|
@@ -763,7 +764,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **UserBrief** `{ "userId": "u_sato", "name": "佐藤" }`
 
-**Me** `{ "userId", "name", "role": "foreman|qa|lead", "status": "active|locked", "lang": "ja|id", "email": "str|null" }`
+**Me** `{ "userId", "name", "company":"str"(版1.8。未設定は空文字), "role": "foreman|qa|lead", "status": "active|locked", "lang": "ja|id", "email": "str|null" }`
 
 **Site**(`getBootstrap.sites[]`)
 ```json
@@ -781,7 +782,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 ```json
 { "recordId":"r_8k2m4n6p8q0s2u4w", "siteId":"s_a", "floor":"2F", "zone":"", "lot":"L1", "stage":"pre_pour",
   "status":"submitted", "round":1, "reinspectOf":null,
-  "ownerUserId":"u_tanaka", "ownerName":"田中", "team":"田中班",
+  "ownerUserId":"u_tanaka", "ownerName":"田中", "ownerCompany":"山田工業株式会社", "team":"田中班",
   "pourPlannedAt":"2026-10-08T09:00:00+09:00",
   "submittedAt":"2026-10-07T10:00:00+09:00",
   "claimedBy":null, "claimedByName":null, "claimedAt":null,
@@ -938,7 +939,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 **lookupInvite**(公開) params `{ "inviteCode":"6桁" }` → `{ "name", "company":"", "purpose":"first|pinReset" }`
 エラー: `VALIDATION_FAILED`(6桁でない)/ `INVITE_INVALID` / `INVITE_EXPIRED` / `RATE_LIMITED`。コードは使用済みにしない。
 
-**registerDevice**(公開) params `{ "inviteCode", "pin", "deviceLabel"?, "platform"?, "appVersion"? }` → `{ "deviceId", "deviceToken", "user": <Me> }`
+**registerDevice**(公開) params `{ "inviteCode", "pin", "company"?(≤40文字), "deviceLabel"?, "platform"?, "appVersion"? }`。`purpose=first` で `company` が空かつ名簿の `company` も空なら `VALIDATION_FAILED`(`violations:[{rule:"FIELD_INVALID",path:"company"}]`。コードは消費しない)。40文字超も同じ。`company` があれば `Users.company` を更新する → `{ "deviceId", "deviceToken", "user": <Me> }`
 エラー: `VALIDATION_FAILED`(inviteCode・pin形式)/ `INVITE_INVALID`(停止・ロック中のユーザーのコードも同じ)/ `INVITE_EXPIRED` / `RATE_LIMITED`。
 例:
 ```json
@@ -1414,7 +1415,7 @@ PDF: `generateReport` `listReports`
 | ID | ルート | 対象 | 使うaction | 表示 | 操作・制御 |
 |---|---|---|---|---|---|
 | S00 | (起動) | 全員 | `me`,`getBootstrap` | スプラッシュ | トークン無→S01、`locked`→S02、それ以外→ホーム(職長S03/他S09)。保留の参加QR(`pendingJoin`)があればS13へ |
-| S01 | `#/register` | 未登録端末 | `lookupInvite`,`registerDevice` | ①招待コード(6桁)欄と「次へ」。②「○○さん(会社名)ですね」と確認し、③PIN4桁(新規)を入力して「登録する」。氏名リストは出さない。「コードが違う/期限切れ」は責任者に再発行を依頼する案内 | 登録成功で `deviceToken` 保存→S00。エラーは `err.<CODE>`。`RATE_LIMITED` は待つ案内、`USER_LOCKED`→S02 |
+| S01 | `#/register` | 未登録端末 | `lookupInvite`,`registerDevice` | ①招待コード(6桁)欄と「次へ」。②「○○さんですね」と確認し、③**会社名欄**(初期値=名簿の会社名。初回は必須)とPIN4桁(新規)を入力して「登録する」。氏名リストは出さない。「コードが違う/期限切れ」は責任者に再発行を依頼する案内 | 登録成功で `deviceToken` 保存→S00。エラーは `err.<CODE>`。`RATE_LIMITED` は待つ案内、`USER_LOCKED`→S02 |
 | S02 | `#/locked` | ロック中 | `me`(60秒ごと) | 「ロックされています。責任者に解除を依頼してください」 | 解除されたら自動で復帰。「この端末をログアウト」(`logoutDevice`) |
 | S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
 | S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
@@ -1498,7 +1499,7 @@ PDF: `generateReport` `listReports`
 ### 10.2 内容(日本語のみ。A4縦、余白12mm)
 0. **件名 `subject`**(§10.2a)。PDFの1ページ目の見出し(タイトルの直下)に大きく表示し、HTMLの `<title>` にも同じ文字列を入れる。
 1. タイトル「型枠工事 {段階名}検査記録」。
-2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(`ownerUserId` の `company`。空なら項目ごと出さない。版1.7)**、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
+2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(記録の `ownerCompany`。空なら作成者の現在の `company`、それも空なら項目ごと出さない。版1.7/1.8)**、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
 3. **3者サイン欄**: 職長(**会社名**・氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(**会社名**・氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。折り返し・行の高さ・列幅は §10.2b-A(版1.5.3)。
@@ -1701,6 +1702,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-AUTH-03: 招待コードなし→`VALIDATION_FAILED`、誤りコード→`INVITE_INVALID`、`lookupInvite` 正コード→本人の `name,company`(コードは未使用のまま)、正しい `123456`+新PIN→`registerDevice` 成功(`status=active`)、再使用→`INVITE_INVALID`、追加端末は `pinReset` コードで登録可(`userId` をリクエストに含めても無視)、氏名+PINだけの登録はできない。(mock-only)時計+73時間→`INVITE_EXPIRED`。
 - C-AUTH-04(ロック): 稼働中ユーザーが `changePin` 等の stepUp で誤PINを5回 → 1〜4回目 `PIN_INVALID`(`remaining` が4,3,2,1)、5回目 `USER_LOCKED`。正しいPINでも `USER_LOCKED`。既存端末のtokenでも `listRecords` が `USER_LOCKED`、`me` は `status=locked` を返す。
 - C-AUTH-06(総当たり対策): 一致しない招待コードを `lookupInvite` で `inviteFailMax`(10)回続けると、次は正しいコードでも `RATE_LIMITED`。`inviteFailWindowMin` 経過後(mockは時計を進める)は再び使える。`failedCount` は増えない。
+- C-AUTH-08(会社名の入力・記録への反映・版1.8): `purpose=first` で会社名なし(名簿も空)→`VALIDATION_FAILED`(path=`company`)でコードは消費されない。41文字→`VALIDATION_FAILED`。会社名つきで登録でき、`Users.company` に空白整形のうえ保存され `Me.company` に出る。記録の `ownerCompany` は作成時の `Users.company` の写しで、後で名簿が変わっても変わらない(新しい記録は新しい会社名)。`RecordSummary/Detail.ownerCompany` に出る。PDFの職長の会社名・職長サイン欄は `ownerCompany` を使う。
 - C-AUTH-07(会社名): Users の `company` が `lookupInvite` と `adminListUsers` に出る。PDFの職長サイン欄・基本情報に出る(空なら出さない)。
 - C-AUTH-05: 状態ダンプ・全応答に `pinHash`/`pinSalt`/`tokenHash`/PIN平文/招待コード平文が含まれない。(mock-only)`Idem.responseJson`・`Events.detail` にも含まれない。
 - C-PIN-01: 田中が下書き完了の記録で `submitRecord` を `pin` なし→`PIN_REQUIRED`(カウント不変)、誤PIN×5→`USER_LOCKED`、責任者が `adminUnlockUser` → 田中の操作が復帰し `failedCount=0`。
@@ -2001,3 +2003,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.6.4 | 不具合対応: iPhone で図面(写真)保存時に IndexedDB が Blob 保存に失敗しエラーになる。§8.2: Blob は ArrayBuffer+type で保存し読み出し時に Blob へ戻す。API契約は変更なし。 |
 | 2026-10-10 | 1.6.5 | ユーザー要望: 元請PDFの図面ページの凡例に測定値を載せる。§10.2c-3: 凡例を label 単位の行にし、`実測値` 列(`④-1 … -1mm`)を追加。API契約・列名は変更なし(backend/Report.gs のみ)。 |
 | 2026-10-12 | 1.7.0 | ユーザー決定(他社の職長も招待するため): ①端末登録を **招待コード先入力**に変更(`listLoginUsers` 廃止→公開action `lookupInvite` 追加。`registerDevice` は `userId` を受け取らず `inviteCode`+`pin`。追加端末(氏名+PINのみ)は廃止し、責任者発行の `pinReset` コードに統一。総当たり対策=サーバー全体の失敗回数制限 `RATE_LIMITED`、Config `inviteFailMax`/`inviteFailWindowMin`、発行時にコード重複を避ける)。②Users に **`company`(会社名)** を追加(末尾列)。`adminListUsers`・`Membership.userCompany`・PDF(基本情報・職長/品質管理者サイン欄)に表示。③責任者の追加端末用に GASエディタ専用 `issueLeadCode`(§3.6.1)。action数は43のまま(1削除・1追加)。P-23 解消 |
+| 2026-10-12 | 1.8.0 | ユーザー要望: 職長が端末登録のときに会社名も入力できるようにし、検査記録に反映する。①`registerDevice` に任意 `company`(≤40文字)を追加。`purpose=first` では会社名を必須(名簿に会社名があれば省略可)。入力値は `Users.company` に保存。②`Me.company` を追加。③Records に **`ownerCompany`**(作成時の会社名の写し。末尾列)を追加し、`RecordSummary/Detail.ownerCompany` に出す。PDFの職長の会社名・職長サイン欄は `ownerCompany`(空なら現在の `company`)。④S01 の確認画面に会社名欄。action数は43のまま。 |

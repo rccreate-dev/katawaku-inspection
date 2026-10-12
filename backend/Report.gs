@@ -136,7 +136,7 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<h1>' + esc_(reportSubject_(rec, site)) + '</h1>');
   h.push('<p>型枠工事 ' + esc_(stage) + '検査記録</p>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
-  var ownerCompany = userCompany_(rec.ownerUserId);
+  var ownerCompany = rec.ownerCompany || userCompany_(rec.ownerUserId);
   if (ownerCompany) h.push('<tr><th>職長の会社名</th><td>' + esc_(ownerCompany) + '</td><th>職長</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
   h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
@@ -145,7 +145,7 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
 
   // 3者サイン
   h.push('<h2>サイン欄(3者)</h2><table class="sign"><tr><th>職長</th><th>品質管理者</th><th>元請</th></tr><tr>');
-  h.push('<td>' + (rec.submittedAt ? esc_(userName_(rec.submittedBy)) + companyLine_(rec.submittedBy) + '<br>' + esc_(dtShort_(rec.submittedAt)) + '<br>PIN認証による電子サイン' : '未') + '</td>');
+  h.push('<td>' + (rec.submittedAt ? esc_(userName_(rec.submittedBy)) + (rec.submittedBy === rec.ownerUserId && ownerCompany ? '<br>' + esc_(ownerCompany) : companyLine_(rec.submittedBy)) + '<br>' + esc_(dtShort_(rec.submittedAt)) + '<br>PIN認証による電子サイン' : '未') + '</td>');
   h.push('<td>' + (rec.qaVerdict === 'ok' ? esc_(userName_(rec.qaVerdictBy)) + companyLine_(rec.qaVerdictBy) + '<br>' + esc_(dtShort_(rec.qaVerdictAt)) + '<br>判定: 合格' : '未') + '</td>');
   if (rec.primeSignedAt) {
     h.push('<td>' + esc_(rec.primeSignerName) + '<br>' + esc_(METHOD_LABEL_[rec.primeSignMethod] || rec.primeSignMethod) +

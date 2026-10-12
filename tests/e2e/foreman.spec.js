@@ -47,13 +47,35 @@ describe('E-01 登録', () => {
     await page.getByRole('button', { name: s.t('scr.S01.next') }).click();
     await page.locator('input[name=pin]').waitFor();
     const txt = await page.locator('#view').innerText();
-    assert.ok(txt.includes('田中') && txt.includes('山田工業株式会社'), '氏名と会社名の確認が出る');
+    assert.ok(txt.includes('田中'), '氏名の確認が出る');
+    assert.equal(await page.locator('input[name=company]').inputValue(), '山田工業株式会社', '会社名は名簿の値が初期表示');
     await page.locator('input[name=pin]').fill('1111');
     await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();
     await page.reload();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();
     assert.equal(await page.locator('input[name=invite]').count(), 0, '再登録画面に戻らない');
+    s.assertClean();
+    await s.close();
+  });
+});
+
+describe('E-01b 会社名の入力', () => {
+  it('初回登録は会社名が空だと「登録する」が押せず、入力すると登録でき、名簿(Users.company)に入る', async () => {
+    await E.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '', status: 'invited' } });
+    const s = await E.newSession(env);
+    const { page } = s;
+    await E.enterCode(s, await E.issueCode('田中'));
+    await page.locator('input[name=pin]').waitFor();
+    const reg = page.getByRole('button', { name: s.t('scr.S01.register') });
+    await page.locator('input[name=pin]').fill('1111');
+    assert.equal(await reg.isDisabled(), true, '会社名が空のうちは登録できない');
+    await page.locator('input[name=company]').fill('  新規建設  株式会社 ');
+    assert.equal(await reg.isDisabled(), false);
+    await reg.click();
+    await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();
+    const u = (await E.stateRows('Users')).find((x) => x.userId === 'u_tanaka');
+    assert.equal(u.company, '新規建設 株式会社');
     s.assertClean();
     await s.close();
   });
@@ -157,6 +179,8 @@ describe('E-09 ロック', () => {
     await page.getByRole('button', { name: s.t('scr.S02.logout') }).click();
     await page.locator('input[name=invite]').waitFor();
     await E.enterCode(s, await E.issueCode('田中'));
+    const co = page.locator('input[name=company]');
+    if (!(await co.inputValue())) await co.fill('テスト工業');
     await page.locator('input[name=pin]').fill('1111');
     await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();

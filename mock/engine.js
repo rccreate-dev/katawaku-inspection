@@ -84,6 +84,7 @@ function driveGet(fileId) {
 // マスタ参照・名簿
 // ---------------------------------------------------------------------------
 const user = (id) => (id ? find('Users', id) : null);
+const userCompanyOf = (id) => { const u = user(id); return u && u.company ? u.company : ''; };
 const userName = (id) => { const u = user(id); return u ? u.name : (id || null); };
 const siteRow = (id) => find('Sites', id);
 const splitCsv = (s) => (s ? String(s).split(',').map((x) => x.trim()).filter(Boolean) : []);
@@ -319,7 +320,7 @@ function allowedActions(actor, rec) {
 // ---------------------------------------------------------------------------
 // ビュー(§5.1)
 // ---------------------------------------------------------------------------
-const meView = (u) => ({ userId: u.userId, name: u.name, role: u.role, status: u.status === 'locked' ? 'locked' : 'active', lang: u.lang, email: u.email || null });
+const meView = (u) => ({ userId: u.userId, name: u.name, role: u.role, status: u.status === 'locked' ? 'locked' : 'active', company: u.company || '', lang: u.lang, email: u.email || null });
 const publicItem = (r) => ({ itemId: r.itemId, seq: r.seq, stage: r.stage, audience: r.audience, groupKey: r.groupKey, groupJa: r.groupJa, groupId: r.groupId, textJa: r.textJa, textId: r.textId, key: r.key, tol: r.tol, measure: r.measure, minMeasures: r.minMeasures, unit: r.unit });
 function enabledItems() {
   const stages = splitCsv(cfg('enabledStages'));
@@ -356,7 +357,7 @@ function summaryView(actor, rec) {
   return {
     recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone || '', lot: rec.lot, stage: rec.stage,
     status: rec.status, round: rec.round, reinspectOf: rec.reinspectOf || null,
-    ownerUserId: rec.ownerUserId, ownerName: userName(rec.ownerUserId), team: rec.team || '',
+    ownerUserId: rec.ownerUserId, ownerName: userName(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompanyOf(rec.ownerUserId), team: rec.team || '',
     pourPlannedAt: rec.pourPlannedAt || null, submittedAt: rec.submittedAt || null,
     claimedBy: rec.claimedBy || null, claimedByName: rec.claimedBy ? userName(rec.claimedBy) : null, claimedAt: rec.claimedAt || null,
     qaVerdict: rec.qaVerdict || null, major: !!rec.major, stopped: !!rec.stopped, escLevel: escLevel(rec),
@@ -543,7 +544,7 @@ const A = (roles, shape, extra = {}) => Object.assign({ roles, shape, handler: n
 const ACTIONS = {
   ping: A(ROLES_ALL, {}, { pub: true }),
   lookupInvite: A(ROLES_ALL, { inviteCode: 's' }, { pub: true }),
-  registerDevice: A(ROLES_ALL, { inviteCode: 's', pin: 's', deviceLabel: 's?', platform: 's?', appVersion: 's?' }, { pub: true, write: true }),
+  registerDevice: A(ROLES_ALL, { inviteCode: 's', pin: 's', deviceLabel: 's?', platform: 's?', appVersion: 's?', company: 's?' }, { pub: true, write: true }),
   me: A(ROLES_ALL, {}), setLang: A(ROLES_ALL, { lang: 's' }, { write: true }),
   changePin: A(ROLES_ALL, { newPin: 's' }, { write: true, star: true, pin: true }),
   logoutDevice: A(ROLES_ALL, {}, { write: true }), getBootstrap: A(ROLES_ALL, {}),

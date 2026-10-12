@@ -63,9 +63,13 @@ module.exports = function install(C) {
     const viol = C.shapeViolations(C.ACTIONS.registerDevice.shape, p);
     if (!viol.length && !/^\d{4}$/.test(p.pin)) viol.push({ rule: 'FIELD_INVALID', path: 'pin' });
     if (!viol.length && !/^\d{6}$/.test(p.inviteCode)) viol.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
+    const company = String(p.company == null ? '' : p.company).replace(/\s+/g, ' ').trim();
+    if (!viol.length && company.length > 40) viol.push({ rule: 'FIELD_INVALID', path: 'company' });
     if (viol.length) vfail(viol);
     const { inv, u } = resolveInvite(p.inviteCode);
+    if (inv.purpose === 'first' && !company && !u.company) vfail([{ rule: 'FIELD_INVALID', path: 'company' }]);
     inv.usedAt = nowDt();
+    if (company) u.company = company;
     setPin(u, p.pin);
     if (inv.purpose === 'first') u.status = 'active';
     else ev('pin_changed', { actorUserId: u.userId, actorRole: u.role, detail: { via: 'invite' } });
@@ -227,7 +231,7 @@ module.exports = function install(C) {
     const rec = insert('Records', {
       recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone, lot: p.lot, stage: p.stage, status: 'draft', round: 1, reinspectOf: p.reinspectOf || null,
       ownerUserId: actor.userId, team: C.teamOf(actor.userId, p.siteId), pourPlannedAt: p.pourPlannedAt ? U.normDt(p.pourPlannedAt) : null,
-      major: false, stopped: false, escNotified: 0, createdAt: n, updatedAt: n, version: 1,
+      major: false, stopped: false, escNotified: 0, createdAt: n, updatedAt: n, version: 1, ownerCompany: actor.company || '',
     });
     for (const it of C.enabledItems().filter((i) => i.stage === p.stage)) {
       insert('RecordItems', { recordItemId: `${rec.recordId}:${it.itemId}`, recordId: rec.recordId, itemId: it.itemId, snapshot: { seq: it.seq, stage: it.stage, audience: it.audience, groupKey: it.groupKey, groupJa: it.groupJa, groupId: it.groupId, textJa: it.textJa, textId: it.textId, key: it.key, tol: it.tol, measure: it.measure, minMeasures: it.minMeasures, unit: it.unit }, selfValues: [], qaValues: [] });

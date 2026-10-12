@@ -91,15 +91,21 @@
         KW.clear(body);
         var isFirst = found.purpose === 'first';
         var pin = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '4', pattern: '[0-9]*', class: 'inp pin', 'aria-label': t('pin.label'), name: 'pin' });
+        var company = h('input', { type: 'text', class: 'inp', maxlength: '40', autocomplete: 'organization', name: 'company', 'aria-label': t('scr.S01.company'), value: found.company || '' });
         var msg = h('div');
         var go = h('button', { type: 'button', class: 'btn', disabled: true }, t('scr.S01.register'));
-        pin.addEventListener('input', function () { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); go.disabled = !/^\d{4}$/.test(pin.value); });
+        // 会社名は初回登録のとき必須(再設定のときは空でも可)
+        function ready() { go.disabled = !(/^\d{4}$/.test(pin.value) && (!isFirst || company.value.trim())); }
+        pin.addEventListener('input', function () { pin.value = pin.value.replace(/\D/g, '').slice(0, 4); ready(); });
+        company.addEventListener('input', ready);
+        ready();
         go.addEventListener('click', C.guard(go, function () {
           KW.clear(msg);
           var pv = pin.value;
           return confirmSwitch(found).then(function (sw) {
             if (!sw.go) { if (sw.incomplete) msg.appendChild(C.msg('', t('scr.S01.send_incomplete'))); return null; }
             var params = { inviteCode: codeValue, pin: pv, deviceLabel: deviceLabel(), platform: platform(), appVersion: KW.config.APP_VERSION };
+            if (company.value.trim()) params.company = company.value.trim().slice(0, 40);
             pin.value = ''; go.disabled = true;
             return KW.api.call('registerDevice', params).then(function (res) {
               params = null; pv = null;
@@ -119,7 +125,8 @@
         body.appendChild(h('div', { class: 'card' },
           h('p', { class: 'sub' }, t('scr.S01.confirm_q')),
           h('h2', null, t('scr.S01.confirm_name', { name: found.name })),
-          found.company ? h('div', { class: 'sub' }, found.company) : null,
+          h('label', { class: 'lbl' }, t('scr.S01.company') + (isFirst ? ' *' : '')), company,
+          h('p', { class: 'sub' }, t('scr.S01.company_hint')),
           h('p', { class: 'sub' }, isFirst ? t('scr.S01.invite_first') : t('scr.S01.invite_reset')),
           h('label', { class: 'lbl' }, t('scr.S01.pin_new')), pin,
           msg,

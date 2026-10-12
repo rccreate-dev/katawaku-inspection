@@ -155,6 +155,8 @@ async function login(s, name, pin = PINS[name]) {
   const { page } = s;
   await enterCode(s, await issueCode(name, s.env));
   await page.locator('input[name=pin]').waitFor();
+  const co = page.locator('input[name=company]');
+  if (!(await co.inputValue())) await co.fill('テスト工業');
   await page.locator('input[name=pin]').fill(pin);
   await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
   await page.locator('#tabbar button').first().waitFor();

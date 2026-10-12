@@ -309,7 +309,7 @@
         if (d.status !== 'submitted') { KW.app.go('#/record/' + id, true); return; }
         ctx.chrome({ back: '#/', site: C.siteName(d.siteId), bar: d.floor + (d.zone ? '・' + d.zone : '') + ' / ' + d.lot });
         el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S10.title')), C.statusChip(d.status, true)));
-        el.appendChild(C.recHeadCard(d, h('div', { class: 'meta' }, t('lbl.submitted_by', { name: d.ownerName || '' }) + ' / ' + C.ago(d.submittedAt))));
+        el.appendChild(C.recHeadCard(d, h('div', { class: 'meta' }, t('lbl.submitted_by', { name: C.ownerLabel(d) }) + ' / ' + C.ago(d.submittedAt))));
         if (d.escLevel) el.appendChild(C.banner('warn', h('b', null, t('esc.' + d.escLevel))));
         el.appendChild(claimSection());
         var lastG = null;
