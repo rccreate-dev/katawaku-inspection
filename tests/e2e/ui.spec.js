@@ -135,3 +135,24 @@ describe('E-21 通信診断(SPEC §1.9)', () => {
     s.assertClean(); await s.close();
   });
 });
+
+describe('E-22 端末キャッシュの整理(SPEC §8.9)', () => {
+  it('サーバーに無い記録は起動時の全件取得で端末から消え、下書きのある記録は残る', async () => {
+    const s = await E.newSession(env);
+    const { page } = s;
+    await E.login(s, '責任者');
+    await page.waitForTimeout(800);
+    const r = await page.evaluate(async () => {
+      const mk = (id) => ({ recordId: id, siteId: 's_gone', summary: { recordId: id, siteId: 's_gone', version: 1 }, detail: null, fetchedAt: Date.now() });
+      await KW.db.put('records', mk('r_ghost0000000000'));
+      await KW.db.put('records', mk('r_draft0000000000'));
+      await KW.db.put('drafts', { recordId: 'r_draft0000000000' });
+      await KW.data.syncRecords(true);
+      return { ghost: !!(await KW.db.get('records', 'r_ghost0000000000')), draft: !!(await KW.db.get('records', 'r_draft0000000000')), real: (await KW.db.all('records')).length };
+    });
+    assert.equal(r.ghost, false, 'サーバーに無い記録は消える');
+    assert.equal(r.draft, true, '下書きのある記録は残る');
+    assert.ok(r.real >= 2, 'サーバーにある記録は残る');
+    s.assertClean(); await s.close();
+  });
+});
