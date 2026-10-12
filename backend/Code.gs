@@ -212,8 +212,35 @@ function jsonOut_(res) {
   return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
 }
 
+/**
+ * 計測(SPEC §1.9)。1リクエストの処理時間の内訳を応答の meta.timing に載せる(診断用。秘密情報は含めない)。
+ * totalMs=サーバー内の合計 / authMs=端末認証 / pinMs=PIN検証 / lockWaitMs=ロック待ち / driveMs=Drive操作(写真)
+ * reads・readMs / writes・writeMs=シートの読み書きの回数と時間(Repo の計測)
+ */
+var Perf = {
+  t0: 0,
+  m: {},
+  begin: function () {
+    this.t0 = Date.now();
+    this.m = { authMs: 0, pinMs: 0, lockWaitMs: 0, driveMs: 0 };
+    Repo.statsReset();
+  },
+  time: function (k, fn) {
+    var s = Date.now();
+    try { return fn(); } finally { this.m[k] = (this.m[k] || 0) + (Date.now() - s); }
+  },
+  snapshot: function () {
+    var s = Repo.stats();
+    return {
+      totalMs: Date.now() - this.t0, authMs: this.m.authMs || 0, pinMs: this.m.pinMs || 0,
+      lockWaitMs: this.m.lockWaitMs || 0, driveMs: this.m.driveMs || 0,
+      reads: s.reads, readMs: s.readMs, writes: s.writes, writeMs: s.writeMs
+    };
+  }
+};
+
 function meta_(replayed) {
-  return { serverTime: Util.nowIso(), replayed: !!replayed, apiVersion: API_VERSION };
+  return { serverTime: Util.nowIso(), replayed: !!replayed, apiVersion: API_VERSION, timing: Perf.snapshot() };
 }
 
 function okRes_(data, replayed) { return { ok: true, data: data, meta: meta_(replayed) }; }
@@ -227,6 +254,7 @@ function errRes_(code, message, data) {
 /** 本文(JSON文字列)を処理して応答オブジェクトを返す。例外は投げない */
 function handleRequest(bodyText) {
   var action = null;
+  Perf.begin();
   try {
     Repo.resetCache();
     var req = parseEnvelope_(bodyText);
@@ -279,7 +307,7 @@ function makeCtx_(req, def, auth) {
     req: req, def: def, action: req.action, params: req.params, clientId: req.clientId || '',
     actor: auth ? auth.actor : null, user: auth ? auth.user : null, device: auth ? auth.device : null
   };
-  ctx.stepUp = function () { Auth.verifyPin(ctx, ctx.user, ctx.req.pin, ctx.action); };
+  ctx.stepUp = function () { Perf.time('pinMs', function () { Auth.verifyPin(ctx, ctx.user, ctx.req.pin, ctx.action); }); };
   return ctx;
 }
 
@@ -290,7 +318,7 @@ function validateParams_(def, params) {
 
 function withLock_(fn) {
   var lock = LockService.getScriptLock();
-  try { lock.waitLock(20000); } catch (e) { throw new ApiError('LOCK_TIMEOUT', 'ロック待ちがタイムアウトしました'); }
+  try { Perf.time('lockWaitMs', function () { lock.waitLock(20000); }); } catch (e) { throw new ApiError('LOCK_TIMEOUT', 'ロック待ちがタイムアウトしました'); }
   try {
     Repo.resetCache();
     return fn();
@@ -317,7 +345,7 @@ function runAction_(req, def) {
   }
 
   // 端末認証(ロック外)
-  var auth = Auth.authenticate(req.deviceToken, action);
+  var auth = Perf.time('authMs', function () { return Auth.authenticate(req.deviceToken, action); });
   checkParamKeys_(req, def);
   if (!def.w) {
     var rctx = makeCtx_(req, def, auth);
@@ -335,7 +363,7 @@ function runAction_(req, def) {
 
   // 更新系: ロック内で 冪等キー→(再認証)→検証→authorize→PIN→更新→Events→冪等キー保存
   return withLock_(function () {
-    var a2 = Auth.authenticate(req.deviceToken, action); // ロック内の最新状態で再確認
+    var a2 = Perf.time('authMs', function () { return Auth.authenticate(req.deviceToken, action); }); // ロック内の最新状態で再確認
     var ctx = makeCtx_(req, def, a2);
     if (def.idem) {
       var hit = Idem.check(ctx);

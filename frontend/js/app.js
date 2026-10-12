@@ -32,7 +32,8 @@
     [/^\/admin\/absences$/, 'S17'],
     [/^\/admin\/qr$/, 'S18'],
     [/^\/settings$/, 'S19'],
-    [/^\/outbox$/, 'S20']
+    [/^\/outbox$/, 'S20'],
+    [/^\/perf$/, 'S21']
   ];
   var PUBLIC_PATHS = { '/register': 1, '/locked': 1 };
 

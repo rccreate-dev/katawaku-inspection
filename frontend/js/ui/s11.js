@@ -146,6 +146,8 @@
       drawDev(null);
       KW.db.kvGet('deviceId').then(function (id) { if (id && ctx.alive()) drawDev(id); });
       if (KW.isOnline()) KW.api.call('me', {}).then(function (res) { if (res.ok && ctx.alive() && res.data.device) drawDev(res.data.device.label || res.data.device.deviceId); });
+      // 通信診断(遅いときの原因調べ。どの役割でも見られる)
+      el.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/perf'); } } }, t('scr.S21.title')));
       // 責任者: 管理
       if (me.role === 'lead') el.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/admin'); } } }, t('nav.admin')));
       var lo = h('button', { type: 'button', class: 'btn badghost' }, t('scr.S19.logout'));

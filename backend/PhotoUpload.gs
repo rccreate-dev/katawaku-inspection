@@ -82,8 +82,13 @@ function photoFolders_(rec, site) {
   }
 }
 
-/** ロック外: 本体とサムネをDriveに保存。サムネだけ失敗したら本体も消して DRIVE_ERROR */
+/** ロック外: 本体とサムネをDriveに保存(所要時間は meta.timing.driveMs。SPEC §1.9) */
 function photoSave_(rec, site, itemId, p, v, taken, kind) {
+  return Perf.time('driveMs', function () { return photoSaveInner_(rec, site, itemId, p, v, taken, kind); });
+}
+
+/** 本体とサムネをDriveに保存。サムネだけ失敗したら本体も消して DRIVE_ERROR */
+function photoSaveInner_(rec, site, itemId, p, v, taken, kind) {
   var fileId = '', thumbId = '';
   try {
     var f = photoFolders_(rec, site);
