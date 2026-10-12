@@ -33,6 +33,13 @@
     var timeout = opts.timeoutMs || TIMEOUTS[action] || 30000;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeout) : null;
 
+    var t0 = Date.now(); // 往復の時間の計測(perf.js。SPEC §1.9)
+    function rec(r) {
+      try {
+        if (KW.perf) KW.perf.record({ action: action, rtMs: Date.now() - t0, ok: !!r.ok, code: r.error && r.error.code, network: !!r.network, timing: r.meta && r.meta.timing });
+      } catch (e) { /* 計測の失敗で通信を止めない */ }
+      return r;
+    }
     return fetch(cfg.API_URL, {
       method: 'POST',
       redirect: 'follow',
@@ -50,7 +57,7 @@
       if (timer) clearTimeout(timer);
       var b = r.body;
       if (!b || typeof b.ok !== 'boolean') {
-        return { ok: false, network: true, error: { code: 'INTERNAL', message: 'bad response' } };
+        return rec({ ok: false, network: true, error: { code: 'INTERNAL', message: 'bad response' } });
       }
       if (b.meta && b.meta.serverTime) {
         var st = KW.time.parse(b.meta.serverTime);
@@ -69,13 +76,13 @@
       if (!b.ok) {
         var err = b.error || { code: 'INTERNAL' };
         if (AUTH_CODES[err.code] && !opts.silentAuth && !PUBLIC[action]) KW.bus.emit('auth:error', err.code, err);
-        return { ok: false, error: err, meta: b.meta };
+        return rec({ ok: false, error: err, meta: b.meta });
       }
-      return { ok: true, data: b.data, meta: b.meta };
+      return rec({ ok: true, data: b.data, meta: b.meta });
     }, function (e) {
       if (timer) clearTimeout(timer);
       KW.state.netFails = (KW.state.netFails || 0) + 1;
-      return { ok: false, network: true, error: { code: 'NETWORK', message: String(e && e.message || e) } };
+      return rec({ ok: false, network: true, error: { code: 'NETWORK', message: String(e && e.message || e) } });
     });
   }
 

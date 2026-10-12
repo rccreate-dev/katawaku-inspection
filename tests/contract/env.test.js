@@ -42,6 +42,10 @@ describe('C-ENV 封筒・共通', () => {
       assert.match(r.meta.serverTime, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/);
       assert.equal(r.meta.apiVersion, 1);
       assert.equal(typeof r.meta.replayed, 'boolean');
+      // 計測(SPEC §1.9): 処理時間の内訳。全て0以上の整数
+      for (const k of ['totalMs', 'authMs', 'pinMs', 'lockWaitMs', 'driveMs', 'reads', 'readMs', 'writes', 'writeMs']) {
+        assert.ok(Number.isInteger(r.meta.timing[k]) && r.meta.timing[k] >= 0, `meta.timing.${k}`);
+      }
       if (!r.ok) assert.ok(KNOWN_CODES.includes(r.error.code), `未知のコード ${r.error.code}`);
       else assert.ok('data' in r);
     }

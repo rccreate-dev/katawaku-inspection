@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.8.0 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
+- 版: 1.8.1 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -142,6 +142,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 
 - `error.data` は任意(コードごとに§5.3で定義)。それ以外のトップレベルキーを足さない。
 - `meta.replayed` は冪等キーによる再生応答のとき `true`。
+- `meta.timing`(版1.8.1。診断用・常に付く)は §1.9。クライアントは無くても動く(旧サーバー・モックの値は0)。
 
 **GET**: `GET {API_URL}?action=ping` のみ。`{ "ok": true, "data": { "apiVersion": 1, "schemaVersion": "1", "serverTime": "..." }, "meta": {...} }`。それ以外のGETは `BAD_REQUEST`。
 
@@ -158,6 +159,18 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 8. 例外は `INTERNAL`(再試行可)。スタックトレース・内部パスを応答に含めない。
 
 ---
+
+
+### 1.9 計測と通信診断(版1.8.1。遅さの原因を数字で見るため)
+
+- **サーバー**: 全応答の `meta.timing` に、そのリクエストの処理時間の内訳を載せる(整数のミリ秒/回数。秘密情報・本文を含めない)。
+  `{ totalMs, authMs, pinMs, lockWaitMs, driveMs, reads, readMs, writes, writeMs }`
+  - `totalMs`=サーバー内の合計(受信から応答作成まで)/ `authMs`=端末認証(ロック内の再認証を含む)/ `pinMs`=PIN検証 / `lockWaitMs`=スクリプトロックの待ち / `driveMs`=写真のDrive保存 / `reads`・`readMs`=シートの読み込みの回数と時間 / `writes`・`writeMs`=シートの書き込みの回数と時間。
+  - 往復の時間(端末で測る)から `totalMs` を引いた残りが「端末とGoogleの間の通信+GASの起動」。
+  - モックは常に0(形だけ同じ)。契約テスト C-ENV-02 が全キーの存在と整数・0以上を検査する。
+- **クライアント**(`js/perf.js`): `api.call` ごとに `{ at, action, rtMs, ok, code, net, srv }` を端末に直近100件だけ残す(IndexedDB `kv.perfLog`。3秒まとめて保存)。氏名・PIN・写真の中身は残さない。
+- **画面 S21 通信診断**(`#/settings` から全員が開ける。§9.2): 操作ごとの集計(往復の中央値・最大・サーバー内の中央値・通信などの中央値。遅い順)、直近20件の内訳、「診断結果をコピー」(貼り付け用の文字列。ビルド番号つき・氏名なし)、「記録を消す」。
+- 遅いと報告があったとき、責任者は職長に「診断結果をコピー」を送ってもらい、`rt`(往復)と `srv`(サーバー内)と `lock`・`rd`・`wr`・`drive` を見て原因を切り分ける。
 
 ## 2. スプレッドシート定義
 
@@ -1432,6 +1445,7 @@ PDF: `generateReport` `listReports`
 | S16 | `#/admin/users` | 責任者 | `adminListUsers`,`adminIssueInvite`,`adminUnlockUser`,`adminSetUserStatus`,`adminRevokeDevice` | ユーザー一覧(役割・状態チップ・`locked`を強調・最終ログイン)。ユーザーごとに端末一覧 | 「招待コードを発行」(`first`/`pinReset`)→M8(コード・期限を1回だけ表示、再表示不可)。「ロック解除」。「無効化/有効化」。端末の「登録解除」(確認ダイアログ) |
 | S17 | `#/admin/absences` | 責任者 | `listAbsences`,`adminSetAbsence`,`adminCancelAbsence` | 不在一覧、追加フォーム(ユーザー・期間・理由) | 追加/取消 |
 | S18 | `#/admin/qr` | 責任者 | `adminGetJoinInfo`,`adminRotateJoinKey` | 現場ごとにQRコード(`joinUrl`から端末内で生成。外部サービス不使用)、現場名、有効な合言葉 | 「印刷」(印刷用CSS)、「合言葉を更新」(確認ダイアログ。旧QRは無効になる) |
+| S21 | `#/perf` | 全員 | (なし。端末の記録 `KW.perf` のみ) | 通信診断(§1.9)。操作ごとの集計・直近の通信・診断結果のコピー・記録の消去 | 設定(S19)の「通信診断」から開く。戻るは S19 |
 | S19 | `#/settings` | 全員 | `setLang`,`changePin`,`logoutDevice`,`me` | 氏名・役割、言語切替(日本語/インドネシア語。インドネシア語は暫定訳の注記)、PIN変更(現在PIN・新PIN2回)、端末情報(端末名・アプリ版・最終同期)、ログアウト | ログアウト前に未送信outboxの警告。責任者は管理メニューへの導線 |
 | S20 | `#/outbox` | 全員 | (ローカル) | 未送信操作の一覧(対象記録・操作名・状態・エラー理由 `err.<CODE>`)、写真の進捗 | 「今すぐ送信」「破棄」「再送」(§8.4)。`failed` は赤。**期限切れ(`EXPIRED`。§8.5)の行は「破棄」のみ** |
 
@@ -2004,3 +2018,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.6.5 | ユーザー要望: 元請PDFの図面ページの凡例に測定値を載せる。§10.2c-3: 凡例を label 単位の行にし、`実測値` 列(`④-1 … -1mm`)を追加。API契約・列名は変更なし(backend/Report.gs のみ)。 |
 | 2026-10-12 | 1.7.0 | ユーザー決定(他社の職長も招待するため): ①端末登録を **招待コード先入力**に変更(`listLoginUsers` 廃止→公開action `lookupInvite` 追加。`registerDevice` は `userId` を受け取らず `inviteCode`+`pin`。追加端末(氏名+PINのみ)は廃止し、責任者発行の `pinReset` コードに統一。総当たり対策=サーバー全体の失敗回数制限 `RATE_LIMITED`、Config `inviteFailMax`/`inviteFailWindowMin`、発行時にコード重複を避ける)。②Users に **`company`(会社名)** を追加(末尾列)。`adminListUsers`・`Membership.userCompany`・PDF(基本情報・職長/品質管理者サイン欄)に表示。③責任者の追加端末用に GASエディタ専用 `issueLeadCode`(§3.6.1)。action数は43のまま(1削除・1追加)。P-23 解消 |
 | 2026-10-12 | 1.8.0 | ユーザー要望: 職長が端末登録のときに会社名も入力できるようにし、検査記録に反映する。①`registerDevice` に任意 `company`(≤40文字)を追加。`purpose=first` では会社名を必須(名簿に会社名があれば省略可)。入力値は `Users.company` に保存。②`Me.company` を追加。③Records に **`ownerCompany`**(作成時の会社名の写し。末尾列)を追加し、`RecordSummary/Detail.ownerCompany` に出す。PDFの職長の会社名・職長サイン欄は `ownerCompany`(空なら現在の `company`)。④S01 の確認画面に会社名欄。action数は43のまま。 |
+| 2026-10-12 | 1.8.1 | ユーザー要望(反応が遅い): 遅さの原因を数字で見るための計測を追加。①§1.5/§1.9: 全応答の `meta.timing`(処理時間の内訳)②`js/perf.js` と画面 S21 通信診断(設定から開く)③契約テスト C-ENV-02 に `meta.timing` の検査を追加、E-21 を追加。API・シート・既存の画面の動作は変更なし(action数43のまま)。 |

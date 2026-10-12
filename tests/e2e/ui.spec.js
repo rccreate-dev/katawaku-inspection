@@ -93,7 +93,7 @@ describe('E-07 レイアウト(390px)', () => {
       const s = await E.newSession(env, { lang });
       await E.login(s, '責任者');
       if (lang === 'id') { await s.page.locator('.lang').click(); s.lang = 'id'; }
-      const routes = ['#/', '#/history', '#/roster', '#/admin', '#/admin/users', '#/admin/absences', '#/admin/qr', '#/joins', '#/settings', '#/outbox', '#/site/s_a', '#/site/s_c',
+      const routes = ['#/', '#/history', '#/roster', '#/admin', '#/admin/users', '#/admin/absences', '#/admin/qr', '#/joins', '#/settings', '#/outbox', '#/perf', '#/site/s_a', '#/site/s_c',
         '#/record/r_seeda20000000000', '#/record/r_seeda20000000000/review', '#/record/r_seedb10000000000', '#/record/r_seedc10000000000'];
       for (const r of routes) {
         await visit(s, r, 700);
@@ -105,4 +105,33 @@ describe('E-07 レイアウト(390px)', () => {
       s.assertClean(); await s.close();
     });
   }
+});
+
+describe('E-21 通信診断(SPEC §1.9)', () => {
+  it('設定から開ける。通信すると操作ごとの集計と直近の通信が出る。コピーと消去ができ、キー文字列が露出しない', async () => {
+    const s = await E.newSession(env);
+    const { page } = s;
+    await E.login(s, '田中');
+    await visit(s, '#/settings');
+    await page.getByRole('button', { name: E.T('scr.S21.title') }).click();
+    await page.waitForFunction(() => location.hash === '#/perf');
+    await page.waitForTimeout(500);
+    const txt = await bodyText(s);
+    assert.ok(txt.includes(E.T('scr.S21.title')), 'タイトル');
+    // ログイン・起動で通信しているので、少なくとも1操作は集計に出る
+    assert.ok(await page.locator('.card').count() > 0, '通信の記録が出る');
+    assert.ok(txt.includes(E.T('scr.S21.by_action')) && txt.includes(E.T('scr.S21.recent')));
+    assert.ok(!RAW_KEY.test(txt), String(RAW_KEY.exec(txt)));
+    // コピー(クリップボードが使えない環境でも、貼り付け用の欄が出る)
+    await page.getByRole('button', { name: E.T('scr.S21.copy') }).click();
+    await page.waitForTimeout(400);
+    const exported = await page.evaluate(() => KW.perf.exportText());
+    assert.match(exported, /^build \d+ \//, '先頭にビルド番号');
+    assert.ok(!exported.includes('田中'), '氏名を含まない');
+    // 消去
+    await page.getByRole('button', { name: E.T('scr.S21.clear') }).click();
+    await page.waitForTimeout(400);
+    assert.ok((await bodyText(s)).includes(E.T('scr.S21.empty')), '消すと空の表示');
+    s.assertClean(); await s.close();
+  });
 });

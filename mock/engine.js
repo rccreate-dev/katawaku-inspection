@@ -602,7 +602,9 @@ function shapeViolations(spec, obj, prefix = '') {
 // ---------------------------------------------------------------------------
 // dispatcher(§1.6)
 // ---------------------------------------------------------------------------
-const meta = (replayed = false) => ({ serverTime: nowDt(), replayed, apiVersion: API_VERSION });
+// timing(SPEC §1.9)。モックにはシートもDriveも無いので処理時間の内訳は常に0(形だけ本物と同じ)
+const ZERO_TIMING = { totalMs: 0, authMs: 0, pinMs: 0, lockWaitMs: 0, driveMs: 0, reads: 0, readMs: 0, writes: 0, writeMs: 0 };
+const meta = (replayed = false) => ({ serverTime: nowDt(), replayed, apiVersion: API_VERSION, timing: Object.assign({}, ZERO_TIMING) });
 const okRes = (data, replayed = false) => ({ ok: true, data, meta: meta(replayed) });
 const errRes = (code, message, data) => {
   const error = { code, message: message || code };

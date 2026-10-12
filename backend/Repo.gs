@@ -11,6 +11,15 @@ var Repo = (function () {
   /** リクエスト内の一時メモ(Authz 等が使う。resetCache で破棄) */
   R.rc = {};
 
+  /* 計測(SPEC §1.9。応答の meta.timing 用)。シートの読み書きの回数と時間。リクエストの開始時に statsReset を呼ぶ */
+  var stats = { reads: 0, readMs: 0, writes: 0, writeMs: 0 };
+  R.statsReset = function () { stats = { reads: 0, readMs: 0, writes: 0, writeMs: 0 }; };
+  R.stats = function () { return { reads: stats.reads, readMs: stats.readMs, writes: stats.writes, writeMs: stats.writeMs }; };
+  function timed(kind, fn) {
+    var s = Date.now();
+    try { return fn(); } finally { stats[kind + 's']++; stats[kind + 'Ms'] += Date.now() - s; }
+  }
+
   R.resetCache = function () {
     tables = {}; sheets = {}; spreadsheet = null; R.rc = {};
   };
@@ -82,7 +91,7 @@ var Repo = (function () {
     var last = sh.getLastRow();
     var rows = [];
     if (last >= 2) {
-      var vals = sh.getRange(2, 1, last - 1, def.columns.length).getValues();
+      var vals = timed('read', function () { return sh.getRange(2, 1, last - 1, def.columns.length).getValues(); });
       for (var i = 0; i < vals.length; i++) {
         var o = toObj(def, vals[i], i + 2);
         if (o[def.pk] === '') continue;
@@ -151,7 +160,7 @@ var Repo = (function () {
     var sh = R.sheet(name);
     var last = sh.getLastRow();
     if (last < 2) return [];
-    var colVals = sh.getRange(2, idx + 1, last - 1, 1).getValues();
+    var colVals = timed('read', function () { return sh.getRange(2, idx + 1, last - 1, 1).getValues(); });
     var hit = [];
     for (var j = 0; j < colVals.length; j++) if (String(colVals[j][0]) === sval) hit.push(j + 2);
     var out = [];
@@ -159,7 +168,7 @@ var Repo = (function () {
     while (k < hit.length) {
       var start = hit[k], end = start;
       while (k + 1 < hit.length && hit[k + 1] === end + 1) { k++; end = hit[k]; }
-      var vals = sh.getRange(start, 1, end - start + 1, def.columns.length).getValues();
+      var vals = timed('read', function () { return sh.getRange(start, 1, end - start + 1, def.columns.length).getValues(); });
       for (var m = 0; m < vals.length; m++) out.push(toObj(def, vals[m], start + m));
       k++;
     }
@@ -193,8 +202,10 @@ var Repo = (function () {
     var rows = objs.map(function (o) { return toRow(def, o); });
     var range = sh.getRange(first, 1, rows.length, def.columns.length);
     try {
-      range.setNumberFormat('@');
-      range.setValues(rows);
+      timed('write', function () {
+        range.setNumberFormat('@');
+        range.setValues(rows);
+      });
     } finally {
       RefCache.drop(name); // 書込み直後に破棄(対象シートのみ。SPEC §2.15 の4)
     }
@@ -232,10 +243,10 @@ var Repo = (function () {
     try {
       if (changed.length <= 4) {
         changed.forEach(function (i) {
-          sh.getRange(obj._r, i + 1).setValue(toCell(def.columns[i].type, obj[def.columns[i].name]));
+          timed('write', function () { sh.getRange(obj._r, i + 1).setValue(toCell(def.columns[i].type, obj[def.columns[i].name])); });
         });
       } else {
-        sh.getRange(obj._r, 1, 1, def.columns.length).setValues([toRow(def, obj)]);
+        timed('write', function () { sh.getRange(obj._r, 1, 1, def.columns.length).setValues([toRow(def, obj)]); });
       }
     } finally {
       RefCache.drop(name); // 書込み直後に破棄(対象シートのみ。SPEC §2.15 の4)
