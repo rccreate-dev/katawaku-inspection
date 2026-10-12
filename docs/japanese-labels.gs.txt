@@ -1,0 +1,119 @@
+/**
+ * 責任者向け: スプレッドシートの日本語ガイドを付ける(一度だけ実行。何度実行しても同じ結果)
+ *  - 各シートの1行目(見出し)のセルに、日本語の説明メモ(吹き出し)を付ける
+ *  - 先頭に「📘説明(責任者向け)」シートを作る(シート一覧と列の説明)
+ *  - シート名・列名・値は変更しない(アプリが英語名で読み書きしているため)
+ * 使い方: Apps Script エディタに貼り付け → 関数 applyJapaneseGuide を選んで「実行」
+ * 運用: 実行後はこの関数を消してよい。アプリや SPEC には影響しない。
+ */
+function applyJapaneseGuide() {
+  var SS_ID = '1aR5L4NAvzBqc1XNCRNHXTkVTrVQWoLkEXp14P-pHDcE';
+  var ss = SpreadsheetApp.openById(SS_ID);
+  ss.rename('型枠検査アプリ_データ(責任者のみ編集)');
+
+  // シート: [日本語名, 手で編集, 何が入っているか]
+  var SHEETS = {
+    Users: ['名簿', '○ 編集してよい', '職長・管理者・責任者の名簿。招待コードの発行はアプリの「ユーザー管理」で行う'],
+    Sites: ['現場', '○ 編集してよい', '現場の一覧。現場名・階・工区・元請・参加用の合言葉など'],
+    Assignments: ['担当表', '○ 編集してよい', '現場ごとの「誰が何の役か」(主担当・代行者・職長・副職長)'],
+    Memberships: ['参加', '× 触らない', '現場への参加申請と承認の記録。アプリが書く'],
+    Devices: ['端末', '× 触らない', '登録された端末の一覧。アプリが書く'],
+    Items: ['検査項目', '○ 編集してよい', '検査項目のマスタ(職長・管理者で共通)'],
+    Records: ['検査記録', '× 触らない', '検査記録の本体。アプリが書く'],
+    RecordItems: ['検査記録の項目', '× 触らない', '検査記録ごとの項目の判定。アプリが書く'],
+    Photos: ['写真', '× 触らない', '写真の情報(本体は Google ドライブ)。アプリが書く'],
+    Notes: ['コメント', '× 触らない', '職長・管理者のコメント。追記のみ'],
+    Events: ['操作履歴', '× 触らない', '操作の履歴。追記のみ'],
+    Absences: ['不在', '○ 編集してよい', '管理者の不在期間。通常はアプリの「不在登録」で行う'],
+    Invites: ['招待コード', '× 触らない', '招待コード(ハッシュ化)。アプリが書く'],
+    Reports: ['提出用PDF', '× 触らない', '作成した提出用PDFの記録。追記のみ'],
+    Idem: ['二重送信防止', '× 触らない', '二重送信を防ぐための内部記録'],
+    Config: ['設定', '○ 編集してよい', 'アプリの設定値(写真の枚数上限など)']
+  };
+
+  // 列: 名前 -> [日本語名, 説明]。シートごとに意味が違うものは OVERRIDE で上書き
+  var COL = {
+    userId: ['ユーザーID', '「u_」+ 英小文字・数字。例 u_hosono'], name: ['氏名', 'ログイン画面に出る氏名'],
+    nameKana: ['氏名(かな)', '任意'], role: ['役割', 'foreman=職長 / qa=管理者 / lead=責任者(1人1役)'],
+    status: ['状態', '名簿: invited=招待中 / active=有効 / disabled=無効 / locked=ロック中'], lang: ['言語', 'ja=日本語 / id=インドネシア語'],
+    email: ['メール', '通知用。任意'], qaQualified: ['主担当の資格', 'TRUE=管理者を主担当・代行者にできる'],
+    pinSalt: ['PIN(内部)', '触らない'], pinHash: ['PIN(内部)', '触らない。PINはハッシュで保存'], failedCount: ['PIN誤り回数', '0のまま。5回でロック'],
+    lockedAt: ['ロック日時', '触らない'], lastLoginAt: ['最終ログイン', '触らない'], note: ['備考', '自由記入'],
+    createdAt: ['作成日時', '自動'], updatedAt: ['更新日時', '自動'],
+    siteId: ['現場ID', '「s_」+ 英小文字・数字。例 s_hachioji1'], floors: ['階の選択肢', '必須。カンマ区切り(例 1F,2F,3F)'],
+    zones: ['工区の選択肢', '任意。カンマ区切り'], primeContractor: ['元請会社名', 'PDFに表示される'], address: ['住所', '任意'],
+    joinKey: ['合言葉', '参加用QRの合言葉。英小文字・数字16文字'], driveFolderId: ['ドライブのフォルダID', '空のまま(自動記入)'],
+    startDate: ['開始日', '例 2026-10-12'], endDate: ['終了日', '空=無期限'],
+    assignId: ['担当ID', '「a_」+ 英小文字・数字'], assignRole: ['担当の役', 'qa_main=主担当 / qa_sub=代行者 / foreman=職長 / subforeman=副職長'],
+    team: ['班名', '職長・副職長のみ'], validFrom: ['有効開始日', '必須'], validTo: ['有効終了日', '空=無期限'], active: ['有効', 'TRUE/FALSE。無効にするときは行を消さずFALSE'],
+    createdBy: ['作成者', '自動'],
+    membershipId: ['参加ID', '自動'], requestedAt: ['申請日時', '自動'], requestClientId: ['申請の識別子', '自動'], decidedBy: ['承認者', '自動'], decidedAt: ['承認日時', '自動'],
+    deviceId: ['端末ID', '自動'], tokenHash: ['端末キー(内部)', '触らない'], label: ['端末名', '自動'], platform: ['機種', '自動'], appVersion: ['アプリ版', '自動'],
+    registeredAt: ['登録日時', '自動'], lastSeenAt: ['最終利用', '自動'], revokedAt: ['登録解除日時', '自動'], revokedBy: ['解除した人', '自動'], revokeReason: ['解除理由', '自動'],
+    itemId: ['項目ID', '末尾の次の番号。例 i50'], seq: ['並び順', '数字'], stage: ['段階', 'pre_pour=打設前など'], audience: ['対象', '職長/管理者'],
+    groupKey: ['グループ(英)', '内部キー'], groupJa: ['グループ(日本語)', '画面に出る見出し'], groupId: ['グループ(インドネシア語)', ''],
+    textJa: ['項目文(日本語)', '画面に出る文'], textId: ['項目文(インドネシア語)', '暫定訳。要確認'], key: ['重点項目', 'TRUE=重点'], tol: ['許容値', '数値'],
+    measure: ['計測の種類', ''], minMeasures: ['最低計測数', ''], unit: ['単位', ''],
+    recordId: ['記録ID', '自動'], floor: ['階', ''], zone: ['工区', ''], lot: ['ロット', ''], round: ['回数', '再提出で増える'], reinspectOf: ['再検査元', ''],
+    ownerUserId: ['作成した職長', ''], pourPlannedAt: ['打設予定', ''], firstSubmittedAt: ['最初の提出', ''], submittedBy: ['提出者', ''], submittedAt: ['提出日時', ''],
+    claimedBy: ['担当した管理者', ''], claimedAt: ['担当開始', ''], qaDraftAt: ['管理者の下書き', ''], qaVerdict: ['管理者の判定', ''], qaVerdictBy: ['判定者', ''],
+    qaVerdictAt: ['判定日時', ''], qaComment: ['管理者コメント', ''], major: ['重大不適合', ''], primeSignedBy: ['元請サイン者', ''], primeSignedAt: ['元請サイン日時', ''],
+    primeSignerName: ['元請サイナー氏名', ''], primeSignMethod: ['元請サイン方法', ''], stopped: ['打設停止中', ''], stoppedBy: ['停止した人', ''], stoppedAt: ['停止日時', ''],
+    stopReason: ['停止理由', ''], escNotified: ['催促通知回数', ''], version: ['版', '自動'],
+    recordItemId: ['記録項目ID', '自動'], snapshot: ['項目の写し', ''], selfResult: ['職長の判定', ''], selfSeverity: ['職長の重さ', ''], selfValues: ['職長の計測値', ''],
+    foremanNote: ['職長コメント', ''], selfUpdatedAt: ['職長の更新', ''], qaResult: ['管理者の判定', ''], qaSeverity: ['管理者の重さ', ''], qaValues: ['管理者の計測値', ''],
+    qaNote: ['管理者コメント', ''], qaUpdatedAt: ['管理者の更新', ''],
+    photoId: ['写真ID', '自動'], side: ['区分', '職長/管理者'], takenBy: ['撮影者', ''], takenAt: ['撮影日時', ''], receivedAt: ['受信日時', ''], mime: ['形式', ''], bytes: ['サイズ', ''],
+    width: ['幅', ''], height: ['高さ', ''], sha256: ['改ざん検知', ''], stampText: ['刻印文字', ''], driveFileId: ['ドライブのファイルID', ''], thumbFileId: ['サムネID', ''],
+    clockSuspect: ['時計ずれの疑い', ''], deleted: ['削除済み', ''], deletedBy: ['削除した人', ''], deletedAt: ['削除日時', ''], kind: ['種類', ''], markers: ['マーカー', ''],
+    noteId: ['コメントID', ''], authorUserId: ['書いた人', ''], authorRole: ['書いた人の役', ''], text: ['本文', ''], source: ['入力元', ''], clientId: ['識別子', '二重送信防止'],
+    eventId: ['履歴ID', ''], at: ['日時', ''], actorUserId: ['操作した人', ''], actorRole: ['操作した人の役', ''], fromStatus: ['変更前', ''], toStatus: ['変更後', ''], detail: ['詳細', ''],
+    absenceId: ['不在ID', ''], dateFrom: ['開始日', '必須'], dateTo: ['終了日', '必須'], reason: ['理由', ''], registeredBy: ['登録者', ''], cancelledAt: ['取消日時', ''],
+    inviteId: ['招待ID', ''], purpose: ['用途', ''], codeHash: ['コード(内部)', '触らない'], expiresAt: ['有効期限', ''], usedAt: ['使用日時', ''],
+    reportId: ['PDF ID', ''], recordStatus: ['記録の状態', ''], url: ['URL', ''], generatedBy: ['作成者', ''], generatedAt: ['作成日時', ''],
+    action: ['操作', ''], paramsHash: ['内容の指紋', ''], responseJson: ['応答', ''],
+    value: ['値', '設定の値'], type: ['型', 'str=文字 / int=整数 / num=小数 / bool=TRUE・FALSE'], description: ['説明', '']
+  };
+  var OVERRIDE = {
+    'Config.key': ['設定名', '英語の設定名。変えない'], 'Config.value': ['設定の値', '変更後、反映まで約1分'], 'Config.type': ['型', 'str=文字 / int=整数 / num=小数 / bool=TRUE・FALSE'],
+    'Config.description': ['説明', '設定の意味'], 'Items.active': ['使う', 'TRUE=使う / FALSE=使わない(行は消さない)'],
+    'Items.note': ['備考', '自由記入'], 'Absences.userId': ['不在の管理者', 'Users の userId'],
+    'Memberships.status': ['参加の状態', 'pending=承認待ち / approved=承認済み / rejected=却下 / cancelled=取消'], 'Memberships.note': ['備考', ''],
+    'Devices.status': ['端末の状態', 'active=有効 / revoked=解除済み'], 'Records.status': ['記録の状態', ''],
+    'Sites.name': ['現場名', ''], 'Sites.status': ['現場の状態', 'active=稼働中 / closed=閉鎖(新規記録・参加申請不可)'],
+    'Assignments.userId': ['担当者', 'Users の userId'], 'Assignments.siteId': ['現場', 'Sites の siteId']
+  };
+
+  var cols = []; // 列の説明シート用
+  Object.keys(SHEETS).forEach(function (n) {
+    var sh = ss.getSheetByName(n);
+    if (!sh) return;
+    var last = sh.getLastColumn();
+    var header = sh.getRange(1, 1, 1, last).getValues()[0];
+    var notes = header.map(function (h) {
+      var d = OVERRIDE[n + '.' + h] || COL[h] || ['', ''];
+      cols.push([n, SHEETS[n][0], h, d[0], d[1]]);
+      return [d[0] ? (d[0] + (d[1] ? '\n' + d[1] : '')) : ''];
+    });
+    sh.getRange(1, 1, 1, last).setNotes([notes.map(function (x) { return x[0]; })]);
+  });
+
+  var G = '📘説明(責任者向け)';
+  var g = ss.getSheetByName(G) || ss.insertSheet(G, 0);
+  g.clear();
+  var r = [['このシートは説明です。アプリは読み書きしません。シート名・列名は英語のまま変えないでください(アプリが英語名で読み書きするため)。', '', '', '', ''],
+    ['', '', '', '', ''], ['【シート一覧】', '', '', '', ''], ['シート名(英語)', '日本語名', '手で編集', '内容', '']];
+  Object.keys(SHEETS).forEach(function (n) { r.push([n, SHEETS[n][0], SHEETS[n][1], SHEETS[n][2], '']); });
+  r.push(['', '', '', '', ''], ['【列の説明】', '', '', '', ''], ['シート名(英語)', 'シートの日本語名', '列名(英語)', '列の日本語名', '入れ方・意味']);
+  cols.forEach(function (c) { r.push(c); });
+  g.getRange(1, 1, r.length, 5).setValues(r);
+  g.getRange(1, 1).setFontWeight('bold').setFontColor('#b3261e');
+  [3, 4].forEach(function (i) { g.getRange(i, 1, 1, 5).setFontWeight('bold'); });
+  g.getRange(4, 1, 1, 5).setBackground('#d7ebe9');
+  var h2 = 4 + Object.keys(SHEETS).length + 3;
+  g.getRange(h2, 1, 1, 5).setBackground('#d7ebe9').setFontWeight('bold');
+  g.getRange(h2 - 1, 1).setFontWeight('bold');
+  g.setColumnWidths(1, 1, 150); g.setColumnWidths(2, 1, 170); g.setColumnWidths(3, 1, 160); g.setColumnWidths(4, 1, 230); g.setColumnWidth(5, 420);
+  g.setFrozenRows(0); g.setTabColor('#0e6b67');
+  return 'OK: ' + cols.length + ' 列に日本語メモを付け、説明シートを作りました';
+}
