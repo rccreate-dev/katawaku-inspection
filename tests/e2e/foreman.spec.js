@@ -30,21 +30,30 @@ async function answerAllOk(s, { ng = {} } = {}) {
 async function photoOn(s, itemId) { await E.shoot(s, s.page.locator(`#it-${itemId} .cam`)); }
 
 describe('E-01 登録', () => {
-  it('氏名+PINで端末登録でき、リロードしてもPIN不要。誤PINは残り回数を表示', async () => {
+  it('招待コード→本人確認(氏名・会社名)→PINで端末登録でき、リロードしてもPIN不要。氏名一覧は出ない', async () => {
+    await E.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '山田工業株式会社' } });
     const s = await E.newSession(env);
     const { page } = s;
     await page.goto(s.base + '/#/register');
-    await page.locator('.userlist button', { hasText: '田中' }).click();
-    await page.locator('input[name=pin]').fill('0000');
-    await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
+    assert.equal(await page.locator('.userlist').count(), 0, '氏名の一覧を出さない');
+    assert.ok(!(await page.locator('#view').innerText()).includes('スギアント'), '他人の氏名が見えない');
+    // 誤ったコード
+    await page.locator('input[name=invite]').fill('000000');
+    await page.getByRole('button', { name: s.t('scr.S01.next') }).click();
     await page.locator('.msg').waitFor();
-    assert.match(await page.locator('.msg').innerText(), /4/, '残り回数(あと4回)が出る');
+    // 正しいコード → 氏名と会社名の確認
+    const code = await E.issueCode('田中');
+    await page.locator('input[name=invite]').fill(code);
+    await page.getByRole('button', { name: s.t('scr.S01.next') }).click();
+    await page.locator('input[name=pin]').waitFor();
+    const txt = await page.locator('#view').innerText();
+    assert.ok(txt.includes('田中') && txt.includes('山田工業株式会社'), '氏名と会社名の確認が出る');
     await page.locator('input[name=pin]').fill('1111');
     await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();
     await page.reload();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();
-    assert.equal(await page.locator('.userlist').count(), 0, '再登録画面に戻らない');
+    assert.equal(await page.locator('input[name=invite]').count(), 0, '再登録画面に戻らない');
     s.assertClean();
     await s.close();
   });
@@ -126,29 +135,28 @@ describe('E-02 職長フロー', () => {
 });
 
 describe('E-09 ロック', () => {
-  it('PINを5回誤るとロック画面。ロック中は登録不可、責任者が解除すると復帰できる', async () => {
+  it('PINを5回誤るとロック画面。責任者が解除すると、招待コードで復帰できる', async () => {
     const s = await E.newSession(env);
     const { page } = s;
-    await page.goto(s.base + '/#/register');
-    await page.locator('.userlist button', { hasText: '田中' }).click();
-    for (let i = 0; i < 5; i++) {
-      await page.locator('input[name=pin]').fill('0000');
-      await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
-      if (i < 4) { await page.locator('.msg').last().waitFor(); await page.waitForTimeout(150); }
-    }
-    await page.getByText(s.t('scr.S02.title')).waitFor();
+    await E.login(s, '田中');
+    // PIN誤り5回(契約テスト C-AUTH-04 / C-PIN-01 で検証済み)の結果と同じ状態にする。ここでは画面の挙動を見る
+    await E.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { status: 'locked' } });
     assert.equal((await E.stateRows('Users')).find((u) => u.userId === 'u_tanaka').status, 'locked');
-    // ロック中は正しいPINでも登録できない(サーバー側)
-    const r = await E.api('registerDevice', { userId: 'u_tanaka', pin: '1111', deviceLabel: 'x', platform: 'other', appVersion: '1.0.0' }, { userId: 'u_lead' });
-    assert.equal(r.ok, false); assert.equal(r.error.code, 'USER_LOCKED');
+    // 画面を更新するとロック画面になる
+    await page.reload();
+    await page.getByText(s.t('scr.S02.title')).waitFor();
+    // ロック中のユーザーには招待コードを発行できない(先に解除が必要)
+    const code0 = await E.issueCode('田中').catch((e) => String(e.message));
+    assert.ok(/USER_LOCKED/.test(code0), 'ロック中は招待コードを発行できない: ' + code0);
     // 責任者のみ解除できる(職長は不可)
     const bad = await E.api('adminUnlockUser', { userId: 'u_tanaka' }, { userId: 'u_sugiant' });
     assert.equal(bad.ok, false);
     const ok = await E.api('adminUnlockUser', { userId: 'u_tanaka' }, { userId: 'u_lead', pin: '9999' });
     assert.equal(ok.ok, true, JSON.stringify(ok.error));
-    // 復帰: 登録画面に戻って正しいPINで入れる
-    await page.getByRole('button', { name: s.t('scr.S02.back') }).click();
-    await page.locator('.userlist button', { hasText: '田中' }).click();
+    // 復帰: 登録画面に戻って、責任者の発行した招待コードで入れる
+    await page.getByRole('button', { name: s.t('scr.S02.logout') }).click();
+    await page.locator('input[name=invite]').waitFor();
+    await E.enterCode(s, await E.issueCode('田中'));
     await page.locator('input[name=pin]').fill('1111');
     await page.getByRole('button', { name: s.t('scr.S01.register') }).click();
     await page.getByRole('heading', { name: s.t('scr.S03.title') }).waitFor();

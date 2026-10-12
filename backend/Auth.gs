@@ -77,15 +77,66 @@ var Auth = {
     if (user.failedCount) Repo.update('Users', user, { failedCount: 0, updatedAt: Util.nowIso() });
   },
 
-  /** 招待コード検証。誤りは同じカウンタに加算。成功したら使用済みにする */
-  verifyInvite_: function (ctx, user, code, purpose) {
-    var rows = Repo.where('Invites', 'userId', user.userId).filter(function (r) { return r.usedAt === ''; });
-    var latest = rows.length ? rows[rows.length - 1] : null;
-    if (!latest || latest.purpose !== purpose) this.fail_(ctx, user, 'registerDevice', 'INVITE_INVALID');
-    if (!Util.safeEqual(this.hashInvite(user.userId, code), latest.codeHash)) this.fail_(ctx, user, 'registerDevice', 'INVITE_INVALID');
-    var exp = Util.dtToDate(latest.expiresAt);
+  /* ---- 招待コード(SPEC §3.6)。コードから本人を特定する ---- */
+
+  /** 未使用・未失効(期限判定は呼び出し側)の Invites から、コードに一致する1件を探す。{inv,user} か null */
+  findInvite_: function (code) {
+    var open = Repo.all('Invites').filter(function (r) { return r.usedAt === ''; });
+    for (var k = 0; k < open.length; k++) {
+      if (Util.safeEqual(this.hashInvite(open[k].userId, code), open[k].codeHash)) {
+        return { inv: open[k], user: Repo.get('Users', open[k].userId) };
+      }
+    }
+    return null;
+  },
+
+  /** 他の有効なコードと重ならない6桁を作る(findInvite_ が高々1件になるように) */
+  newInviteCode_: function () {
+    for (var n = 0; n < 50; n++) {
+      var c = Util.randomDigits(6);
+      if (!this.findInvite_(c)) return c;
+    }
+    throw new ApiError('INTERNAL', '招待コードを作れませんでした');
+  },
+
+  throttleKey_: function () { return 'inviteFail'; },
+  /** 窓内の失敗回数が上限に達していれば RATE_LIMITED */
+  throttleCheck_: function () {
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get(this.throttleKey_());
+    var st = raw ? JSON.parse(raw) : null;
+    if (st && st.n >= Cfg.get('inviteFailMax')) {
+      var left = Math.max(1, Math.ceil((st.until - Util.nowMs()) / 1000));
+      throw new ApiError('RATE_LIMITED', 'しばらく待ってからやり直してください', { retryAfterSec: left });
+    }
+  },
+  /** 一致しない失敗を1件数える(窓は最初の失敗から inviteFailWindowMin 分) */
+  throttleHit_: function (ctx) {
+    var cache = CacheService.getScriptCache();
+    var winSec = Cfg.get('inviteFailWindowMin') * 60;
+    var raw = cache.get(this.throttleKey_());
+    var st = raw ? JSON.parse(raw) : null;
+    if (!st || st.until <= Util.nowMs()) st = { n: 0, until: Util.nowMs() + winSec * 1000 };
+    st.n += 1;
+    var ttl = Math.max(1, Math.min(21600, Math.ceil((st.until - Util.nowMs()) / 1000)));
+    cache.put(this.throttleKey_(), JSON.stringify(st), ttl);
+    Ev.add(null, 'invite_failed', { detail: { count: st.n } });
+  },
+
+  /**
+   * コードを検証して {inv,user} を返す。使用済みにはしない。
+   * 一致なし/停止・ロック中のユーザー → INVITE_INVALID(存在を示さない)、期限切れ → INVITE_EXPIRED
+   */
+  resolveInvite_: function (ctx, code) {
+    this.throttleCheck_();
+    var hit = this.findInvite_(code);
+    if (!hit || !hit.user || hit.user.status === 'disabled' || hit.user.status === 'locked') {
+      this.throttleHit_(ctx);
+      throw new ApiError('INVITE_INVALID', '招待コードが違います');
+    }
+    var exp = Util.dtToDate(hit.inv.expiresAt);
     if (!exp || exp.getTime() < Util.nowMs()) throw new ApiError('INVITE_EXPIRED', '招待コードの有効期限が切れています');
-    Repo.update('Invites', latest, { usedAt: Util.nowIso() });
+    return hit;
   },
 
   setNewPin_: function (user, pin) {
@@ -100,41 +151,32 @@ function act_ping(ctx) {
   return { apiVersion: API_VERSION, schemaVersion: '1', serverTime: Util.nowIso() };
 }
 
-function act_listLoginUsers(ctx) {
-  var list = Repo.all('Users').filter(function (u) { return u.status !== 'disabled'; }).map(function (u) {
-    return { userId: u.userId, name: u.name, nameKana: u.nameKana || '', status: u.status };
-  });
-  list.sort(function (a, b) {
-    var ka = a.nameKana || a.name, kb = b.nameKana || b.name;
-    if (ka !== kb) return ka < kb ? -1 : 1;
-    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
-  });
-  return { users: list };
+function act_lookupInvite(ctx) {
+  var code = ctx.params.inviteCode;
+  if (!/^\d{6}$/.test(code)) {
+    throw new ApiError('VALIDATION_FAILED', '入力が不正です', { violations: [{ rule: 'FIELD_INVALID', path: 'inviteCode' }] });
+  }
+  var hit = Auth.resolveInvite_(ctx, code);
+  return { name: hit.user.name, company: hit.user.company || '', purpose: hit.inv.purpose };
 }
 
 function act_registerDevice(ctx) {
   var p = ctx.params, v = [];
   if (!/^\d{4}$/.test(p.pin)) v.push({ rule: 'FIELD_INVALID', path: 'pin' });
-  if (p.inviteCode !== undefined && !/^\d{6}$/.test(p.inviteCode)) v.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
+  if (!/^\d{6}$/.test(p.inviteCode)) v.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
   if (v.length) throw new ApiError('VALIDATION_FAILED', '入力が不正です', { violations: v });
-  var user = Repo.get('Users', p.userId);
-  if (!user) throw new ApiError('NOT_FOUND', 'ユーザーが見つかりません');
-  if (user.status === 'disabled') throw new ApiError('USER_DISABLED', 'アカウントが停止されています');
-  if (user.status === 'locked') throw new ApiError('USER_LOCKED', 'ロックされています');
+  var hit = Auth.resolveInvite_(ctx, p.inviteCode);
+  var user = hit.user;
   var now = Util.nowIso();
   var evCtx = { actor: { userId: user.userId, role: user.role }, device: null, clientId: '' };
 
-  if (user.status === 'invited') {
-    if (p.inviteCode === undefined) throw new ApiError('INVITE_REQUIRED', '招待コードが必要です');
-    Auth.verifyInvite_(ctx, user, p.inviteCode, 'first');
+  Repo.update('Invites', hit.inv, { usedAt: now });
+  if (hit.inv.purpose === 'first') {
     Repo.update('Users', user, Object.assign(Auth.setNewPin_(user, p.pin), { status: 'active' }));
     Ev.add(evCtx, 'pin_changed', { detail: { via: 'invite_first' } });
-  } else if (p.inviteCode !== undefined) {
-    Auth.verifyInvite_(ctx, user, p.inviteCode, 'pinReset');
+  } else {
     Repo.update('Users', user, Auth.setNewPin_(user, p.pin));
     Ev.add(evCtx, 'pin_changed', { detail: { via: 'invite_reset' } });
-  } else {
-    Auth.verifyPin(ctx, user, p.pin, 'registerDevice');
   }
 
   var deviceId = Util.newId('d');

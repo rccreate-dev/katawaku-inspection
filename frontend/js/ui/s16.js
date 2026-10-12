@@ -29,6 +29,7 @@
         var cls = u.status === 'locked' ? 'bad' : (u.status === 'active' ? 'good' : (u.status === 'invited' ? 'warn' : 'na'));
         var card = h('div', { class: 'card' },
           h('div', { class: 'row wrap' }, h('b', null, u.name), h('span', { class: 'chips' }, C.chip('na', t('role.' + u.role)), C.chip(cls, t('userst.' + u.status)))),
+          u.company ? h('div', { class: 'sub' }, u.company) : null,
           h('div', { class: 'sub' }, t('scr.S16.last_login') + ': ' + (u.lastLoginAt ? C.fmt(u.lastLoginAt) : '-')));
         var btns = h('div', { class: 'gap' });
         function invite(purpose) {

@@ -13,7 +13,7 @@ var SCHEMA = (function () {
     S[name] = { name: name, pk: pk, appendOnly: appendOnly, columns: cols };
   }
   def('Users', 'userId', false,
-    'userId,name,nameKana,role,status,lang,email,qaQualified:bool,pinSalt,pinHash,failedCount:int,lockedAt:dt,lastLoginAt:dt,note,createdAt:dt,updatedAt:dt');
+    'userId,name,nameKana,role,status,lang,email,qaQualified:bool,pinSalt,pinHash,failedCount:int,lockedAt:dt,lastLoginAt:dt,note,createdAt:dt,updatedAt:dt,company');
   def('Sites', 'siteId', false,
     'siteId,name,status,floors,zones,primeContractor,address,joinKey,driveFolderId,startDate:date,endDate:date,createdAt:dt,updatedAt:dt');
   def('Assignments', 'assignId', false,
@@ -178,9 +178,9 @@ function setupFirstLead(name, loginId) {
     var now = Util.nowIso();
     Repo.append('Users', {
       userId: userId, name: nm, nameKana: '', role: 'lead', status: 'invited', lang: 'ja', email: '', qaQualified: true,
-      pinSalt: '', pinHash: '', failedCount: 0, lockedAt: '', lastLoginAt: '', note: 'setupFirstLead', createdAt: now, updatedAt: now
+      pinSalt: '', pinHash: '', failedCount: 0, lockedAt: '', lastLoginAt: '', note: 'setupFirstLead', createdAt: now, updatedAt: now, company: ''
     });
-    var code = Util.randomDigits(6);
+    var code = Auth.newInviteCode_();
     var expiresAt = Util.fmtDt(new Date(Util.nowMs() + Cfg.get('inviteTtlHours') * 3600000));
     var inv = Repo.append('Invites', {
       inviteId: Util.newId('i'), userId: userId, purpose: 'first', codeHash: Auth.hashInvite(userId, code),
@@ -190,7 +190,43 @@ function setupFirstLead(name, loginId) {
     log('最初の責任者を作成しました: ' + nm + '(userId=' + userId + ')');
     log('招待コード(6桁): ' + code);
     log('有効期限: ' + expiresAt + '(' + Cfg.get('inviteTtlHours') + '時間)');
-    log('アプリの「端末の登録」で ' + nm + ' を選び、このコードと決めたPIN(4桁)を入力してください。このログは他人に見せないでください');
+    log('アプリの「端末の登録」画面で、このコードを入力し、決めたPIN(4桁)を登録してください。このログは他人に見せないでください');
+    return { created: true, userId: userId, expiresAt: expiresAt };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 責任者自身の追加端末・PIN再設定用の招待コード(purpose=pinReset)を発行し、Logger に表示する(SPEC §3.6.1)。
+ * GASエディタ専用。Webアプリの action ではない。対象は role=lead の active ユーザーのみ。
+ * 使い方: function runLeadCode() { issueLeadCode('u_xxxx'); } を作って実行する(docs/DEPLOY.md)。
+ */
+function issueLeadCode(userId) {
+  var log = function (msg) { Logger.log(msg); };
+  var abort = function (reason) { log('中止: ' + reason); return { created: false, reason: reason }; };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    Repo.resetCache();
+    var user = Repo.get('Users', userId);
+    if (!user) return abort('userId が見つかりません: ' + userId);
+    if (user.role !== 'lead') return abort('責任者(lead)のみ対象です');
+    if (user.status !== 'active') return abort('status が active の責任者のみ対象です(現在: ' + user.status + ')');
+    var now = Util.nowIso();
+    Repo.where('Invites', 'userId', userId).forEach(function (inv) {
+      if (inv.usedAt === '') Repo.update('Invites', inv, { usedAt: 'superseded' });
+    });
+    var code = Auth.newInviteCode_();
+    var expiresAt = Util.fmtDt(new Date(Util.nowMs() + Cfg.get('inviteTtlHours') * 3600000));
+    var inv = Repo.append('Invites', {
+      inviteId: Util.newId('i'), userId: userId, purpose: 'pinReset', codeHash: Auth.hashInvite(userId, code),
+      expiresAt: expiresAt, usedAt: '', createdBy: 'system', createdAt: now
+    });
+    Ev.add(null, 'invite_issued', { detail: { userId: userId, purpose: 'pinReset', inviteId: inv.inviteId, expiresAt: expiresAt } });
+    log('招待コード(6桁): ' + code);
+    log('有効期限: ' + expiresAt + '(' + Cfg.get('inviteTtlHours') + '時間)');
+    log('アプリの「端末の登録」画面でこのコードと新しいPIN(4桁)を入力してください。このログは他人に見せないでください');
     return { created: true, userId: userId, expiresAt: expiresAt };
   } finally {
     lock.releaseLock();

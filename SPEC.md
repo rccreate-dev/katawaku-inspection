@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.6.0 / 作成日: 2026-10-07(最終改訂 2026-10-10) / 作成: 設計担当
+- 版: 1.7.0 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -106,7 +106,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | 起動が遅い(コールドスタート) | クライアントのタイムアウトは通常30秒・写真チャンク60秒・PDF生成120秒。タイムアウトは再試行扱い。 |
 | 参照が遅い(行ごとのAPI呼び出し) | バックエンドは **1リクエスト内でシートを `getValues()` 一括読み**する。参照シート **`Config` / `Items` / `Sites` のみ** `CacheService`(スクリプトキャッシュ)で最大60秒キャッシュしてよい(§2.15。書込み時に破棄)。**権限判定に使うシート(`Users` / `Devices` / `Assignments` / `Memberships` / `Absences`)は絶対にキャッシュしない**(認可は常に最新のシートで判定する)。 |
 | 固定処理(認証・シート読込)が1リクエストの大半を占める(版1.5) | 本番実測: 1往復≒1.3〜2.8秒、写真1枚の1リクエスト≒6秒のうち大半はサーバー側の固定処理(端末認証・シート読込)。本文サイズは主因ではない。対処は ①写真は単発1回(§7.3) ②同時送信(§8.4) ③**1リクエスト内で同じシートを再読込しない・必要な行/列だけ読む(§2.16)** ④`Config`/`Items`/`Sites` のみ最大60秒の読み取りキャッシュ(§2.15)。性能の目標値は §12.6(手動確認)。 |
-| 認証されないGET/POSTが誰でも打てる | トークン検査をdispatcher冒頭で行う。公開actionは `ping`/`listLoginUsers`/`registerDevice` のみ。 |
+| 認証されないGET/POSTが誰でも打てる | トークン検査をdispatcher冒頭で行う。公開actionは `ping`/`lookupInvite`/`registerDevice` のみ。 |
 | `.gs` の構文チェック | `node --check` は拡張子 `.gs` でも動くか確認し、動かない場合 `tests/check-syntax.js` が一時コピーを `.js` にして検査する(テスト担当)。 |
 
 ### 1.5 リクエスト/レスポンス封筒(全action共通)
@@ -187,6 +187,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | lastLoginAt | dt | | 最終の端末登録/PIN成功 |
 | note | str | | 備考 |
 | createdAt / updatedAt | dt | 必 | |
+| company | str | | **会社名**(版1.7。例 `株式会社RCCREATE`、`○○工業`)。最大40文字。他社の職長を招待するための項目。元請向けPDFに表示(§10.2)。**列は末尾に追加**(§2.9a の方式で既存シートに不足列として追記) |
 
 ### 2.2 Sites(現場)  PK=`siteId`
 
@@ -542,6 +543,8 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | pinMaxFail | `5` | |
 | maxDevicesPerUser | `3` | |
 | inviteTtlHours | `72` | |
+| inviteFailMax | `10` | 招待コードの失敗の許容回数(サーバー全体・窓あたり。版1.7) |
+| inviteFailWindowMin | `10` | 上の窓(分) |
 | photoMaxEdge | `1280` | 本体の長辺px上限 |
 | photoJpegQuality | `0.72` | |
 | photoThumbEdge | `320` | サムネ長辺px |
@@ -632,20 +635,25 @@ PIN検証:
 - 端末登録は維持される(解除後すぐ使える)。クライアントは `me` を `Config.pollIntervalSec` ごとに呼び、`active` に戻ったら通常画面へ復帰する。
 - **解除は責任者のみ**: `adminUnlockUser`(§5.4)。`status=locked` のユーザーにだけ有効。`failedCount=0`、`lockedAt` 空、`status=active`、Events `user_unlocked`。
 
-### 3.6 端末登録フロー(`registerDevice`)
-UI: S01。`listLoginUsers` で氏名一覧(`userId,name,status`)を取得 → 氏名を選ぶ → PIN4桁を入力。`status=invited` の氏名では「招待コード(6桁)」欄も表示。「PINを忘れた/再設定」リンクで招待コード欄を出す。
+### 3.6 端末登録フロー(`lookupInvite` → `registerDevice`)(版1.7で変更。ユーザー決定)
+**氏名一覧は未認証で返さない**(他社の職長も招待するため。`listLoginUsers` は廃止)。**招待コードを先に入力**し、コードから本人を特定する。
 
-| ケース | 入力 | サーバー処理 |
+UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ ②サーバーが返した **本人の氏名・会社名**(「○○さんですね」)を確認 → ③PIN4桁(新規)を入力 →「登録する」(`registerDevice`)。氏名を選ぶ操作はない。
+
+| ケース | コードの `purpose` | サーバー処理 |
 |---|---|---|
-| A 初回(`invited`) | `userId`, `pin`(新規に決める), `inviteCode` | 招待コード検証 → `pinSalt/pinHash` 設定 → `status=active` → 端末登録 |
-| B 追加端末(機種変更等。`active`) | `userId`, `pin`(既存) | PIN検証(誤りカウント対象)→ 端末登録 |
-| C PIN再設定(`active`) | `userId`, `pin`(新PIN), `inviteCode`(purpose=pinReset) | 招待コード検証 → PIN差し替え → 端末登録。他端末は有効のまま |
+| A 初回(`invited`) | `first` | `registerDevice`: コード検証 → `pinSalt/pinHash` 設定 → `status=active` → 端末登録 |
+| C PIN再設定・追加端末・機種変更(`active`) | `pinReset` | `registerDevice`: コード検証 → PIN差し替え → 端末登録。他端末は有効のまま |
 
-- `status=invited` で `inviteCode` なし → `INVITE_REQUIRED`。
-- 招待コード: 責任者が `adminIssueInvite` で発行(§5.4)。有効期限 `Config.inviteTtlHours`(72時間)。ユーザーごとに未使用の最新1件のみ有効(新規発行で旧コードは即失効)。誤りは §3.4 のカウンタに加算(`INVITE_INVALID` + `remaining`)。期限切れ → `INVITE_EXPIRED`。使用後 `usedAt` を記録。
+- **追加端末(旧ケースB。氏名+既存PINだけで登録)は廃止**。新しい端末は必ず責任者が発行した招待コード(`first` または `pinReset`)が要る(責任者が `adminIssueInvite`)。ロック中(`locked`)のユーザーは先に責任者が解除。
+- **`lookupInvite`**(公開action): params `{ "inviteCode" }`。有効な(未使用・未失効・最新の)コードに一致する1件を探し、`{ "name", "company", "purpose" }` だけを返す(userId・役割・status は返さない)。一致なし → `INVITE_INVALID`、期限切れ → `INVITE_EXPIRED`。`USER_DISABLED`/`USER_LOCKED` のユーザーのコードは `INVITE_INVALID` として扱う(存在を示さない)。**コードは使用済みにしない**(`registerDevice` で使用済みにする)。
+- **`registerDevice`**: params `{ "inviteCode", "pin", "deviceLabel"?, "platform"?, "appVersion"? }`(`userId` は受け取らない。コードから特定)。
+- **コードの特定**: 未使用・未失効の Invites 全行について `hashInvite(userId, code)` を計算して一致を探す(件数は少ない)。**発行時に、他の有効なコードと同じ値にならないよう再抽選**する(`adminIssueInvite`・`setupFirstLead`)ため、一致は高々1件。
+- **総当たり対策**(`lookupInvite` と `registerDevice` 共通): コードが一致しない失敗を、サーバー全体で `Config.inviteFailWindowMin`(10分)あたり `Config.inviteFailMax`(10回)まで。超えたら `RATE_LIMITED`(メッセージ「しばらく待ってからやり直してください」)で、以後の試行を窓が過ぎるまで拒否(正しいコードでも拒否)。カウンタは Script Cache(`CacheService`)に保存(再起動で消えてよい)。Events `invite_failed`(detail に件数のみ。コード平文は入れない)。ユーザー単位の PIN 誤りロック(§3.5)は従来どおり。コード検証は PIN の誤りカウント(`failedCount`)に加算しない。
+- 招待コード: 責任者が `adminIssueInvite` で発行(§5.4)。有効期限 `Config.inviteTtlHours`(72時間)。ユーザーごとに未使用の最新1件のみ有効(新規発行で旧コードは即失効)。期限切れ → `INVITE_EXPIRED`。使用後 `usedAt` を記録。
 - 端末登録時 `Users.lastLoginAt` 更新、Events `device_registered`。`maxDevicesPerUser` 超過時は §2.5 の自動整理。
-- `registerDevice` は冪等キーを使わない(応答にトークン平文が入るためIdemに保存しない)。応答喪失時の再実行は端末が1つ増えるだけで害はない(古い行は自動整理)。
-- ユーザーの新規追加は **Usersシートに行を追加**(`userId,name,role,status=invited,lang,qaQualified,failedCount=0,createdAt,updatedAt`)→ 責任者がアプリで招待コードを発行 → 本人へ口頭/対面で伝える(P-03)。
+- `registerDevice` は冪等キーを使わない(応答にトークン平文が入るためIdemに保存しない)。応答喪失時はコードが使用済みになっているため、責任者が再発行する。
+- ユーザーの新規追加は **Usersシートに行を追加**(`userId,name,role,status=invited,lang,qaQualified,failedCount=0,createdAt,updatedAt` と、**他社の職長は `company`(会社名)**)→ 責任者がアプリで招待コードを発行 → 本人へ口頭/対面/メッセージで伝える(P-03)。
 - PIN変更: `changePin`(§5.4)。
 
 #### 3.6.1 最初の責任者の作成(`setupFirstLead`。GASエディタ専用)
@@ -658,6 +666,7 @@ UI: S01。`listLoginUsers` で氏名一覧(`userId,name,status`)を取得 → �
 - 招待コード: 6桁・`purpose=first`・有効 `Config.inviteTtlHours`(72時間)・ハッシュは §3.3。`adminIssueInvite` と同じ Invites 行を作る(`createdBy=system`)。Events に `invite_issued`(`actorUserId=system`。detail に平文を含めない)。
 - 処理は `LockService.getScriptLock()` 内で行う。コード平文の表示先は §0.5 の例外のとおり `Logger` のみ。
 - この初回登録(§3.6 ケースA)の後は、責任者がアプリの `adminIssueInvite` で他のユーザーの招待コードを発行する。
+- **責任者自身の追加端末・PIN再設定**: 発行できる責任者がいなくなる場合に備え、GASエディタ専用の関数 `issueLeadCode(userId)`(`backend/Schema.gs`。Webアプリのactionではない)で `purpose=pinReset` の招待コードを発行できる(対象は `role=lead` の `active` ユーザーのみ。コード平文は `Logger` のみ)。他に有効な責任者がいればその人が `adminIssueInvite` で発行してもよい。
 
 ### 3.7 端末登録解除・退職
 - 紛失端末: 責任者が `adminRevokeDevice`(`status=revoked`)。以後その端末は `DEVICE_REVOKED`。クライアントは `deviceToken` を消去し S01 へ(未送信のoutboxは保持し、同一ユーザーで再登録すれば再開。別ユーザーなら確認の上で破棄 §8.4)。
@@ -680,7 +689,7 @@ UI: S01。`listLoginUsers` で氏名一覧(`userId,name,status`)を取得 → �
 | action | 職長 | QA | 責任者 | 条件(要点) |
 |---|---|---|---|---|
 | ping | 公 | 公 | 公 | |
-| listLoginUsers | 公 | 公 | 公 | status が disabled 以外のユーザーの `userId,name,nameKana,status` のみ(役割は返さない。P-23) |
+| lookupInvite | 公 | 公 | 公 | 招待コードに一致する1件の `name,company,purpose` のみ(userId・役割・statusは返さない。氏名一覧は返さない。総当たり対策 §3.6) |
 | registerDevice | 公 | 公 | 公 | §3.6 |
 | me / setLang / changePin / logoutDevice | ○ | ○ | ○ | 本人のみ。`changePin` は現PIN必須 |
 | getBootstrap | ○ | ○ | ○ | 自分に見える現場・項目のみ |
@@ -814,7 +823,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - `notes` と `events` は時刻昇順。`events` は直近100件。`stopInfo`/`signatures.*` は無ければ `null`。`signatures.foreman`=直近の提出、`signatures.qa`=`qaVerdict=ok` のときのみ、`signatures.prime`=元請サイン記録済みのときのみ。`qaComment` は職長にも `fix`/`qa_ok`/`approved` では返す(`draft`/`submitted` では `""`)。
 - 項目は `def.seq` 昇順。`audience=qa` の項目は職長には返さない(`self` 入力不要)。
 
-**Membership** `{ "membershipId","siteId","siteName","userId","userName","status","requestedAt","decidedBy":"str|null","decidedByName":"str|null","decidedAt":"dt|null","assignRole":"str|null","team":"str|null","note":"str|null","canDecide":false }`
+**Membership** `{ "membershipId","siteId","siteName","userId","userName","userCompany":"str","status","requestedAt","decidedBy":"str|null","decidedByName":"str|null","decidedAt":"dt|null","assignRole":"str|null","team":"str|null","note":"str|null","canDecide":false }`
 
 **Assignment** `{ "assignId","siteId","siteName","userId","userName","assignRole","team","validFrom","validTo":"date|null","active":true,"effective":true,"absentToday":false }`
 
@@ -850,8 +859,9 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | PIN_REQUIRED | PIN必須actionで `pin` なし/形式不正 | × | |
 | PIN_INVALID | PIN誤り(4回目まで) | × | `{remaining}` |
 | INVITE_REQUIRED | 未設定ユーザーに招待コードなし | × | |
-| INVITE_INVALID | 招待コード誤り/該当なし | × | `{remaining}` |
+| INVITE_INVALID | 招待コード誤り/該当なし/使用済み | × | |
 | INVITE_EXPIRED | 招待コード期限切れ | × | |
+| RATE_LIMITED | 招待コードの失敗が多すぎる(版1.7。サーバー全体の窓) | ○(待てば解消) | `{retryAfterSec}` |
 | FORBIDDEN_ROLE | 役割が許されない | × | |
 | FORBIDDEN_SITE | その現場に担当がない | × | |
 | FORBIDDEN_TEAM | 他班の記録/他人の写真 | × | |
@@ -925,14 +935,15 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **ping**(GET/POST) params `{}` → `{ "apiVersion":1, "schemaVersion":"1", "serverTime":"…" }`
 
-**listLoginUsers** params `{}` → `{ "users":[ {"userId","name","nameKana":"","status":"invited|active|locked"} ] }`(`disabled` は除外、`nameKana`→`name`順)
+**lookupInvite**(公開) params `{ "inviteCode":"6桁" }` → `{ "name", "company":"", "purpose":"first|pinReset" }`
+エラー: `VALIDATION_FAILED`(6桁でない)/ `INVITE_INVALID` / `INVITE_EXPIRED` / `RATE_LIMITED`。コードは使用済みにしない。
 
-**registerDevice** params `{ "userId", "pin", "inviteCode"?, "deviceLabel"?, "platform"?, "appVersion"? }` → `{ "deviceId", "deviceToken", "user": <Me> }`
-エラー: `VALIDATION_FAILED`(pin形式)/ `NOT_FOUND`(userIdなし)/ `USER_DISABLED` / `USER_LOCKED` / `INVITE_REQUIRED` / `INVITE_INVALID` / `INVITE_EXPIRED` / `PIN_INVALID` / `USER_LOCKED`。
+**registerDevice**(公開) params `{ "inviteCode", "pin", "deviceLabel"?, "platform"?, "appVersion"? }` → `{ "deviceId", "deviceToken", "user": <Me> }`
+エラー: `VALIDATION_FAILED`(inviteCode・pin形式)/ `INVITE_INVALID`(停止・ロック中のユーザーのコードも同じ)/ `INVITE_EXPIRED` / `RATE_LIMITED`。
 例:
 ```json
 // request
-{"v":1,"action":"registerDevice","appVersion":"1.0.0","params":{"userId":"u_tanaka","pin":"1111","deviceLabel":"Pixel 7","platform":"android"}}
+{"v":1,"action":"registerDevice","appVersion":"1.0.0","params":{"inviteCode":"482913","pin":"1111","deviceLabel":"Pixel 7","platform":"android"}}
 // response
 {"ok":true,"data":{"deviceId":"d_a1b2c3d4e5f6","deviceToken":"d_a1b2c3d4e5f6.0f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778","user":{"userId":"u_tanaka","name":"田中","role":"foreman","status":"active","lang":"ja","email":null}},"meta":{"serverTime":"2026-10-07T08:00:00+09:00","replayed":false,"apiVersion":1}}
 ```
@@ -1081,7 +1092,7 @@ params:
 
 **listAssignments** `{ "siteId"? }` → `{ "assignments":[<Assignment>] }`(`siteId`→`assignRole`順。`active=FALSE` も返す)
 **listAbsences** `{}` → `{ "absences":[<Absence>] }`(未取消かつ `dateTo >= 今日-7日`)
-**adminListUsers** `{}` → `{ "users":[ { "userId","name","role","status","lang","email","qaQualified","failedCount","lockedAt","lastLoginAt","devices":[{"deviceId","label","platform","status","registeredAt","lastSeenAt"}] } ] }`(`disabled` も含む。`pinHash/pinSalt` は絶対に返さない)
+**adminListUsers** `{}` → `{ "users":[ { "userId","name","role","status","lang","email","qaQualified","company","failedCount","lockedAt","lastLoginAt","devices":[{"deviceId","label","platform","status","registeredAt","lastSeenAt"}] } ] }`(`disabled` も含む。`pinHash/pinSalt` は絶対に返さない)
 **adminIssueInvite** `{ "userId", "purpose":"first|pinReset" }` → `{ "inviteId", "code":"6桁", "expiresAt" }`(平文コードはこの応答のみ。`first` は `invited` のユーザー、`pinReset` は `active` のユーザーにのみ。`locked`→`USER_LOCKED`、`disabled`→`USER_DISABLED`、不整合→`STATE_CONFLICT`。Events `invite_issued`(コードは含めない))
 **adminUnlockUser** `{ "userId" }` → `{ "userId", "status":"active" }`(`locked` のみ。他は `STATE_CONFLICT`。Events `user_unlocked`)
 **adminSetUserStatus** `{ "userId", "status":"active|disabled" }` → `{ "userId", "status" }`(自分自身は変更不可=`FIELD_INVALID`。Events `user_status_changed`)
@@ -1095,7 +1106,7 @@ params:
 
 ### 5.5 エンドポイント早見表(43 action)
 
-公開: `ping` `listLoginUsers` `registerDevice`
+公開: `ping` `lookupInvite` `registerDevice`
 セッション: `me` `setLang` `changePin` `logoutDevice` `getBootstrap`
 記録: `listRecords` `getRecord` `createRecord` `saveDraft` `submitRecord` `claimReview` `releaseClaim` `takeoverReview` `saveQaDraft` `submitVerdict` `recordPrimeSign` `stopPour` `addNote`
 写真: `uploadPhotoChunk` `deletePhoto` `getPhotoThumbs` `getPhoto`
@@ -1403,7 +1414,7 @@ PDF: `generateReport` `listReports`
 | ID | ルート | 対象 | 使うaction | 表示 | 操作・制御 |
 |---|---|---|---|---|---|
 | S00 | (起動) | 全員 | `me`,`getBootstrap` | スプラッシュ | トークン無→S01、`locked`→S02、それ以外→ホーム(職長S03/他S09)。保留の参加QR(`pendingJoin`)があればS13へ |
-| S01 | `#/register` | 未登録端末 | `listLoginUsers`,`registerDevice` | 氏名リスト(ボタン)、PIN4桁、`invited` の氏名には招待コード欄、「PINを忘れた/再設定」で招待コード欄表示 | 登録成功で `deviceToken` 保存→S00。エラーは `err.<CODE>`。`PIN_INVALID` は残り回数、`USER_LOCKED`→S02 |
+| S01 | `#/register` | 未登録端末 | `lookupInvite`,`registerDevice` | ①招待コード(6桁)欄と「次へ」。②「○○さん(会社名)ですね」と確認し、③PIN4桁(新規)を入力して「登録する」。氏名リストは出さない。「コードが違う/期限切れ」は責任者に再発行を依頼する案内 | 登録成功で `deviceToken` 保存→S00。エラーは `err.<CODE>`。`RATE_LIMITED` は待つ案内、`USER_LOCKED`→S02 |
 | S02 | `#/locked` | ロック中 | `me`(60秒ごと) | 「ロックされています。責任者に解除を依頼してください」 | 解除されたら自動で復帰。「この端末をログアウト」(`logoutDevice`) |
 | S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
 | S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
@@ -1487,8 +1498,8 @@ PDF: `generateReport` `listReports`
 ### 10.2 内容(日本語のみ。A4縦、余白12mm)
 0. **件名 `subject`**(§10.2a)。PDFの1ページ目の見出し(タイトルの直下)に大きく表示し、HTMLの `<title>` にも同じ文字列を入れる。
 1. タイトル「型枠工事 {段階名}検査記録」。
-2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
-3. **3者サイン欄**: 職長(氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
+2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(`ownerUserId` の `company`。空なら項目ごと出さない。版1.7)**、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
+3. **3者サイン欄**: 職長(**会社名**・氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(**会社名**・氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。折り返し・行の高さ・列幅は §10.2b-A(版1.5.3)。
 5a. **確認箇所(図面)**(版1.6。§10.2c): 項目表の直後、NG・是正の経過の前。登録された図面を1枚=1ページで載せる(概ね2ページ目)。無ければこの節ごと出さない。
@@ -1685,10 +1696,12 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-ENV-04(検査順序 §4.2): 同時に複数の不備がある要求は最初の段のエラーを返す。契約外キー+役割違反(職長の `claimReview` に未知キー)→`BAD_REQUEST`。役割違反+範囲違反→`FORBIDDEN_ROLE`。範囲違反+状態違反(担当外現場の `draft` 記録への `claimReview`)→`FORBIDDEN_SITE`。班違反+状態違反(他班の `submitted` 記録への `saveDraft`)→`FORBIDDEN_TEAM`。
 
 **認証・PIN**
-- C-AUTH-01: `listLoginUsers` は `disabled` を含まず、`role` キーを含まない。
-- C-AUTH-02: `registerDevice`(田中/1111)で token 取得→`me` が田中・`role=foreman`。token改ざん→`UNAUTHENTICATED`。`adminRevokeDevice` 後→`DEVICE_REVOKED`。
-- C-AUTH-03: `invited` ユーザー: 招待コードなし→`INVITE_REQUIRED`、誤りコード→`INVITE_INVALID`(`remaining`)、正しい `123456`+新PIN→登録成功しそのPINで `registerDevice` 可、再使用→`INVITE_INVALID`。(mock-only)時計+73時間→`INVITE_EXPIRED`。
-- C-AUTH-04(ロック): 誤PINで `registerDevice` を5回 → 1〜4回目 `PIN_INVALID`(`remaining` が4,3,2,1)、5回目 `USER_LOCKED`。正しいPINでも `USER_LOCKED`。既存端末のtokenでも `listRecords` が `USER_LOCKED`、`me` は `status=locked` を返す。
+- C-AUTH-01: `listLoginUsers` は存在しない(`UNKNOWN_ACTION`)。`lookupInvite` は `name,company,purpose` 以外のキー(`userId`・`role`・`status` 等)を返さず、無効(`disabled`/`locked`)ユーザーのコードは `INVITE_INVALID`。
+- C-AUTH-02: `registerDevice`(田中の招待コード+PIN 1111)で token 取得→`me` が田中・`role=foreman`。token改ざん→`UNAUTHENTICATED`。`adminRevokeDevice` 後→`DEVICE_REVOKED`。
+- C-AUTH-03: 招待コードなし→`VALIDATION_FAILED`、誤りコード→`INVITE_INVALID`、`lookupInvite` 正コード→本人の `name,company`(コードは未使用のまま)、正しい `123456`+新PIN→`registerDevice` 成功(`status=active`)、再使用→`INVITE_INVALID`、追加端末は `pinReset` コードで登録可(`userId` をリクエストに含めても無視)、氏名+PINだけの登録はできない。(mock-only)時計+73時間→`INVITE_EXPIRED`。
+- C-AUTH-04(ロック): 稼働中ユーザーが `changePin` 等の stepUp で誤PINを5回 → 1〜4回目 `PIN_INVALID`(`remaining` が4,3,2,1)、5回目 `USER_LOCKED`。正しいPINでも `USER_LOCKED`。既存端末のtokenでも `listRecords` が `USER_LOCKED`、`me` は `status=locked` を返す。
+- C-AUTH-06(総当たり対策): 一致しない招待コードを `lookupInvite` で `inviteFailMax`(10)回続けると、次は正しいコードでも `RATE_LIMITED`。`inviteFailWindowMin` 経過後(mockは時計を進める)は再び使える。`failedCount` は増えない。
+- C-AUTH-07(会社名): Users の `company` が `lookupInvite` と `adminListUsers` に出る。PDFの職長サイン欄・基本情報に出る(空なら出さない)。
 - C-AUTH-05: 状態ダンプ・全応答に `pinHash`/`pinSalt`/`tokenHash`/PIN平文/招待コード平文が含まれない。(mock-only)`Idem.responseJson`・`Events.detail` にも含まれない。
 - C-PIN-01: 田中が下書き完了の記録で `submitRecord` を `pin` なし→`PIN_REQUIRED`(カウント不変)、誤PIN×5→`USER_LOCKED`、責任者が `adminUnlockUser` → 田中の操作が復帰し `failedCount=0`。
 - C-PIN-02: PIN必須でないaction(`saveDraft` 等)に `pin` を付けても無視され誤りカウントが増えない。`submitVerdict(minor)` はPINなしで成功、`submitVerdict(ok)` はPINなしで `PIN_REQUIRED`。`recordPrimeSign` はPINなしで `PIN_REQUIRED`。
@@ -1924,7 +1937,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-20 | 写真の圧縮値 | 長辺1280px・JPEG品質0.72・サムネ320px・項目×sideあたり5枚まで・本体≤600KB |
 | P-21 | PWAアイコン | 仮アイコン |
 | P-22 | インドネシア語 | 暫定訳(prototypeの訳を流用+不足分は設計担当が補足)。ネイティブ確認が必要 |
-| P-23 | `listLoginUsers` | 端末登録前に氏名一覧(役割は含めない)を未認証で返す。氏名が外部から見える点は許容(要確認) |
+| P-23 | 氏名一覧の公開 | **解消(版1.7)**: 他社の職長を招待するため `listLoginUsers` を廃止し、招待コード先入力(`lookupInvite`)に変更 |
 | P-24 | 弱いPIN(0000等) | 拒否しない(4桁の制約上。ロックと端末登録制で緩和) |
 | P-25 | 重大不適合の30分報告 | 判定時に責任者へ即時通知で充足。責任者の確認(ack)機能は作らない |
 | P-26 | 項目マスタ | prototypeの16項目(active)+追加案15項目(i17〜i31)+元Excel突合で追加した18項目(i32〜i49)(計49行)。i17〜i49 の33項目は無効。**突合済**(`docs/item-reconciliation.md`)。i48・i49 は `stage=post_demold`(v1では作成不可)。編集ルールは §2.6.2 |
@@ -1987,3 +2000,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-10 | 1.6.3 | 不具合対応: 短時間に複数回更新すると、precache がHTTPキャッシュ(GitHub Pages は約10分)から古いファイルを取り込み、新旧のJSが混在して画面でエラーになる。§8.10: precache は `cache:'reload'` で取得する。API契約は変更なし。 |
 | 2026-10-10 | 1.6.4 | 不具合対応: iPhone で図面(写真)保存時に IndexedDB が Blob 保存に失敗しエラーになる。§8.2: Blob は ArrayBuffer+type で保存し読み出し時に Blob へ戻す。API契約は変更なし。 |
 | 2026-10-10 | 1.6.5 | ユーザー要望: 元請PDFの図面ページの凡例に測定値を載せる。§10.2c-3: 凡例を label 単位の行にし、`実測値` 列(`④-1 … -1mm`)を追加。API契約・列名は変更なし(backend/Report.gs のみ)。 |
+| 2026-10-12 | 1.7.0 | ユーザー決定(他社の職長も招待するため): ①端末登録を **招待コード先入力**に変更(`listLoginUsers` 廃止→公開action `lookupInvite` 追加。`registerDevice` は `userId` を受け取らず `inviteCode`+`pin`。追加端末(氏名+PINのみ)は廃止し、責任者発行の `pinReset` コードに統一。総当たり対策=サーバー全体の失敗回数制限 `RATE_LIMITED`、Config `inviteFailMax`/`inviteFailWindowMin`、発行時にコード重複を避ける)。②Users に **`company`(会社名)** を追加(末尾列)。`adminListUsers`・`Membership.userCompany`・PDF(基本情報・職長/品質管理者サイン欄)に表示。③責任者の追加端末用に GASエディタ専用 `issueLeadCode`(§3.6.1)。action数は43のまま(1削除・1追加)。P-23 解消 |

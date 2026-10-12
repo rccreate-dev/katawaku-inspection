@@ -34,7 +34,7 @@ test('FL-01 最初の責任者→招待コードでregisterDevice→adminIssueIn
   assert.equal(Date.parse(inv[0].expiresAt) - h.nowMs() < 72.1 * 3600000, true);
 
   // 初回登録(§3.6 ケースA)
-  const reg = h.call('registerDevice', { userId: 'u_hosono', pin: '5555', inviteCode: code });
+  const reg = h.call('registerDevice', { pin: '5555', inviteCode: code });
   assert.equal(reg.ok, true, JSON.stringify(reg));
   assert.equal(reg.data.user.role, 'lead');
   const lead = (a, p, o) => h.call(a, p, Object.assign({ token: reg.data.deviceToken }, o || {}));
@@ -45,7 +45,7 @@ test('FL-01 最初の責任者→招待コードでregisterDevice→adminIssueIn
   const iss = lead('adminIssueInvite', { userId: 'u_newfore', purpose: 'first' });
   assert.equal(iss.ok, true, JSON.stringify(iss));
   assert.match(iss.data.code, /^\d{6}$/);
-  const reg2 = h.call('registerDevice', { userId: 'u_newfore', pin: '1234', inviteCode: iss.data.code });
+  const reg2 = h.call('registerDevice', { pin: '1234', inviteCode: iss.data.code });
   assert.equal(reg2.ok, true, JSON.stringify(reg2));
   assert.equal(reg2.data.user.role, 'foreman');
 });
@@ -105,14 +105,37 @@ test('FL-06 招待コード平文はシート・Events・戻り値・console・I
   assert.equal(res.error.code, 'BAD_REQUEST');
 });
 
-test('FL-07 誤った招待コードは誤り回数に数えられ、期限切れ(72時間後)は登録できない', () => {
+test('FL-07 誤った招待コードは拒否され、期限切れ(72時間後)は登録できない', () => {
   first('細野', 'u_hosono');
   const code = codeFromLog();
-  const bad = h.call('registerDevice', { userId: 'u_hosono', pin: '5555', inviteCode: code === '000000' ? '000001' : '000000' });
+  const bad = h.call('registerDevice', { pin: '5555', inviteCode: code === '000000' ? '000001' : '000000' });
   assert.equal(bad.ok, false);
   assert.equal(bad.error.code, 'INVITE_INVALID');
   h.control('clock', { advanceMin: 73 * 60 });
-  const late = h.call('registerDevice', { userId: 'u_hosono', pin: '5555', inviteCode: code });
+  const late = h.call('registerDevice', { pin: '5555', inviteCode: code });
   assert.equal(late.ok, false);
   assert.equal(late.error.code, 'INVITE_EXPIRED');
+});
+
+test('FL-08 issueLeadCode は active な責任者にだけ pinReset コードを出し、Webの actionではない', () => {
+  first('細野', 'u_hosono');
+  const code = codeFromLog();
+  assert.equal(h.ctx.issueLeadCode('u_hosono').created, false, 'invited の責任者には出さない');
+  assert.equal(h.call('registerDevice', { pin: '5555', inviteCode: code }).ok, true);
+  h.state.loggerLines.length = 0;
+  const r = h.ctx.issueLeadCode('u_hosono');
+  assert.equal(r.created, true, JSON.stringify(lines()));
+  const c2 = codeFromLog();
+  const look = h.call('lookupInvite', { inviteCode: c2 });
+  assert.equal(look.data.purpose, 'pinReset');
+  assert.equal(h.call('registerDevice', { pin: '7777', inviteCode: c2 }).ok, true, '追加端末を登録できる');
+  assert.equal(Object.keys(h.ctx.ACTIONS).includes('issueLeadCode'), false);
+});
+
+test('FL-09 company は lookupInvite に出て、PDFの基本情報・サイン欄に出る(空なら出さない)', () => {
+  first('細野', 'u_hosono');
+  h.control('patch', { sheet: 'Users', key: 'u_hosono', set: { company: '株式会社テスト' } });
+  const look = h.call('lookupInvite', { inviteCode: codeFromLog() });
+  assert.deepEqual(Object.keys(look.data).sort(), ['company', 'name', 'purpose']);
+  assert.equal(look.data.company, '株式会社テスト');
 });

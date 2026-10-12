@@ -136,6 +136,8 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<h1>' + esc_(reportSubject_(rec, site)) + '</h1>');
   h.push('<p>型枠工事 ' + esc_(stage) + '検査記録</p>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
+  var ownerCompany = userCompany_(rec.ownerUserId);
+  if (ownerCompany) h.push('<tr><th>職長の会社名</th><td>' + esc_(ownerCompany) + '</td><th>職長</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
   h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
   h.push('<tr><th>ステータス</th><td>' + esc_(STATUS_LABEL_[rec.status] || rec.status) + '</td><th>提出ラウンド</th><td>' + rec.round + '</td></tr>');
@@ -143,8 +145,8 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
 
   // 3者サイン
   h.push('<h2>サイン欄(3者)</h2><table class="sign"><tr><th>職長</th><th>品質管理者</th><th>元請</th></tr><tr>');
-  h.push('<td>' + (rec.submittedAt ? esc_(userName_(rec.submittedBy)) + '<br>' + esc_(dtShort_(rec.submittedAt)) + '<br>PIN認証による電子サイン' : '未') + '</td>');
-  h.push('<td>' + (rec.qaVerdict === 'ok' ? esc_(userName_(rec.qaVerdictBy)) + '<br>' + esc_(dtShort_(rec.qaVerdictAt)) + '<br>判定: 合格' : '未') + '</td>');
+  h.push('<td>' + (rec.submittedAt ? esc_(userName_(rec.submittedBy)) + companyLine_(rec.submittedBy) + '<br>' + esc_(dtShort_(rec.submittedAt)) + '<br>PIN認証による電子サイン' : '未') + '</td>');
+  h.push('<td>' + (rec.qaVerdict === 'ok' ? esc_(userName_(rec.qaVerdictBy)) + companyLine_(rec.qaVerdictBy) + '<br>' + esc_(dtShort_(rec.qaVerdictAt)) + '<br>判定: 合格' : '未') + '</td>');
   if (rec.primeSignedAt) {
     h.push('<td>' + esc_(rec.primeSignerName) + '<br>' + esc_(METHOD_LABEL_[rec.primeSignMethod] || rec.primeSignMethod) +
       '<br>記録者: ' + esc_(userName_(rec.primeSignedBy)) + '<br>' + esc_(dtShort_(rec.primeSignedAt)) + '</td>');
@@ -291,4 +293,10 @@ function act_listReports(ctx) {
   requireAuth_(ctx.actor, 'listReports', { record: rec, params: ctx.params });
   var rows = Repo.where('Reports', 'recordId', rec.recordId).slice().sort(function (a, b) { return b.version - a.version; });
   return { reports: rows.map(reportView_) };
+}
+
+/** サイン欄の氏名の下に会社名を出す(空なら何も出さない) */
+function companyLine_(userId) {
+  var c = userCompany_(userId);
+  return c ? '<br>' + esc_(c) : '';
 }

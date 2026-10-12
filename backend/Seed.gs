@@ -70,6 +70,8 @@ var DEFAULT_CONFIG = [
   { key: 'pinMaxFail', value: '5', type: 'int', description: 'PIN連続誤りでロックする回数' },
   { key: 'maxDevicesPerUser', value: '3', type: 'int', description: '1ユーザーの有効端末数の上限' },
   { key: 'inviteTtlHours', value: '72', type: 'int', description: '招待コードの有効時間' },
+  { key: 'inviteFailMax', value: '10', type: 'int', description: '招待コードの失敗の上限(サーバー全体・窓あたり)' },
+  { key: 'inviteFailWindowMin', value: '10', type: 'int', description: '招待コード失敗を数える窓(分)' },
   { key: 'photoMaxEdge', value: '1280', type: 'int', description: '写真本体の長辺px上限' },
   { key: 'photoJpegQuality', value: '0.72', type: 'num', description: '写真のJPEG品質' },
   { key: 'photoThumbEdge', value: '320', type: 'int', description: 'サムネ長辺px' },

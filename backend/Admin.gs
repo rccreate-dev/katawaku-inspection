@@ -19,7 +19,7 @@ function act_adminListUsers(ctx) {
   return {
     users: Repo.all('Users').map(function (u) {
       return {
-        userId: u.userId, name: u.name, role: u.role, status: u.status, lang: u.lang || 'ja', email: u.email ? u.email : null,
+        userId: u.userId, name: u.name, company: u.company || '', role: u.role, status: u.status, lang: u.lang || 'ja', email: u.email ? u.email : null,
         qaQualified: !!u.qaQualified, failedCount: u.failedCount || 0, lockedAt: orNull_(u.lockedAt), lastLoginAt: orNull_(u.lastLoginAt),
         devices: (devs[u.userId] || []).map(function (d) {
           return {
@@ -47,7 +47,7 @@ function act_adminIssueInvite(ctx) {
   Repo.where('Invites', 'userId', user.userId).forEach(function (inv) {
     if (inv.usedAt === '') Repo.update('Invites', inv, { usedAt: 'superseded' });
   });
-  var code = Util.randomDigits(6);
+  var code = Auth.newInviteCode_();
   var expiresAt = Util.fmtDt(new Date(Util.nowMs() + Cfg.get('inviteTtlHours') * 3600000));
   var inv = Repo.append('Invites', {
     inviteId: Util.newId('i'), userId: user.userId, purpose: p.purpose, codeHash: Auth.hashInvite(user.userId, code),

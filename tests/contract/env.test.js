@@ -28,7 +28,7 @@ describe('C-ENV 封筒・共通', () => {
   it('C-ENV-02: 全応答に ok/meta、失敗は既知コード、常にHTTP 200', async () => {
     const t = await h.login('u_tanaka');
     const rs = [
-      await h.call('listLoginUsers'),
+      await h.call('lookupInvite', { inviteCode: '000000' }),
       await h.call('me', {}, { token: t.token }),
       await h.call('getBootstrap', {}, { token: t.token }),
       await h.call('getRecord', { recordId: 'r_seedc10000000000' }, { token: t.token }),
@@ -64,11 +64,11 @@ describe('C-ENV 封筒・共通', () => {
     const p = await h.call('ping');
     assert.equal(p.ok, true);
     assert.equal(p.data.apiVersion, 1);
-    const g2 = await (await fetch(h.API_URL + '?action=listLoginUsers', { redirect: 'follow' })).json();
+    const g2 = await (await fetch(h.API_URL + '?action=lookupInvite', { redirect: 'follow' })).json();
     assert.equal(g2.error.code, 'BAD_REQUEST', 'ping以外のGETは BAD_REQUEST');
 
     const t = await h.login('u_tanaka');
-    const old = await h.call('listLoginUsers', {}, { appVersion: '0.0.1' });
+    const old = await h.call('lookupInvite', { inviteCode: '000000' }, { appVersion: '0.0.1' });
     assert.equal(old.error.code, 'CLIENT_OUTDATED');
     assert.equal(typeof old.error.data.minClientVersion, 'string');
     const o2 = await h.call('getBootstrap', {}, { token: t.token, appVersion: '0.0.1' });

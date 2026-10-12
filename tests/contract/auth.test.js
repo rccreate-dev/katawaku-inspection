@@ -7,25 +7,29 @@ const h = require('../helpers/client');
 describe('C-AUTH 端末登録・ロック', () => {
   beforeEach(() => h.reset());
 
-  it('C-AUTH-01: listLoginUsers は role を含まず、disabled を含まない', async () => {
-    const r = await h.call('listLoginUsers');
-    assert.equal(r.ok, true);
-    assert.ok(r.data.users.length >= 5);
-    for (const u of r.data.users) {
-      assert.ok(!('role' in u), 'role を返さない');
-      assert.deepEqual(Object.keys(u).sort(), ['name', 'nameKana', 'status', 'userId']);
-      assert.ok(['invited', 'active', 'locked'].includes(u.status));
-    }
+  it('C-AUTH-01: listLoginUsers は存在しない。lookupInvite は name/company/purpose だけを返す', async () => {
+    assert.equal((await h.call('listLoginUsers')).error.code, 'BAD_REQUEST');
+    const code = await h.issueCode('u_tanaka', 'pinReset');
+    const r = await h.call('lookupInvite', { inviteCode: code });
+    assert.equal(r.ok, true, JSON.stringify(r.error));
+    assert.deepEqual(Object.keys(r.data).sort(), ['company', 'name', 'purpose']);
+    assert.equal(r.data.name, '田中');
+    assert.equal(r.data.purpose, 'pinReset');
+    assert.equal((await h.call('lookupInvite', { inviteCode: 'abc' })).error.code, 'VALIDATION_FAILED');
   });
-  h.mockOnly(it, 'C-AUTH-01(mock-only): disabled は一覧に出ない', async () => {
+  h.mockOnly(it, 'C-AUTH-01(mock-only): 停止・ロック中ユーザーのコードは INVITE_INVALID', async () => {
+    const c1 = await h.issueCode('u_suzuki', 'pinReset');
+    const c2 = await h.issueCode('u_sato', 'pinReset');
     await h.mock('patch', { sheet: 'Users', key: 'u_suzuki', set: { status: 'disabled' } });
-    const r = await h.call('listLoginUsers');
-    assert.ok(!r.data.users.some((u) => u.userId === 'u_suzuki'));
+    await h.mock('patch', { sheet: 'Users', key: 'u_sato', set: { status: 'locked' } });
+    assert.equal((await h.call('lookupInvite', { inviteCode: c1 })).error.code, 'INVITE_INVALID');
+    assert.equal((await h.call('lookupInvite', { inviteCode: c2 })).error.code, 'INVITE_INVALID');
   });
 
   it('C-AUTH-02: 登録→me、token改ざん→UNAUTHENTICATED、端末登録解除→DEVICE_REVOKED', async () => {
-    const reg = await h.call('registerDevice', { userId: 'u_tanaka', pin: '1111', deviceLabel: 'Pixel 7', platform: 'android' });
-    assert.equal(reg.ok, true);
+    const code = await h.issueCode('u_tanaka', 'pinReset');
+    const reg = await h.call('registerDevice', { inviteCode: code, pin: '1111', deviceLabel: 'Pixel 7', platform: 'android' });
+    assert.equal(reg.ok, true, JSON.stringify(reg.error));
     assert.match(reg.data.deviceId, /^d_[a-z0-9]{3,32}$/);
     assert.ok(reg.data.deviceToken.startsWith(reg.data.deviceId + '.'));
     assert.deepEqual(Object.keys(reg.data.user).sort(), ['email', 'lang', 'name', 'role', 'status', 'userId']);
@@ -47,52 +51,83 @@ describe('C-AUTH 端末登録・ロック', () => {
     const existing = await h.login('u_sugiant');
     const seen = [];
     for (let i = 0; i < 4; i++) {
-      const r = await h.call('registerDevice', { userId: 'u_sugiant', pin: '0000' });
+      const r = await existing.call('changePin', { newPin: '5555' }, { pin: '0000' });
       assert.equal(r.error.code, 'PIN_INVALID');
       seen.push(r.error.data.remaining);
     }
     assert.deepEqual(seen, [4, 3, 2, 1]);
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '0000' })).error.code, 'USER_LOCKED');
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '2222' })).error.code, 'USER_LOCKED', '正しいPINでもロック中は不可');
+    assert.equal((await existing.call('changePin', { newPin: '5555' }, { pin: '0000' })).error.code, 'USER_LOCKED');
+    assert.equal((await existing.call('changePin', { newPin: '5555' }, { pin: '2222' })).error.code, 'USER_LOCKED', '正しいPINでもロック中は不可');
     assert.equal((await existing.call('listRecords', {})).error.code, 'USER_LOCKED');
     assert.equal((await existing.call('getBootstrap', {})).error.code, 'USER_LOCKED');
     const me = await existing.call('me', {});
     assert.equal(me.ok, true);
     assert.equal(me.data.user.status, 'locked');
-    // 公開actionのlistLoginUsersにもロック状態が出る
-    const list = await h.call('listLoginUsers');
-    assert.equal(list.data.users.find((u) => u.userId === 'u_sugiant').status, 'locked');
   });
 
   h.mockOnly(it, 'C-AUTH-03(mock-only): invited ユーザーの招待コード登録', async () => {
     await h.reset({ variant: 'invited' });
-    const list = await h.call('listLoginUsers');
-    assert.equal(list.data.users.find((u) => u.userId === 'u_sugiant').status, 'invited');
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555' })).error.code, 'INVITE_REQUIRED');
-    const wrong = await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: '000000' });
-    assert.equal(wrong.error.code, 'INVITE_INVALID');
-    assert.equal(wrong.error.data.remaining, 4);
-    const ok = await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: '123456' });
+    assert.equal((await h.call('registerDevice', { pin: '5555' })).error.code, 'VALIDATION_FAILED', '招待コードなしは不可');
+    assert.equal((await h.call('registerDevice', { inviteCode: '12', pin: '5555' })).error.code, 'VALIDATION_FAILED');
+    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', inviteCode: '123456', pin: '5555' })).error.code, 'BAD_REQUEST', 'userId は受け取らない');
+    assert.equal((await h.call('registerDevice', { inviteCode: '000000', pin: '5555' })).error.code, 'INVITE_INVALID');
+    const look = await h.call('lookupInvite', { inviteCode: '123456' });
+    assert.equal(look.data.name, 'スギアント');
+    assert.equal(look.data.purpose, 'first');
+    assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).ok, true, 'lookup では使用済みにならない');
+    const ok = await h.call('registerDevice', { inviteCode: '123456', pin: '5555' });
     assert.equal(ok.ok, true, JSON.stringify(ok.error));
     assert.equal(ok.data.user.userId, 'u_sugiant');
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555' })).ok, true, '設定したPINで追加端末を登録できる');
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: '123456' })).error.code, 'INVITE_INVALID', 'コードの再使用は不可');
+    assert.equal(ok.data.user.status, 'active');
+    assert.equal((await h.call('registerDevice', { inviteCode: '123456', pin: '5555' })).error.code, 'INVITE_INVALID', 'コードの再使用は不可');
+    assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).error.code, 'INVITE_INVALID');
+    const u = (await h.stateRows('Users')).find((x) => x.userId === 'u_sugiant');
+    assert.equal(u.failedCount, 0, 'コード誤りは failedCount に加算しない');
   });
   h.mockOnly(it, 'C-AUTH-03(mock-only): 時計+73時間で INVITE_EXPIRED', async () => {
     await h.reset({ variant: 'invited' });
     await h.mock('clock', { advanceMin: 73 * 60 });
-    assert.equal((await h.call('registerDevice', { userId: 'u_sugiant', pin: '5555', inviteCode: '123456' })).error.code, 'INVITE_EXPIRED');
+    assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).error.code, 'INVITE_EXPIRED');
+    assert.equal((await h.call('registerDevice', { inviteCode: '123456', pin: '5555' })).error.code, 'INVITE_EXPIRED');
+  });
+
+  h.mockOnly(it, 'C-AUTH-06(mock-only): 総当たり対策(失敗10回で正しいコードでも RATE_LIMITED、窓経過で復帰)', async () => {
+    await h.reset({ variant: 'invited' });
+    for (let i = 0; i < 10; i++) {
+      assert.equal((await h.call('lookupInvite', { inviteCode: '00000' + (i % 10) })).error.code, 'INVITE_INVALID');
+    }
+    const r = await h.call('lookupInvite', { inviteCode: '123456' });
+    assert.equal(r.error.code, 'RATE_LIMITED');
+    assert.equal(typeof r.error.data.retryAfterSec, 'number');
+    assert.equal((await h.call('registerDevice', { inviteCode: '123456', pin: '5555' })).error.code, 'RATE_LIMITED');
+    const u = (await h.stateRows('Users')).find((x) => x.userId === 'u_sugiant');
+    assert.equal(u.failedCount, 0);
+    const ev = (await h.stateRows('Events')).filter((e) => e.kind === 'invite_failed');
+    assert.equal(ev.length, 10);
+    assert.ok(!JSON.stringify(ev).includes('000000'), 'コード平文を残さない');
+    await h.mock('clock', { advanceMin: 11 });
+    assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).ok, true);
+  });
+
+  h.mockOnly(it, 'C-AUTH-07(mock-only): company が lookupInvite・adminListUsers・Membership に出る', async () => {
+    await h.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '株式会社テスト工業' } });
+    const code = await h.issueCode('u_tanaka', 'pinReset');
+    assert.equal((await h.call('lookupInvite', { inviteCode: code })).data.company, '株式会社テスト工業');
+    const lead = await h.login('u_lead');
+    const users = (await lead.ok('adminListUsers')).users;
+    assert.equal(users.find((x) => x.userId === 'u_tanaka').company, '株式会社テスト工業');
+    assert.equal(users.find((x) => x.userId === 'u_sato').company, '');
   });
 
   h.mockOnly(it, 'C-AUTH-05(mock-only): 状態ダンプ・Idem・Eventsに秘密を残さない', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const lead = await h.login('u_lead');
-    const reg = await h.call('registerDevice', { userId: 'u_suzuki', pin: '4444' });
+    const reg = await h.call('registerDevice', { inviteCode: await h.issueCode('u_suzuki', 'pinReset'), pin: '4444' });
     const inv = await lead.ok('adminIssueInvite', { userId: 'u_suzuki', purpose: 'pinReset' });
     const { recordId } = await h.makeSubmitted(t); // PIN付きaction
     await qa.call('claimReview', { recordId, round: 1 });
-    const responses = [reg, await h.call('listLoginUsers'), await lead.call('adminListUsers'), await t.call('getBootstrap'), await t.call('getRecord', { recordId })];
+    const responses = [reg, await h.call('lookupInvite', { inviteCode: inv.code }), await lead.call('adminListUsers'), await t.call('getBootstrap'), await t.call('getRecord', { recordId })];
     const text = JSON.stringify(responses);
     for (const k of ['pinHash', 'pinSalt', 'tokenHash', 'codeHash']) assert.ok(!text.includes(`"${k}"`), `応答に ${k} が含まれる`);
     const dump = [];
@@ -199,9 +234,9 @@ describe('C-PIN PIN再入力・ロック・解除', () => {
     const ok = await s.call('changePin', { newPin: '5678' }, { pin: '4444' });
     assert.equal(ok.ok, true);
     assert.equal(ok.data.changed, true);
-    assert.equal((await h.call('registerDevice', { userId: 'u_suzuki', pin: '5678' })).ok, true);
-    const old = await h.call('registerDevice', { userId: 'u_suzuki', pin: '4444' });
-    assert.equal(old.error.code, 'PIN_INVALID');
+    assert.equal((await s.call('changePin', { newPin: '1357' }, { pin: '5678' })).ok, true, '新PINが有効');
+    const old = await s.call('changePin', { newPin: '1357' }, { pin: '4444' });
+    assert.equal(old.error.code, 'PIN_INVALID', '旧PINは不可');
     assert.equal(old.error.data.remaining, 4, '成功でカウンタが0に戻っている');
   });
 });

@@ -12,7 +12,7 @@ var ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_
   'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED',
   'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING',
   'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT',
-  'LOCK_TIMEOUT', 'DRIVE_ERROR', 'INTERNAL'];
+  'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
 
 var VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED',
   'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG',
@@ -23,7 +23,7 @@ var EVENT_KINDS = ['record_created', 'submitted', 'resubmitted', 'claimed', 'cla
   'verdict_ok', 'verdict_minor', 'verdict_major', 'prime_signed', 'stopped', 'note_added', 'report_generated',
   'escalate_30', 'escalate_60', 'join_requested', 'join_approved', 'join_rejected', 'join_revoked',
   'device_registered', 'device_revoked', 'pin_failed', 'pin_locked', 'pin_changed', 'user_unlocked',
-  'user_status_changed', 'invite_issued', 'absence_set', 'absence_cancelled', 'joinkey_rotated'];
+  'user_status_changed', 'invite_issued', 'invite_failed', 'absence_set', 'absence_cancelled', 'joinkey_rotated'];
 
 /** 内部用の例外。code は ERROR_CODES のいずれか */
 class ApiError extends Error {
@@ -49,11 +49,11 @@ var RECORD_STATUSES = ['draft', 'submitted', 'fix', 'qa_ok', 'approved'];
  */
 var ACTIONS = {
   ping: { pub: true, roles: ALL_ROLES, params: {} },
-  listLoginUsers: { pub: true, roles: ALL_ROLES, params: {} },
+  lookupInvite: { pub: true, roles: ALL_ROLES, params: { inviteCode: { t: 'str', req: 1, max: 16 } } },
   registerDevice: {
     pub: true, w: true, roles: ALL_ROLES,
     params: {
-      userId: { t: 'id', p: 'u', req: 1 }, pin: { t: 'str', req: 1, max: 16 }, inviteCode: { t: 'str', max: 16 },
+      inviteCode: { t: 'str', req: 1, max: 16 }, pin: { t: 'str', req: 1, max: 16 },
       deviceLabel: { t: 'str', max: 200 }, platform: { t: 'str', max: 20 }, appVersion: { t: 'str', max: 20 }
     }
   },

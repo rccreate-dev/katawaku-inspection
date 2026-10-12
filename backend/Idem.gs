@@ -84,3 +84,10 @@ function userName_(userId) {
   var u = Repo.get('Users', userId);
   return u ? u.name : (userId === 'system' ? 'システム' : null);
 }
+
+/** 会社名の解決(空なら空文字) */
+function userCompany_(userId) {
+  if (!userId) return '';
+  var u = Repo.get('Users', userId);
+  return u && u.company ? String(u.company) : '';
+}
