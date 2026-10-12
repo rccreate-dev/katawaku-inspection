@@ -54,7 +54,8 @@ var ACTIONS = {
     pub: true, w: true, roles: ALL_ROLES,
     params: {
       inviteCode: { t: 'str', req: 1, max: 16 }, pin: { t: 'str', req: 1, max: 16 },
-      deviceLabel: { t: 'str', max: 200 }, platform: { t: 'str', max: 20 }, appVersion: { t: 'str', max: 20 }
+      deviceLabel: { t: 'str', max: 200 }, platform: { t: 'str', max: 20 }, appVersion: { t: 'str', max: 20 },
+      company: { t: 'str', max: 40 }
     }
   },
 

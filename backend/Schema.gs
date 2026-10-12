@@ -25,7 +25,7 @@ var SCHEMA = (function () {
   def('Items', 'itemId', false,
     'itemId,seq:int,stage,audience,groupKey,groupJa,groupId,textJa,textId,key:bool,tol:num,measure,minMeasures:int,unit,active:bool,note');
   def('Records', 'recordId', false,
-    'recordId,siteId,floor,zone,lot,stage,status,round:int,reinspectOf,ownerUserId,team,pourPlannedAt:dt,firstSubmittedAt:dt,submittedBy,submittedAt:dt,claimedBy,claimedAt:dt,qaDraftAt:dt,qaVerdict,qaVerdictBy,qaVerdictAt:dt,qaComment,major:bool,primeSignedBy,primeSignedAt:dt,primeSignerName,primeSignMethod,stopped:bool,stoppedBy,stoppedAt:dt,stopReason,escNotified:int,createdAt:dt,updatedAt:dt,version:int');
+    'recordId,siteId,floor,zone,lot,stage,status,round:int,reinspectOf,ownerUserId,team,pourPlannedAt:dt,firstSubmittedAt:dt,submittedBy,submittedAt:dt,claimedBy,claimedAt:dt,qaDraftAt:dt,qaVerdict,qaVerdictBy,qaVerdictAt:dt,qaComment,major:bool,primeSignedBy,primeSignedAt:dt,primeSignerName,primeSignMethod,stopped:bool,stoppedBy,stoppedAt:dt,stopReason,escNotified:int,createdAt:dt,updatedAt:dt,version:int,ownerCompany');
   def('RecordItems', 'recordItemId', false,
     'recordItemId,recordId,itemId,snapshot:json,selfResult,selfSeverity,selfValues:json,foremanNote,selfUpdatedAt:dt,qaResult,qaSeverity,qaValues:json,qaNote,qaUpdatedAt:dt');
   def('Photos', 'photoId', false,

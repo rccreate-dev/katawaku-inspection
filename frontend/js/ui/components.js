@@ -90,6 +90,9 @@
   C.placeLine = function (rec) {
     return C.siteName(rec.siteId) + ' ' + rec.floor + (rec.zone ? '・' + rec.zone : '') + ' ・ ' + rec.lot;
   };
+  /** 職長名(会社名)。会社名が空なら氏名のみ */
+  C.ownerLabel = function (r) { return (r.ownerName || '') + (r.ownerCompany ? '(' + r.ownerCompany + ')' : ''); };
+
   C.recHeadCard = function (rec, extra) {
     return h('div', { class: 'rechead' },
       h('div', { class: 'big' }, C.siteName(rec.siteId)),

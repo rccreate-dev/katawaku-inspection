@@ -110,7 +110,7 @@
               var dest = masked ? null : (role === 'foreman' && acts.indexOf('saveDraft') >= 0 ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId);
               var label = masked
                 ? t('badge.masked')
-                : [t('lbl.lot') + ' ' + (r.lot || ''), r.zone || null, r.ownerName || null].filter(Boolean).join(' / ');
+                : [t('lbl.lot') + ' ' + (r.lot || ''), r.zone || null, C.ownerLabel(r) || null].filter(Boolean).join(' / ');
               // 他班(masked)は開けない。ただし actions に stopPour があるときは「打設を止める」だけ出す(SPEC §9.2 S04)
               if (masked && acts.indexOf('stopPour') >= 0) {
                 card.appendChild(C.maskedStopRow(r));
@@ -154,7 +154,7 @@
     var now = KW.time.toIso(KW.time.nowMs(KW.state.skewMs));
     return {
       recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone: p.zone || '', lot: p.lot, stage: p.stage,
-      status: 'draft', round: 1, reinspectOf: p.reinspectOf || null, ownerUserId: me.userId, ownerName: me.name, team: site && site.myTeam || '',
+      status: 'draft', round: 1, reinspectOf: p.reinspectOf || null, ownerUserId: me.userId, ownerName: me.name, ownerCompany: me.company || '', team: site && site.myTeam || '',
       pourPlannedAt: p.pourPlannedAt || null, submittedAt: null, claimedBy: null, claimedByName: null, claimedAt: null,
       qaVerdict: null, major: false, stopped: false, escLevel: 0,
       counts: { total: items.length, filled: 0, ok: 0, ng: 0, na: 0 }, qaCounts: { filled: 0, ok: 0, ng: 0, na: 0 },

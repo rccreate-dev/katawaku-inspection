@@ -344,3 +344,20 @@ test('C-AUTH-07 会社名: PDFの基本情報とサイン欄(職長・品質管�
   assert.ok(sign.includes('山田工業株式会社'), '職長サイン欄に会社名');
   assert.ok(sign.includes('株式会社RCCREATE'), '品質管理者サイン欄に会社名');
 });
+
+test('C-AUTH-08 検査記録の ownerCompany は作成時の写し。後で Users.company を変えても記録・PDFは作成時の会社名', () => {
+  h.control('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '山田工業株式会社' } });
+  const id = newRecord(tanaka, 's_a', '1F', { lot: 'SNAP' + Math.floor(Math.random() * 1e6) });
+  assert.equal(tanaka('getRecord', { recordId: id }).data.record.ownerCompany, '山田工業株式会社');
+  h.control('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '別会社' } });
+  assert.equal(tanaka('getRecord', { recordId: id }).data.record.ownerCompany, '山田工業株式会社');
+  fillAll(h, tanaka, id, 'self');
+  assert.equal(tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' }).ok, true);
+  assert.equal(sato('claimReview', { recordId: id, round: 1 }).ok, true);
+  fillAll(h, sato, id, 'qa');
+  assert.equal(sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' }).ok, true);
+  assert.equal(sato('generateReport', { recordId: id }).ok, true);
+  assert.match(h.state.lastHtml, /<th>職長の会社名<\/th><td>山田工業株式会社<\/td>/);
+  const sign = /<table class="sign">[\s\S]*?<\/table>/.exec(h.state.lastHtml)[0];
+  assert.ok(sign.includes('山田工業株式会社') && !sign.includes('別会社'), '職長サイン欄も作成時の会社名');
+});

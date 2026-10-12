@@ -50,6 +50,7 @@ async function makeJpeg(page, w = 1200, h = 800) {
     await page.locator('input[name=invite]').fill(code);
     await shot(f, 'f01-register-list');
     await page.getByRole('button', { name: f.t('scr.S01.next') }).click();
+    await page.locator('input[name=company]').fill('山田工業株式会社');
     await page.locator('input[name=pin]').fill('1111');
     await shot(f, 'f02-register-pin');
     await page.getByRole('button', { name: f.t('scr.S01.register') }).click();

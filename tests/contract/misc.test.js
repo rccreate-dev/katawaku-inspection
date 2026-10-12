@@ -184,7 +184,23 @@ describe('C-ADMIN 管理', () => {
     assert.equal((await lead.call('adminIssueInvite', { userId: 'u_sugiant', purpose: 'pinReset' })).error.code, 'STATE_CONFLICT');
     const i = await lead.ok('adminIssueInvite', { userId: 'u_sugiant', purpose: 'first' });
     assert.equal((await h.call('registerDevice', { pin: '5555', inviteCode: '123456' })).error.code, 'INVITE_INVALID', '旧コード(シード)は新規発行で失効');
-    assert.equal((await h.call('registerDevice', { pin: '5555', inviteCode: i.code })).ok, true);
+    assert.equal((await h.call('registerDevice', { pin: '5555', inviteCode: i.code, company: 'テスト工業' })).ok, true);
+  });
+
+  h.mockOnly(it, 'C-ADMIN-02(mock-only): 検査記録の ownerCompany は作成時の会社名の写し(後で名簿が変わっても過去の記録は変わらない)', async () => {
+    await h.reset();
+    await h.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '山田工業株式会社' } });
+    const t = await h.login('u_tanaka');
+    const { recordId, res } = await h.createRecordFor(t, {});
+    assert.equal(res.ok, true, JSON.stringify(res.error));
+    assert.equal(res.data.record.ownerCompany, '山田工業株式会社');
+    await h.mock('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '別の会社' } });
+    const got = await h.getRecord(t, recordId);
+    assert.equal(got.ownerCompany, '山田工業株式会社', '作成時の写し');
+    const list = await t.ok('listRecords', { siteId: 's_a' });
+    assert.equal(list.records.find((r) => r.recordId === recordId).ownerCompany, '山田工業株式会社');
+    const { recordId: r2 } = await h.createRecordFor(t, {});
+    assert.equal((await h.getRecord(t, r2)).ownerCompany, '別の会社', '新しい記録は新しい会社名');
   });
 
   it('C-ADMIN-01: adminSetUserStatus(disabled)→全actionが USER_DISABLED、自分自身は不可、復帰', async () => {

@@ -34,7 +34,7 @@ test('FL-01 最初の責任者→招待コードでregisterDevice→adminIssueIn
   assert.equal(Date.parse(inv[0].expiresAt) - h.nowMs() < 72.1 * 3600000, true);
 
   // 初回登録(§3.6 ケースA)
-  const reg = h.call('registerDevice', { pin: '5555', inviteCode: code });
+  const reg = h.call('registerDevice', { pin: '5555', inviteCode: code, company: '株式会社RCCREATE' });
   assert.equal(reg.ok, true, JSON.stringify(reg));
   assert.equal(reg.data.user.role, 'lead');
   const lead = (a, p, o) => h.call(a, p, Object.assign({ token: reg.data.deviceToken }, o || {}));
@@ -45,7 +45,7 @@ test('FL-01 最初の責任者→招待コードでregisterDevice→adminIssueIn
   const iss = lead('adminIssueInvite', { userId: 'u_newfore', purpose: 'first' });
   assert.equal(iss.ok, true, JSON.stringify(iss));
   assert.match(iss.data.code, /^\d{6}$/);
-  const reg2 = h.call('registerDevice', { pin: '1234', inviteCode: iss.data.code });
+  const reg2 = h.call('registerDevice', { pin: '1234', inviteCode: iss.data.code, company: '山田工業' });
   assert.equal(reg2.ok, true, JSON.stringify(reg2));
   assert.equal(reg2.data.user.role, 'foreman');
 });
@@ -121,7 +121,7 @@ test('FL-08 issueLeadCode は active な責任者にだけ pinReset コードを
   first('細野', 'u_hosono');
   const code = codeFromLog();
   assert.equal(h.ctx.issueLeadCode('u_hosono').created, false, 'invited の責任者には出さない');
-  assert.equal(h.call('registerDevice', { pin: '5555', inviteCode: code }).ok, true);
+  assert.equal(h.call('registerDevice', { pin: '5555', inviteCode: code, company: '株式会社RCCREATE' }).ok, true);
   h.state.loggerLines.length = 0;
   const r = h.ctx.issueLeadCode('u_hosono');
   assert.equal(r.created, true, JSON.stringify(lines()));
@@ -138,4 +138,16 @@ test('FL-09 company は lookupInvite に出て、PDFの基本情報・サイン�
   const look = h.call('lookupInvite', { inviteCode: codeFromLog() });
   assert.deepEqual(Object.keys(look.data).sort(), ['company', 'name', 'purpose']);
   assert.equal(look.data.company, '株式会社テスト');
+});
+
+test('FL-10 会社名: 初回は必須(空→VALIDATION_FAILED・コードは消費しない)、入力は Users.company に保存', () => {
+  first('細野', 'u_hosono');
+  const code = codeFromLog();
+  const no = h.call('registerDevice', { pin: '5555', inviteCode: code, company: '   ' });
+  assert.equal(no.error.code, 'VALIDATION_FAILED');
+  assert.equal(h.call('registerDevice', { pin: '5555', inviteCode: code, company: 'あ'.repeat(41) }).error.code, 'VALIDATION_FAILED');
+  const reg = h.call('registerDevice', { pin: '5555', inviteCode: code, company: ' 株式会社  RCCREATE ' });
+  assert.equal(reg.ok, true, JSON.stringify(reg));
+  assert.equal(reg.data.user.company, '株式会社 RCCREATE');
+  assert.equal(h.control('state', { sheet: 'Users' }).data.rows.find((u) => u.userId === 'u_hosono').company, '株式会社 RCCREATE');
 });

@@ -19,7 +19,7 @@ var Auth = {
     return {
       userId: user.userId, name: user.name, role: user.role,
       status: user.status === 'locked' ? 'locked' : 'active',
-      lang: user.lang || 'ja', email: user.email ? user.email : null
+      company: user.company || '', lang: user.lang || 'ja', email: user.email ? user.email : null
     };
   },
 
@@ -164,13 +164,22 @@ function act_registerDevice(ctx) {
   var p = ctx.params, v = [];
   if (!/^\d{4}$/.test(p.pin)) v.push({ rule: 'FIELD_INVALID', path: 'pin' });
   if (!/^\d{6}$/.test(p.inviteCode)) v.push({ rule: 'FIELD_INVALID', path: 'inviteCode' });
+  var company = String(p.company === undefined || p.company === null ? '' : p.company).replace(/\s+/g, ' ').trim();
+  if (company.length > 40) v.push({ rule: 'FIELD_INVALID', path: 'company' });
   if (v.length) throw new ApiError('VALIDATION_FAILED', '入力が不正です', { violations: v });
   var hit = Auth.resolveInvite_(ctx, p.inviteCode);
   var user = hit.user;
+  // 会社名: 初回登録は必須(責任者が事前に入れた値があれば省略可)。入力があれば名簿(Users.company)を更新する
+  if (hit.inv.purpose === 'first' && !company && !user.company) {
+    throw new ApiError('VALIDATION_FAILED', '会社名を入力してください', { violations: [{ rule: 'FIELD_INVALID', path: 'company' }] });
+  }
   var now = Util.nowIso();
   var evCtx = { actor: { userId: user.userId, role: user.role }, device: null, clientId: '' };
 
   Repo.update('Invites', hit.inv, { usedAt: now });
+  if (company && company !== (user.company || '')) {
+    Repo.update('Users', user, { company: company, updatedAt: now });
+  }
   if (hit.inv.purpose === 'first') {
     Repo.update('Users', user, Object.assign(Auth.setNewPin_(user, p.pin), { status: 'active' }));
     Ev.add(evCtx, 'pin_changed', { detail: { via: 'invite_first' } });

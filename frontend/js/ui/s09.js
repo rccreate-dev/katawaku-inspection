@@ -71,7 +71,7 @@
     var dest = '#/record/' + r.recordId + (r.status === 'submitted' && (has(r, 'claimReview') || has(r, 'saveQaDraft')) ? '/review' : '');
     return h('button', { type: 'button', class: 'tap', on: { click: function () { KW.app.go(dest); } } },
       h('span', null, h('b', null, C.placeLine(r)),
-        h('small', null, [r.ownerName, r.submittedAt ? C.ago(r.submittedAt) : null, r.claimedByName ? t('msg.claimed_by_name', { name: r.claimedByName }) : null].filter(Boolean).join(' / ')),
+        h('small', null, [C.ownerLabel(r), r.submittedAt ? C.ago(r.submittedAt) : null, r.claimedByName ? t('msg.claimed_by_name', { name: r.claimedByName }) : null].filter(Boolean).join(' / ')),
         h('span', { class: 'chips' }, C.flags(r), hint ? C.chip('good', hint) : null)),
       C.statusChip(r.status));
   }

@@ -57,7 +57,7 @@ function recordSummary_(actor, rec) {
   return {
     recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone, lot: rec.lot, stage: rec.stage,
     status: rec.status, round: rec.round, reinspectOf: orNull_(rec.reinspectOf),
-    ownerUserId: rec.ownerUserId, ownerName: userName_(rec.ownerUserId), team: rec.team,
+    ownerUserId: rec.ownerUserId, ownerName: userName_(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompany_(rec.ownerUserId), team: rec.team,
     pourPlannedAt: orNull_(rec.pourPlannedAt), submittedAt: orNull_(rec.submittedAt),
     claimedBy: orNull_(rec.claimedBy), claimedByName: userName_(rec.claimedBy), claimedAt: orNull_(rec.claimedAt),
     qaVerdict: orNull_(rec.qaVerdict), major: !!rec.major, stopped: !!rec.stopped,
@@ -415,7 +415,7 @@ function act_createRecord(ctx) {
   var rec = Repo.append('Records', {
     recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone: zone, lot: p.lot, stage: p.stage, status: 'draft', round: 1,
     reinspectOf: reinspectOf, ownerUserId: actor.userId, team: team, pourPlannedAt: planned, major: false, stopped: false,
-    escNotified: 0, createdAt: now, updatedAt: now, version: 1
+    escNotified: 0, createdAt: now, updatedAt: now, version: 1, ownerCompany: userCompany_(actor.userId)
   });
   var itemRows = enabledItems_().filter(function (i) { return i.stage === p.stage; }).map(function (i) {
     return {

@@ -32,7 +32,7 @@ describe('C-AUTH 端末登録・ロック', () => {
     assert.equal(reg.ok, true, JSON.stringify(reg.error));
     assert.match(reg.data.deviceId, /^d_[a-z0-9]{3,32}$/);
     assert.ok(reg.data.deviceToken.startsWith(reg.data.deviceId + '.'));
-    assert.deepEqual(Object.keys(reg.data.user).sort(), ['email', 'lang', 'name', 'role', 'status', 'userId']);
+    assert.deepEqual(Object.keys(reg.data.user).sort(), ['company', 'email', 'lang', 'name', 'role', 'status', 'userId']);
     const me = await h.call('me', {}, { token: reg.data.deviceToken });
     assert.equal(me.data.user.userId, 'u_tanaka');
     assert.equal(me.data.user.name, '田中');
@@ -75,9 +75,16 @@ describe('C-AUTH 端末登録・ロック', () => {
     assert.equal(look.data.name, 'スギアント');
     assert.equal(look.data.purpose, 'first');
     assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).ok, true, 'lookup では使用済みにならない');
-    const ok = await h.call('registerDevice', { inviteCode: '123456', pin: '5555' });
+    // 初回登録は会社名が必須(名簿に会社名が無いとき)
+    const noCo = await h.call('registerDevice', { inviteCode: '123456', pin: '5555' });
+    assert.equal(noCo.error.code, 'VALIDATION_FAILED');
+    assert.equal(noCo.error.data.violations[0].path, 'company');
+    assert.equal((await h.call('registerDevice', { inviteCode: '123456', pin: '5555', company: 'あ'.repeat(41) })).error.code, 'VALIDATION_FAILED', '41文字は不可');
+    assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).ok, true, '会社名不足の失敗ではコードを消費しない');
+    const ok = await h.call('registerDevice', { inviteCode: '123456', pin: '5555', company: '  山田工業  株式会社 ' });
     assert.equal(ok.ok, true, JSON.stringify(ok.error));
     assert.equal(ok.data.user.userId, 'u_sugiant');
+    assert.equal(ok.data.user.company, '山田工業 株式会社', '前後の空白を除き連続空白を1つにして保存');
     assert.equal(ok.data.user.status, 'active');
     assert.equal((await h.call('registerDevice', { inviteCode: '123456', pin: '5555' })).error.code, 'INVITE_INVALID', 'コードの再使用は不可');
     assert.equal((await h.call('lookupInvite', { inviteCode: '123456' })).error.code, 'INVITE_INVALID');

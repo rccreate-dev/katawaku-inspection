@@ -326,6 +326,8 @@
     ['scr.S01.invite', '招待コード(6桁)', 'Kode undangan (6 digit)'],
     ['scr.S01.invite_first', 'これから使うPIN(4桁)を決めて入力してください。', 'Tentukan dan masukkan PIN (4 digit) yang akan dipakai.'],
     ['scr.S01.invite_reset', '新しいPIN(4桁)を決めて入力してください。この端末を新しく登録します。', 'Tentukan PIN baru (4 digit). Perangkat ini akan didaftarkan.'],
+    ['scr.S01.company', '会社名', 'Nama perusahaan'],
+    ['scr.S01.company_hint', '所属の会社名を入力してください(検査記録と提出用PDFに載ります)。', 'Masukkan nama perusahaan Anda (dicantumkan pada catatan inspeksi dan PDF).'],
     ['scr.S01.pin_new', '新しいPIN(4桁)', 'PIN baru (4 digit)'],
     ['scr.S01.forgot', 'PINを忘れた/再設定', 'Lupa PIN / atur ulang'],
     ['scr.S01.next', '次へ', 'Lanjut'],
