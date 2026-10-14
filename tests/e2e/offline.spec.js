@@ -42,7 +42,7 @@ describe('E-05 オフライン', () => {
     await offline(s, true);
     await page.locator('.net.off').waitFor();
     assert.equal(await page.locator('.net.off').innerText(), s.t('app.offline'));
-    for (let n = 1; n <= 16; n++) await page.locator(`#it-i${n} .v-ok`).click();
+    await E.answerAllOk(s);
     await page.locator('#plan-row input').fill(tomorrow0900());
     await page.locator('#plan-row input').blur();
     for (const id of KEY_ITEMS) await E.shoot(s, page.locator(`#it-${id} .cam`));
@@ -71,7 +71,7 @@ describe('E-05 オフライン', () => {
     assert.equal(rows.filter((r) => r.lot === 'OFF1').length, 1, '記録の二重作成なし');
     assert.equal((await E.stateRows('Photos')).filter((p) => p.recordId === recordId).length, KEY_ITEMS.length, '写真の二重登録なし');
     const items = (await E.stateRows('RecordItems')).filter((r) => r.recordId === recordId);
-    assert.equal(items.length, 16); assert.equal(items.filter((r) => r.selfResult === 'ok').length, 16);
+    assert.equal(items.length, 28, '新規の打設前記録は28項目(版1.9)'); assert.equal(items.filter((r) => r.selfResult === 'ok').length, 28);
 
     // 提出(PIN)
     await page.evaluate(() => { location.hash = '#/record/' + location.hash.split('/')[2] + '/confirm'; });
@@ -99,7 +99,7 @@ describe('E-05 オフライン', () => {
     const recs = (await E.stateRows('Records')).filter((r) => r.lot === 'LOST1');
     assert.equal(recs.length, 1, '記録は1件のみ');
     const items = (await E.stateRows('RecordItems')).filter((r) => r.recordId === recs[0].recordId);
-    assert.equal(items.length, 16);
+    assert.equal(items.length, 28);
     assert.deepEqual(items.filter((r) => r.selfResult).map((r) => r.itemId).sort(), ['i1', 'i2']);
     s.assertClean(); await s.close();
   });

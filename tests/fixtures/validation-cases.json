@@ -1,5 +1,5 @@
 {
- "_comment": "契約テスト(C-STATE-05)とユニットテスト(U-VALID-01)の共用データ。各項目の既定: result=ok, photos=重点項目なら1/他は0, note=\"\", values=[]。items で上書き(photos=職長写真の枚数)。pourPlannedAt=false は打設予定日時なし。itemDefs はマスタ差し替え(mock-only)。expect は rule+itemId の集合と完全一致(空=提出成功)。",
+ "_comment": "契約テスト(C-STATE-05)とユニットテスト(U-VALID-01)の共用データ。各項目の既定: result=ok, photos=重点項目なら1/他は0, note=\"\", values=[]。items で上書き(photos=職長写真の枚数)。stage は記録の段階(省略=pre_pour。版1.9)。対象項目は段階ごとの有効項目(pre_pour=i1〜i16+i58〜i69、post_demold=i50〜i57。SPEC §2.6.1a)。pourPlannedAt=false は打設予定日時なし(post_demold では true でも保存されず、false でも POUR_PLAN_REQUIRED は出ない)。itemDefs はマスタ差し替え(mock-only)。expect は rule+itemId の集合と完全一致(空=提出成功)。",
  "keyItems": [
   "i2",
   "i3",
@@ -382,6 +382,168 @@
     }
    },
    "expect": []
+  },
+  {
+   "id": "V21",
+   "desc": "[版1.9 出来形] 全項目ok・打設予定日時なし(重点項目なし。POUR_PLAN_REQUIRED は出ない)",
+   "stage": "post_demold",
+   "pourPlannedAt": false,
+   "items": {},
+   "expect": []
+  },
+  {
+   "id": "V22",
+   "desc": "[版1.9 出来形] i50が未回答(打設予定日時なしでも ANSWER_MISSING のみ)",
+   "stage": "post_demold",
+   "pourPlannedAt": false,
+   "items": {
+    "i50": {
+     "result": null
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i50"
+    }
+   ]
+  },
+  {
+   "id": "V23",
+   "desc": "[版1.9 出来形] i56(はらみ・許容10)が値[11]でok",
+   "stage": "post_demold",
+   "pourPlannedAt": false,
+   "items": {
+    "i56": {
+     "result": "ok",
+     "values": [
+      11
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i56"
+    }
+   ]
+  },
+  {
+   "id": "V24",
+   "desc": "[版1.9 出来形] i57(段差・許容3)が値[3,-3]でok(境界は許容内)",
+   "stage": "post_demold",
+   "pourPlannedAt": false,
+   "items": {
+    "i57": {
+     "result": "ok",
+     "values": [
+      3,
+      -3
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V25",
+   "desc": "[版1.9 出来形] i57が値[4]でok → 許容超え。i51はNGで写真・備考なし(全て列挙)",
+   "stage": "post_demold",
+   "pourPlannedAt": false,
+   "items": {
+    "i57": {
+     "result": "ok",
+     "values": [
+      4
+     ]
+    },
+    "i51": {
+     "result": "ng",
+     "photos": 0,
+     "note": ""
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i57"
+    },
+    {
+     "rule": "PHOTO_REQUIRED",
+     "itemId": "i51"
+    },
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i51"
+    }
+   ]
+  },
+  {
+   "id": "V26",
+   "desc": "[版1.9 出来形] 打設予定日時が(指定されても保存されず)空でも提出できる。i52が該当なし",
+   "stage": "post_demold",
+   "pourPlannedAt": true,
+   "items": {
+    "i52": {
+     "result": "na"
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V27",
+   "desc": "[版1.9 打設前] 新しい項目 i58(許容3)が値[4]でok",
+   "stage": "pre_pour",
+   "pourPlannedAt": true,
+   "items": {
+    "i58": {
+     "result": "ok",
+     "values": [
+      4
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_OVER_TOL_OK",
+     "itemId": "i58"
+    }
+   ]
+  },
+  {
+   "id": "V28",
+   "desc": "[版1.9 打設前] i64(許容50)が値[50,-50]でok(境界は許容内)・i59(実測欄なし)は値なしでok",
+   "stage": "pre_pour",
+   "pourPlannedAt": true,
+   "items": {
+    "i64": {
+     "result": "ok",
+     "values": [
+      50,
+      -50
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "V29",
+   "desc": "[版1.9 打設前] 新しい項目 i69 が未回答 + 打設予定日時なし(両方列挙)",
+   "stage": "pre_pour",
+   "pourPlannedAt": false,
+   "items": {
+    "i69": {
+     "result": null
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i69"
+    },
+    {
+     "rule": "POUR_PLAN_REQUIRED"
+    }
+   ]
   }
  ]
 }

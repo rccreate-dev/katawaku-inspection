@@ -72,8 +72,8 @@
     return h('button', { type: 'button', class: 'tap', on: { click: function () { KW.app.go(dest); } } },
       h('span', null, h('b', null, C.placeLine(r)),
         h('small', null, [C.ownerLabel(r), r.submittedAt ? C.ago(r.submittedAt) : null, r.claimedByName ? t('msg.claimed_by_name', { name: r.claimedByName }) : null].filter(Boolean).join(' / ')),
-        h('span', { class: 'chips' }, C.flags(r), hint ? C.chip('good', hint) : null)),
-      C.statusChip(r.status));
+        h('span', { class: 'chips' }, C.stageChip(r.stage), C.flags(r), hint ? C.chip('good', hint) : null)),
+      C.statusChip(r.status, false, r.stage));
   }
 
   /* ---- S09 ---- */
@@ -107,15 +107,18 @@
           waiting.forEach(function (r) { el.appendChild(recRow(r, has(r, 'claimReview') ? t('act.claim') : null)); });
           // ③ 重大・停止
           var bad = all.filter(function (r) { return !r.masked && (r.major || r.stopped) && r.status !== 'approved'; });
-          if (bad.length) {
-            el.appendChild(h('h3', null, t('scr.S09.major')));
-            bad.forEach(function (r) { el.appendChild(recRow(r)); });
-          }
+          // 見出しの語(打設停止中)は打設前の記録だけ。出来形の記録は段階別の見出しに分ける(SPEC §9.4・§6.8)
+          C.stagesFor(bad).forEach(function (stage) {
+            var part = bad.filter(function (r) { return C.stageOf(r) === stage; });
+            if (!part.length) return;
+            el.appendChild(h('h3', null, KW.ts('scr.S09.major', stage)));
+            part.forEach(function (r) { el.appendChild(recRow(r)); });
+          });
           // ④ 元請待ち
           var prime = all.filter(function (r) { return !r.masked && r.status === 'qa_ok'; });
           el.appendChild(h('h3', null, t('scr.S09.prime')));
           if (!prime.length) el.appendChild(C.empty('scr.S09.prime_none'));
-          prime.forEach(function (r) { el.appendChild(recRow(r, has(r, 'recordPrimeSign') ? t('act.prime_sign') : null)); });
+          prime.forEach(function (r) { el.appendChild(recRow(r, has(r, 'recordPrimeSign') ? KW.ts('act.prime_sign', r.stage) : null)); });
           // ⑤ 現場×階の状況
           el.appendChild(h('h3', null, t('scr.S09.grid')));
           var sites = (KW.state.bootstrap && KW.state.bootstrap.sites) || [];
@@ -123,9 +126,15 @@
             var card = h('div', { class: 'card' }, h('div', { class: 'row' }, h('b', null, s.name),
               h('button', { type: 'button', class: 'link', on: { click: function () { KW.app.go('#/site/' + s.siteId); } } }, t('act.open'))));
             var grid = h('div', { class: 'grid' });
+            // 1つの階のセルに段階ごとのチップを並べる(段階名つき。段階が1つだけなら従来のチップ。SPEC §9.2 S09)
+            var siteRecs = all.filter(function (r) { return r.siteId === s.siteId; });
+            var stages = C.stagesFor(siteRecs);
             s.floors.forEach(function (f) {
-              var st = C.floorStatus(all.filter(function (r) { return r.siteId === s.siteId && r.floor === f; }));
-              grid.appendChild(h('button', { type: 'button', class: 'cell', on: { click: function () { KW.app.go('#/site/' + s.siteId); } } }, h('b', null, f), C.statusChip(st)));
+              var fr = siteRecs.filter(function (r) { return r.floor === f; });
+              var chips = stages.length > 1
+                ? h('div', { class: 'chips' }, stages.map(function (stage) { return C.stageStatusChip(stage, C.stageFloorStatus(fr, stage)); }))
+                : C.statusChip(C.floorStatus(fr), false, stages[0]);
+              grid.appendChild(h('button', { type: 'button', class: 'cell', on: { click: function () { KW.app.go('#/site/' + s.siteId); } } }, h('b', null, f), chips));
             });
             card.appendChild(grid);
             el.appendChild(card);

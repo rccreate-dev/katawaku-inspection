@@ -9,7 +9,7 @@
     mount: function (ctx) {
       ctx.chrome({ tab: 'history' });
       var el = ctx.el;
-      var fSite = 'all', fSt = 'all';
+      var fSite = 'all', fSt = 'all', fStage = 'all';
       function draw() {
         KW.data.allSummaries().then(function (all) {
           if (!ctx.alive()) return;
@@ -19,13 +19,34 @@
           var selS = h('select', { class: 'inp', 'aria-label': t('lbl.site') }, h('option', { value: 'all' }, t('lbl.all')));
           sites.forEach(function (s) { selS.appendChild(h('option', { value: s.siteId, selected: s.siteId === fSite }, s.name)); });
           selS.value = fSite;
+          // 段階の絞り込み(段階が複数あるときだけ)。「打設可」の語は打設前の記録の状態名なので、
+          // 状態の選択肢の表示名は、絞り込んだ段階(「すべて」のときは一覧にある段階)の表示名にする(SPEC §6.8・§9.4)
+          var stages = C.stagesFor(all);
+          if (stages.indexOf(fStage) < 0) fStage = 'all';
+          var inList = {};
+          all.forEach(function (r) { inList[C.stageOf(r)] = true; });
+          var present = fStage === 'all' ? stages.filter(function (sg) { return inList[sg]; }) : [fStage];
+          if (!present.length) present = ['pre_pour'];
+          function statusLabel(st) {
+            var labels = [];
+            present.forEach(function (sg) { var l = KW.ts('st.' + st, sg); if (labels.indexOf(l) < 0) labels.push(l); });
+            return labels.join(' / ');
+          }
           var selT = h('select', { class: 'inp', 'aria-label': t('lbl.status') }, h('option', { value: 'all' }, t('lbl.all')));
-          ['draft', 'submitted', 'fix', 'qa_ok', 'approved'].forEach(function (s) { selT.appendChild(h('option', { value: s }, t('st.' + s))); });
+          ['draft', 'submitted', 'fix', 'qa_ok', 'approved'].forEach(function (s) { selT.appendChild(h('option', { value: s }, statusLabel(s))); });
           selT.value = fSt;
           selS.addEventListener('change', function () { fSite = selS.value; draw(); });
           selT.addEventListener('change', function () { fSt = selT.value; draw(); });
-          el.appendChild(h('div', { class: 'filters' }, selS, selT));
-          var list = all.filter(function (r) { return (fSite === 'all' || r.siteId === fSite) && (fSt === 'all' || r.status === fSt); })
+          var filters = h('div', { class: 'filters' }, selS, selT);
+          if (stages.length > 1) {
+            var selG = h('select', { class: 'inp', 'aria-label': t('lbl.stage') }, h('option', { value: 'all' }, t('lbl.all')));
+            stages.forEach(function (sg) { selG.appendChild(h('option', { value: sg }, t('stage.' + sg))); });
+            selG.value = fStage;
+            selG.addEventListener('change', function () { fStage = selG.value; draw(); });
+            filters.appendChild(selG);
+          }
+          el.appendChild(filters);
+          var list = all.filter(function (r) { return (fSite === 'all' || r.siteId === fSite) && (fSt === 'all' || r.status === fSt) && (fStage === 'all' || C.stageOf(r) === fStage); })
             .sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)) || String(a.recordId).localeCompare(String(b.recordId)); });
           if (!list.length) { el.appendChild(C.empty('scr.S11.empty')); return; }
           list.forEach(function (r) {
@@ -33,8 +54,8 @@
             if (masked && (r.actions || []).indexOf('stopPour') >= 0) { el.appendChild(C.maskedStopRow(r)); return; }
             el.appendChild(h('button', { type: 'button', class: 'tap', disabled: masked, on: { click: function () { KW.app.go('#/record/' + r.recordId); } } },
               h('span', null, h('b', null, masked ? t('badge.masked') : C.placeLine(r)),
-                h('small', null, masked ? C.siteName(r.siteId) : [C.siteName(r.siteId), C.ownerLabel(r), C.fmt(r.updatedAt), r.counts ? t('lbl.ng_count') + ' ' + r.counts.ng : null].filter(Boolean).join(' / '))),
-              C.statusChip(r.status)));
+                h('small', null, masked ? C.siteName(r.siteId) : [C.siteName(r.siteId), t('stage.' + C.stageOf(r)), C.ownerLabel(r), C.fmt(r.updatedAt), r.counts ? t('lbl.ng_count') + ' ' + r.counts.ng : null].filter(Boolean).join(' / '))),
+              C.statusChip(r.status, false, r.stage)));
           });
         });
       }

@@ -25,7 +25,9 @@ var Notify = {
   },
 
   subject_: function (kind, site, rec) {
-    return '[型枠検査] ' + kind + ' ' + (site ? site.name : '') + (rec && rec.floor ? ' ' + rec.floor : '');
+    // 版1.9(§6.6): 出来形(post_demold)の記録に紐づく通知は件名の末尾に ' 出来形' を付ける。打設前は従来どおり
+    return '[型枠検査] ' + kind + ' ' + (site ? site.name : '') + (rec && rec.floor ? ' ' + rec.floor : '') +
+      (rec && rec.stage === 'post_demold' ? ' 出来形' : '');
   },
 
   body_: function (kind, site, rec, linkType) {

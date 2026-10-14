@@ -1,5 +1,5 @@
 // E2E 共通ヘルパ(Playwright。SPEC §12.1/§12.5)。
-// ・モバイル 390x844(isMobile/hasTouch)、fakeカメラ、ja-JP/id-ID
+// ・モバイル 375x667(SPEC §12.1。isMobile/hasTouch)、fakeカメラ、ja-JP/id-ID
 // ・コンソールエラー/未処理例外/想定外の失敗リクエストがあれば、そのテストを失敗させる(assertClean)
 'use strict';
 const fs = require('node:fs');
@@ -29,6 +29,9 @@ const T = (key, params, lang = 'ja') => {
   if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] != null ? params[k] : m));
   return s;
 };
+
+/** 段階つきの文言(`<key>@<stage>` があればそれ、無ければ <key>。frontend の ts と同じ規則) */
+const TS = (key, stage, lang = 'ja') => ((I18N[lang] && I18N[lang][key + '@' + stage]) ? T(key + '@' + stage, null, lang) : T(key, null, lang));
 
 // ---- mock 制御 ----
 async function mock(p, body = {}) {
@@ -117,7 +120,7 @@ const WORKAROUND_KWAPP = () => {
 
 async function newSession(env, { lang = 'ja', storageState, workaround = !process.env.E2E_NO_WORKAROUNDS } = {}) {
   const ctx = await env.browser.newContext({
-    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
     locale: lang === 'id' ? 'id-ID' : 'ja-JP', permissions: ['camera'], storageState,
   });
   if (workaround) await ctx.addInitScript(WORKAROUND_KWAPP);
@@ -128,6 +131,7 @@ async function newSession(env, { lang = 'ja', storageState, workaround = !proces
   page.on('requestfailed', (r) => { const why = r.failure() && r.failure().errorText; if (why === 'net::ERR_ABORTED') return; /* リロード/遷移による中断 */ if (s.allowFail) { s.suppressed++; return; } if (true) s.errors.push(`requestfailed: ${r.method()} ${r.url()} ${r.failure() && r.failure().errorText}`); });
   page.on('response', (r) => { if (r.status() >= 400 && r.url().startsWith(env.baseUrl) && !s.allowFail) s.errors.push(`HTTP ${r.status()}: ${r.url()}`); });
   s.t = (k, p) => T(k, p, s.lang);
+  s.ts = (k, stage) => TS(k, stage, s.lang);
   s.assertClean = () => assert.deepEqual(s.errors, [], 'コンソールエラー/例外/失敗リクエストがあります');
   s.close = () => ctx.close();
   return s;
@@ -186,6 +190,23 @@ async function enterPin(s, pin) {
   await sheet.locator('.btns .btn:not(.ghost)').click();
 }
 
+/** S06 に出ている項目の itemId(画面の並び順)。項目は固定リストでなく画面(= getRecord.items)から取る(版1.9: 段階ごとに項目が違う) */
+const itemIdsOnScreen = (s) => s.page.locator('.item[id^="it-"]').evaluateAll((els) => els.map((e) => e.id.slice(3)));
+/** S06 の全項目を ok にする(ng/na: {itemId: true} で個別指定)。回答した itemId の一覧を返す */
+async function answerAllOk(s, { ng = {}, na = {} } = {}) {
+  const ids = await itemIdsOnScreen(s);
+  for (const id of ids) await s.page.locator(`#it-${id}`).locator(ng[id] ? '.v-ng' : na[id] ? '.v-na' : '.v-ok').click();
+  return ids;
+}
+/** 画面 URL(#/record/:id/...)の recordId */
+const recordIdOnScreen = (s) => s.page.evaluate(() => location.hash.split('/')[2]);
+/** 記録の項目(契約 API の getRecord。段階の確認用)。userId はその記録を見られるユーザー */
+async function recordItems(recordId, userId = 'u_tanaka', env) {
+  const r = await api('getRecord', { recordId }, { userId, env });
+  if (!r.ok) throw new Error('getRecord 失敗: ' + JSON.stringify(r.error));
+  return r.data.record.items;
+}
+
 const outboxCount = (s) => s.page.locator('.obx').innerText();
 /** outbox が空になり、送信直後の画面更新(photo:done→詳細再取得)も落ち着くまで待つ */
 async function settle(s, ms = 600) {
@@ -196,4 +217,4 @@ async function settle(s, ms = 600) {
 /** 横スクロールが無いこと */
 const noHScroll = (s) => s.page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth);
 
-module.exports = { setup, setupWithLatency, newSession, login, issueCode, enterCode, tab, goHash, shoot, enterPin, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };
+module.exports = { setup, setupWithLatency, newSession, login, issueCode, enterCode, tab, goHash, shoot, enterPin, itemIdsOnScreen, answerAllOk, recordIdOnScreen, recordItems, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };

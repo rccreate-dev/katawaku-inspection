@@ -36,7 +36,7 @@ describe('フロント不具合の再現', () => {
     const s = await E.newSession(env);
     await E.login(s, '田中');
     await startRecord(s, '1F', 'FE02');
-    for (let n = 1; n <= 16; n++) await s.page.locator(`#it-i${n} .v-ok`).click();
+    await E.answerAllOk(s);
     for (const id of KEY_ITEMS) await E.shoot(s, s.page.locator(`#it-${id} .cam`));
     await E.settle(s);
     await s.page.getByRole('button', { name: s.t('scr.S06.to_confirm') }).click();
@@ -50,7 +50,7 @@ describe('フロント不具合の再現', () => {
     const { page } = s;
     await E.login(s, '田中');
     await startRecord(s, '1F', 'FE04');
-    for (let n = 1; n <= 16; n++) await page.locator(`#it-i${n} .v-ok`).click();
+    await E.answerAllOk(s);
     await page.locator('#plan-row input').fill(tomorrow0900());
     await page.locator('#plan-row input').blur();
     for (const id of KEY_ITEMS.slice(0, -1)) await E.shoot(s, page.locator(`#it-${id} .cam`));

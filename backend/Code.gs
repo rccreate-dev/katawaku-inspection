@@ -78,7 +78,8 @@ var ACTIONS = {
     params: {
       recordId: { t: 'str', req: 1, max: 40 }, siteId: { t: 'id', p: 's', req: 1 }, floor: { t: 'str', req: 1, min: 1, max: 10 },
       zone: { t: 'str', max: 10 }, lot: { t: 'str', req: 1, min: 1, max: 40 },
-      stage: { t: 'enum', req: 1, values: STAGES }, pourPlannedAt: { t: 'dt', nullable: true },
+      // 版1.9: 列挙外の値も STAGE_NOT_ENABLED にする(§5.3)ため、型は文字列とし、段階の判定はハンドラ(createRecord)で行う
+      stage: { t: 'str', req: 1, min: 1, max: 40 }, pourPlannedAt: { t: 'dt', nullable: true },
       reinspectOf: { t: 'id', p: 'r', nullable: true }
     }
   },

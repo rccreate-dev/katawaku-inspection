@@ -1,4 +1,4 @@
-/* ui/s03.js: S03 職長ホーム / S04 現場(階・スロット)/ S05 新しい記録 / S13 QR参加 */
+/* ui/s03.js: S03 職長ホーム / S04 現場(階・スロット)/ S13 QR参加(S05 新しい記録は s05.js) */
 (function (root) {
   'use strict';
   var KW = root.KW;
@@ -43,14 +43,19 @@
             if (!s.myAssignRole) return;
             shown++;
             var recs = all.filter(function (r) { return r.siteId === s.siteId; });
-            var cnt = { none: 0, fix: 0, submitted: 0 };
-            s.floors.forEach(function (f) {
-              var st = floorStatus(recs.filter(function (r) { return r.floor === f; }));
-              if (cnt[st] != null) cnt[st]++;
+            // 段階が複数のときは段階ごとの行(階数は段階ごとに数える)。1つだけなら従来どおり段階名なしの1行(SPEC §9.2 S03)
+            var stages = C.stagesFor(recs);
+            var lines = stages.map(function (stage) {
+              var cnt = { none: 0, fix: 0, submitted: 0 };
+              s.floors.forEach(function (f) {
+                var st = C.stageFloorStatus(recs.filter(function (r) { return r.floor === f; }), stage);
+                if (cnt[st] != null) cnt[st]++;
+              });
+              var text = t('st.none') + ' ' + cnt.none + ' / ' + t('st.fix') + ' ' + cnt.fix + ' / ' + t('st.submitted') + ' ' + cnt.submitted;
+              return h('small', null, stages.length > 1 ? t('stage.' + stage) + ' ' + text : text);
             });
             holder.appendChild(h('button', { type: 'button', class: 'tap', on: { click: function () { KW.app.go('#/site/' + s.siteId); } } },
-              h('span', null, h('b', null, s.name),
-                h('small', null, t('st.none') + ' ' + cnt.none + ' / ' + t('st.fix') + ' ' + cnt.fix + ' / ' + t('st.submitted') + ' ' + cnt.submitted),
+              h('span', null, h('b', null, s.name), lines,
                 s.status === 'closed' ? C.chip('na', t('site.closed')) : null),
               h('span', { 'aria-hidden': 'true' }, '›')));
           });
@@ -100,33 +105,42 @@
             el.appendChild(h('p', { class: 'sub' }, t('lbl.qa_main') + ': ' + main + (site.qa.mainAbsent ? ' (' + t('badge.acting') + ')' : '') + ' / ' + t('lbl.qa_sub') + ': ' + (site.qa.subs || []).map(function (u) { return u.name; }).join(', ')));
           }
           el.appendChild(h('p', { class: 'sub' }, t('scr.S04.floors')));
+          // 段階が複数のときは、階のカードを段階ごとに分ける(見出し=段階名+その段階の代表ステータス。SPEC §9.2 S04)
+          var stages = C.stagesFor(recs);
+          var multi = stages.length > 1;
+          function recordRow(r) {
+            var masked = !!r.masked;
+            var acts = r.actions || [];
+            var dest = masked ? null : (role === 'foreman' && acts.indexOf('saveDraft') >= 0 ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId);
+            var label = masked
+              ? t('badge.masked')
+              : [t('lbl.lot') + ' ' + (r.lot || ''), r.zone || null, C.ownerLabel(r) || null].filter(Boolean).join(' / ');
+            // 他班(masked)は開けない。ただし actions に stopPour があるときは「打設を止める」だけ出す(SPEC §9.2 S04。出来形は actions に出ない)
+            if (masked && acts.indexOf('stopPour') >= 0) return C.maskedStopRow(r);
+            return h('button', {
+              type: 'button', class: 'tap', disabled: masked,
+              on: { click: function () { if (dest) KW.app.go(dest); } }
+            }, h('span', null, h('b', null, masked ? t('badge.masked') : label),
+              masked ? null : h('small', null, [t('stage.' + C.stageOf(r)), r.team || null].filter(Boolean).join(' / '))),
+            h('span', { class: 'chips' }, C.statusChip(r.status, false, r.stage),
+              drafts[r.recordId] ? C.chip('warn', t('badge.draft_local')) : null,
+              (!masked && r.stopped) ? C.chip('bad', t('badge.stopped')) : null,
+              (!masked && acts.indexOf('claimReview') >= 0) ? C.chip('good', t('act.claim')) : null));
+          }
           site.floors.forEach(function (f) {
             var fr = recs.filter(function (r) { return r.floor === f; })
               .sort(function (a, b) { return String(a.lot).localeCompare(String(b.lot)); });
-            var card = h('div', { class: 'card' }, h('div', { class: 'row' }, h('b', null, f), C.statusChip(floorStatus(fr))));
-            fr.forEach(function (r) {
-              var masked = !!r.masked;
-              var acts = r.actions || [];
-              var dest = masked ? null : (role === 'foreman' && acts.indexOf('saveDraft') >= 0 ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId);
-              var label = masked
-                ? t('badge.masked')
-                : [t('lbl.lot') + ' ' + (r.lot || ''), r.zone || null, C.ownerLabel(r) || null].filter(Boolean).join(' / ');
-              // 他班(masked)は開けない。ただし actions に stopPour があるときは「打設を止める」だけ出す(SPEC §9.2 S04)
-              if (masked && acts.indexOf('stopPour') >= 0) {
-                card.appendChild(C.maskedStopRow(r));
-                return;
-              }
-              var row = h('button', {
-                type: 'button', class: 'tap', disabled: masked,
-                on: { click: function () { if (dest) KW.app.go(dest); } }
-              }, h('span', null, h('b', null, masked ? t('badge.masked') : label),
-                masked ? null : h('small', null, [t('stage.' + (r.stage || 'pre_pour')), r.team || null].filter(Boolean).join(' / '))),
-              h('span', { class: 'chips' }, C.statusChip(r.status),
-                drafts[r.recordId] ? C.chip('warn', t('badge.draft_local')) : null,
-                (!masked && r.stopped) ? C.chip('bad', t('badge.stopped')) : null,
-                (!masked && acts.indexOf('claimReview') >= 0) ? C.chip('good', t('act.claim')) : null));
-              card.appendChild(row);
-            });
+            var card;
+            if (!multi) {
+              card = h('div', { class: 'card' }, h('div', { class: 'row' }, h('b', null, f), C.statusChip(floorStatus(fr), false, stages[0])));
+              fr.forEach(function (r) { card.appendChild(recordRow(r)); });
+            } else {
+              card = h('div', { class: 'card' }, h('b', null, f));
+              stages.forEach(function (stage) {
+                card.appendChild(h('div', { class: 'row', 'data-stage': stage }, h('span', null, t('stage.' + stage)), C.statusChip(C.stageFloorStatus(fr, stage), false, stage)));
+                fr.filter(function (r) { return C.stageOf(r) === stage; }).forEach(function (r) { card.appendChild(recordRow(r)); });
+              });
+            }
             if (role === 'foreman' && site.status !== 'closed') {
               card.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/site/' + siteId + '/new?floor=' + encodeURIComponent(f)); } } }, t('scr.S04.new')));
             }
@@ -139,85 +153,6 @@
       if (KW.isOnline()) {
         KW.data.fetchAllRecords({ siteId: siteId }).then(function (res) { if (res.ok && ctx.alive()) KW.data.putSummaries(res.data.records); });
       }
-    }
-  };
-
-  /* ---- S05 ---- */
-  function localDetail(p, site) {
-    var me = KW.state.me;
-    var items = ((KW.state.bootstrap && KW.state.bootstrap.items) || []).filter(function (it) { return it.stage === p.stage && it.audience !== 'qa'; })
-      .sort(function (a, b) { return a.seq - b.seq; })
-      .map(function (it) {
-        var def = Object.assign({}, it); delete def.itemId;
-        return { itemId: it.itemId, def: def, self: { result: null, severity: null, values: [], note: '', updatedAt: null, photos: [] }, qa: null };
-      });
-    var now = KW.time.toIso(KW.time.nowMs(KW.state.skewMs));
-    return {
-      recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone: p.zone || '', lot: p.lot, stage: p.stage,
-      status: 'draft', round: 1, reinspectOf: p.reinspectOf || null, ownerUserId: me.userId, ownerName: me.name, ownerCompany: me.company || '', team: site && site.myTeam || '',
-      pourPlannedAt: p.pourPlannedAt || null, submittedAt: null, claimedBy: null, claimedByName: null, claimedAt: null,
-      qaVerdict: null, major: false, stopped: false, escLevel: 0,
-      counts: { total: items.length, filled: 0, ok: 0, ng: 0, na: 0 }, qaCounts: { filled: 0, ok: 0, ng: 0, na: 0 },
-      hasReport: false, updatedAt: now, version: 0, masked: false,
-      actions: ['saveDraft', 'submitRecord', 'addNote', 'uploadPhotoChunk'],
-      items: items, primePhotos: [], notes: [], events: [], qaComment: '', stopInfo: null,
-      signatures: { foreman: null, qa: null, prime: null }, timing: { selfDeadlineAt: null, qaOpenAt: null, qaDeadlineAt: null, selfLate: false, qaLate: false },
-      local: true
-    };
-  }
-
-  KW.screens.S05 = {
-    mount: function (ctx) {
-      var siteId = ctx.params[0];
-      var site = C.siteOf(siteId);
-      ctx.chrome({ back: '#/site/' + siteId, site: site ? site.name : null });
-      var el = ctx.el;
-      if (!site) { el.appendChild(C.empty('err.FORBIDDEN_SITE')); return; }
-      var reinspectOf = ctx.query.re || null;
-      var floor = h('select', { class: 'inp', 'aria-label': t('lbl.floor') });
-      site.floors.forEach(function (f) { floor.appendChild(h('option', { value: f, selected: f === ctx.query.floor }, f)); });
-      var zone = null;
-      if (site.zones && site.zones.length) {
-        zone = h('select', { class: 'inp', 'aria-label': t('lbl.zone') }, h('option', { value: '' }, t('lbl.none')));
-        site.zones.forEach(function (z) { zone.appendChild(h('option', { value: z }, z)); });
-      }
-      var lot = h('input', { type: 'text', class: 'inp', maxlength: '40', autocomplete: 'off', 'aria-label': t('lbl.lot') });
-      var plan = h('input', { type: 'datetime-local', class: 'inp', 'aria-label': t('lbl.pour_planned') });
-      var msg = h('div');
-      var go = h('button', { type: 'button', class: 'btn big' }, t('scr.S05.go'));
-      el.appendChild(h('h2', null, t('scr.S05.title')));
-      if (reinspectOf) el.appendChild(C.banner('', t('scr.S05.reinspect')));
-      el.appendChild(h('div', { class: 'card' },
-        h('label', { class: 'lbl' }, t('lbl.floor')), floor,
-        zone ? h('label', { class: 'lbl' }, t('lbl.zone')) : null, zone,
-        h('label', { class: 'lbl' }, t('lbl.lot') + ' *'), lot,
-        h('label', { class: 'lbl' }, t('lbl.stage')), h('div', null, t('stage.pre_pour')),
-        h('label', { class: 'lbl' }, t('lbl.pour_planned')), plan,
-        h('p', { class: 'sub' }, t('scr.S05.plan_hint')), msg));
-      el.appendChild(go);
-      go.addEventListener('click', C.guard(go, function () {
-        KW.clear(msg);
-        var lv = lot.value.trim();
-        if (!lv) { msg.appendChild(C.msg('', t('scr.S05.lot_required'))); lot.focus(); return Promise.resolve(); }
-        var params = { recordId: KW.newRecordId(), siteId: siteId, floor: floor.value, zone: zone ? zone.value : '', lot: lv, stage: 'pre_pour' };
-        var pi = KW.time.fromInput(plan.value);
-        if (pi) params.pourPlannedAt = pi;
-        if (reinspectOf) params.reinspectOf = reinspectOf;
-        return KW.data.putDetail(localDetail(params, site)).then(function () {
-          return KW.sync.runQueued('createRecord', params, { recordId: params.recordId });
-        }).then(function (r) {
-          if (r.ok) { KW.app.go('#/record/' + params.recordId + '/edit'); return null; }
-          var err = r.error || {};
-          return KW.data.removeRecord(params.recordId).then(function () {
-            if (err.code === 'ALREADY_EXISTS' && err.data && err.data.mine && err.data.recordId) {
-              C.toast(t('scr.S05.exists_mine'));
-              return KW.data.loadDetail(err.data.recordId).then(function () { KW.app.go('#/record/' + err.data.recordId + '/edit'); });
-            }
-            msg.appendChild(C.msg('', err.code === 'ALREADY_EXISTS' ? t('scr.S05.exists_other') : KW.errText(err)));
-            return null;
-          });
-        });
-      }));
     }
   };
 

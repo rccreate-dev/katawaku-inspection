@@ -18,7 +18,8 @@ const verdictBtn = (s, v) => s.page.getByRole('button', { name: s.t('verdict.' +
 
 /** S10: 全項目 ok(over で個別指定)+写真。claim 済みの画面で呼ぶ */
 async function fillQa(s, { ng = {} } = {}) {
-  for (let i = 0; i < 16; i++) {
+  const count = await s.page.locator('.item').count(); // シードの記録は16項目、新規の打設前記録は28項目(版1.9)
+  for (let i = 0; i < count; i++) {
     const box = qaItem(s, i);
     if (ng[i]) {
       await box.locator('.v-ng').click();

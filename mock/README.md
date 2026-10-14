@@ -25,7 +25,7 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 - `POST /api` : `Content-Type: text/plain;charset=utf-8`、本文は封筒JSON(§1.5)。応答は **常にHTTP 200**・`application/json;charset=utf-8`・`Access-Control-Allow-Origin: *`。
 - `GET /api?action=ping` のみ有効。他のGETは `BAD_REQUEST`(HTTP 200)。
 - **`OPTIONS` は 405 でCORSヘッダなし**(`application/json` 等でプリフライトが必要な送り方をするとブラウザで失敗する)。
-- `GET /files/reports/{name}` : 生成したPDF(`application/pdf`)。
+- `GET /files/reports/{name}` : 生成したPDF(`application/pdf`)。ファイル名は `{subject}_{出来形|打設前}_v{n}_{YYYYMMDD-HHmm}.pdf`、本文スタブは `MOCK REPORT {recordId} v{n} {status} stage={stage}`。
 - フロントは `frontend/config.js` の `API_URL` を `http://localhost:8787/api` にするだけで接続できる。
 
 ## テスト用コントロール `/__mock/*`(契約外。フロントのコードから絶対に呼ばない)
@@ -78,3 +78,9 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 ## ファイル
 
 - `server.js` HTTPとコントロール、`engine.js` 状態・`authorize`・ビュー・dispatcher、`actions.js` 全actionの処理、`seed.js` スキーマ・初期項目・Config、`pdfstub.js` 最小PDF、`util.js` 時刻/ハッシュ/ID。
+
+## 版1.9(出来形検査)の対応
+- 初期項目は69行(SPEC §2.6.1・§2.6.1a)。有効は36(打設前28 = i1〜i16 + i58〜i69、出来形8 = i50〜i57)。シードの記録(a1〜c2)は従来どおり i1〜i16 のみ。
+- `Config.enabledStages` の既定は `pre_pour,post_demold`。有効項目が0件の段階は `STAGE_NOT_ENABLED`。
+- 出来形は `pourPlannedAt` を保存せず、時間ルール(SELF_LATE / QA_BEFORE_OPEN / QA_LATE)なし(エスカレーションは有効)。`stopPour` は打設前のみ(他は `STATE_CONFLICT`)で、allowedActions と他班マスク行の actions からも外れる。
+- 通知メールの件名は出来形のとき末尾に ` 出来形` が付く。

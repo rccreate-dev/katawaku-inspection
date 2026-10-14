@@ -385,7 +385,7 @@
         });
         return [
           h('h2', null, t('scr.M5.title')),
-          h('p', { class: 'sub' }, t('scr.M5.desc')),
+          h('p', { class: 'sub' }, KW.ts('scr.M5.desc', rec.stage)),
           h('label', { class: 'lbl' }, t('scr.M5.signer')), name,
           h('label', { class: 'lbl' }, t('scr.M5.method')), methodBox,
           h('label', { class: 'lbl' }, t('scr.M5.evidence_label')), evBox, err,
@@ -404,7 +404,7 @@
       function showReport(r) {
         KW.clear(body);
         body.appendChild(h('div', { class: 'card' },
-          h('div', { class: 'row' }, h('b', null, 'v' + r.version), C.statusChip(r.recordStatus)),
+          h('div', { class: 'row' }, h('b', null, 'v' + r.version), C.statusChip(r.recordStatus, false, rec.stage)),
           h('div', { class: 'sub' }, C.fmt(r.generatedAt) + ' / ' + (r.generatedByName || '')),
           h('div', { class: 'gap' },
             h('button', { type: 'button', class: 'btn small', on: { click: function () { share(r); } } }, t('act.share')),
@@ -423,7 +423,7 @@
           hist.appendChild(h('h3', null, t('scr.M6.history')));
           res.data.reports.forEach(function (r) {
             hist.appendChild(h('div', { class: 'row card' },
-              h('span', null, 'v' + r.version + ' / ' + C.fmt(r.generatedAt) + ' / ' + t('st.' + r.recordStatus)),
+              h('span', null, 'v' + r.version + ' / ' + C.fmt(r.generatedAt) + ' / ' + KW.ts('st.' + r.recordStatus, rec.stage)),
               h('a', { class: 'link', href: r.url, target: '_blank', rel: 'noopener' }, t('act.open'))));
           });
         });

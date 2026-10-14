@@ -46,7 +46,7 @@ async function newReadyRecord(s, lot, { submit = false } = {}) {
   await page.getByRole('button', { name: s.t('scr.S05.go') }).click();
   await page.locator('#plan-row').waitFor();
   if (!submit) return;
-  for (let n = 1; n <= 16; n++) await page.locator(`#it-i${n}`).locator('.v-ok').click();
+  await E.answerAllOk(s);
   await page.locator('#plan-row input').fill(tomorrow0900());
   await page.locator('#plan-row input').blur();
   for (const id of KEY_ITEMS) await E.shoot(s, page.locator(`#it-${id} .cam`));

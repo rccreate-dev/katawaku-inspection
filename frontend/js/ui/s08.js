@@ -38,13 +38,14 @@
     return node;
   };
 
-  C.eventLine = function (e) {
+  /* stage: 記録の段階(出来形では ev.prime_signed の語が変わる。SPEC §9.4) */
+  C.eventLine = function (e, stage) {
     var d = e.detail || {};
     var extra = [];
     if (d.comment) extra.push(d.comment);
     if (d.reason) extra.push(d.reason);
     return h('li', null, h('time', null, C.fmt(e.at)),
-      h('div', null, h('b', null, t('ev.' + e.kind)), ' ', e.actorName || '', e.round ? ' (R' + e.round + ')' : '', extra.length ? h('div', { class: 'sub' }, extra.join(' / ')) : null));
+      h('div', null, h('b', null, KW.ts('ev.' + e.kind, stage)), ' ', e.actorName || '', e.round ? ' (R' + e.round + ')' : '', extra.length ? h('div', { class: 'sub' }, extra.join(' / ')) : null));
   };
 
   KW.screens.S08 = {
@@ -60,10 +61,10 @@
       function draw() {
         var d = detail;
         KW.clear(el);
-        ctx.chrome({ back: '#/site/' + d.siteId, site: C.siteName(d.siteId), bar: d.floor + (d.zone ? '・' + d.zone : '') + ' / ' + d.lot });
+        ctx.chrome({ back: '#/site/' + d.siteId, site: C.siteName(d.siteId), bar: [d.floor + (d.zone ? '・' + d.zone : ''), d.lot, t('stage.' + C.stageOf(d))].join(' / ') });
         if (cached) el.appendChild(C.banner('warn', t('msg.cached_view')));
-        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S08.title')), C.statusChip(d.status, true)));
-        el.appendChild(C.recHeadCard(d, d.pourPlannedAt ? h('div', { class: 'meta' }, t('lbl.pour_planned') + ': ' + C.fmt(d.pourPlannedAt)) : null));
+        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S08.title')), C.statusChip(d.status, true, d.stage)));
+        el.appendChild(C.recHeadCard(d, d.pourPlannedAt && C.stageOf(d) === 'pre_pour' ? h('div', { class: 'meta' }, t('lbl.pour_planned') + ': ' + C.fmt(d.pourPlannedAt)) : null));
         var warn = KW.flash.record[id];
         if (warn && warn.length) { warn.forEach(function (w) { el.appendChild(C.banner('warn', t('warn.' + w))); }); delete KW.flash.record[id]; }
         if (d.stopped) {
@@ -97,9 +98,9 @@
         if (has(d, 'recordPrimeSign')) {
           btns.appendChild(h('button', { type: 'button', class: 'btn', disabled: !online, on: { click: function () {
             KW.modal.primeSign(d).then(function (res) {
-              if (res && res.ok) { C.toast(t('msg.prime_signed')); KW.data.mergeSummary(res.data.record).then(reload); }
+              if (res && res.ok) { C.toast(KW.ts('msg.prime_signed', d.stage)); KW.data.mergeSummary(res.data.record).then(reload); }
             });
-          } } }, t('act.prime_sign')));
+          } } }, KW.ts('act.prime_sign', d.stage)));
         }
         if (has(d, 'generateReport')) btns.appendChild(h('button', { type: 'button', class: 'btn ghost', disabled: !online, on: { click: function () { KW.modal.report(d); } } }, t('act.report')));
         if (has(d, 'stopPour')) {
@@ -154,7 +155,7 @@
         });
         // 履歴
         el.appendChild(h('h3', null, t('scr.S08.events')));
-        el.appendChild(h('ul', { class: 'log' }, (d.events || []).slice().reverse().map(C.eventLine)));
+        el.appendChild(h('ul', { class: 'log' }, (d.events || []).slice().reverse().map(function (e) { return C.eventLine(e, d.stage); })));
       }
 
       function reload() {

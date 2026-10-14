@@ -267,7 +267,7 @@
         KW.clear(el); itemNodes = {};
         editable = (detail.actions || []).indexOf('saveDraft') >= 0;
         ctx.chrome({ back: '#/site/' + detail.siteId, site: C.siteName(detail.siteId), bar: [detail.floor + (detail.zone ? '・' + detail.zone : ''), detail.lot, t('stage.' + detail.stage)].join(' / ') });
-        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S06.title')), C.statusChip(detail.status, true)));
+        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S06.title')), C.statusChip(detail.status, true, detail.stage)));
         el.appendChild(C.recHeadCard(detail));
         if (changedBanner) {
           el.appendChild(C.banner('warn', h('div', { class: 'row' }, h('span', null, t('scr.S06.status_changed')),
@@ -293,16 +293,19 @@
           }
           el.appendChild(C.banner('bad', [h('b', null, t('scr.S06.fix_banner')), fixes]));
         }
-        // 打設予定日時
-        var plan = h('input', { type: 'datetime-local', class: 'inp', disabled: !editable, value: KW.time.toInput(work.header.pourPlannedAt), 'aria-label': t('lbl.pour_planned') });
-        plan.addEventListener('change', function () {
-          work.header.pourPlannedAt = KW.time.fromInput(plan.value); work.dirty = true; work.dirtyHeader = true;
-          headerPatch = { pourPlannedAt: work.header.pourPlannedAt }; planErr = false; save();
+        // 打設予定日時(打設前のときだけ。出来形では欄を出さない。SPEC §6.8)
+        planMsg = null;
+        if (detail.stage === 'pre_pour') {
+          var plan = h('input', { type: 'datetime-local', class: 'inp', disabled: !editable, value: KW.time.toInput(work.header.pourPlannedAt), 'aria-label': t('lbl.pour_planned') });
+          plan.addEventListener('change', function () {
+            work.header.pourPlannedAt = KW.time.fromInput(plan.value); work.dirty = true; work.dirtyHeader = true;
+            headerPatch = { pourPlannedAt: work.header.pourPlannedAt }; planErr = false; save();
+            drawPlanMsg();
+          });
+          planMsg = h('div');
           drawPlanMsg();
-        });
-        planMsg = h('div');
-        drawPlanMsg();
-        el.appendChild(h('div', { class: 'card', id: 'plan-row' }, h('label', { class: 'lbl' }, t('lbl.pour_planned') + ' *'), plan, planMsg));
+          el.appendChild(h('div', { class: 'card', id: 'plan-row' }, h('label', { class: 'lbl' }, t('lbl.pour_planned') + ' *'), plan, planMsg));
+        }
         // 進捗
         progress = h('i'); progressText = h('div', { class: 'sub' });
         el.appendChild(h('div', { class: 'card' }, progressText, h('div', { class: 'bar' }, progress)));
@@ -421,7 +424,7 @@
       function draw(rows) {
         KW.clear(el);
         var c = counts(detail, work);
-        ctx.chrome({ back: '#/record/' + id + '/edit', site: C.siteName(detail.siteId), bar: detail.floor + (detail.zone ? '・' + detail.zone : '') + ' / ' + detail.lot });
+        ctx.chrome({ back: '#/record/' + id + '/edit', site: C.siteName(detail.siteId), bar: [detail.floor + (detail.zone ? '・' + detail.zone : ''), detail.lot, t('stage.' + detail.stage)].join(' / ') });
         el.appendChild(h('h2', null, t('scr.S07.title')));
         el.appendChild(h('div', { class: 'confirmbox' },
           h('div', { class: 'line' }, t('scr.S07.confirm_q')),
@@ -430,7 +433,7 @@
           detail.zone ? h('div', { class: 'line' }, t('lbl.zone') + ': ' + detail.zone) : null,
           h('div', { class: 'line' }, t('lbl.lot') + ': ' + detail.lot),
           h('div', { class: 'line' }, t('lbl.stage') + ': ' + t('stage.' + detail.stage)),
-          h('div', { class: 'line' }, t('lbl.pour_planned') + ': ' + C.fmt(work.header.pourPlannedAt))));
+          detail.stage === 'pre_pour' ? h('div', { class: 'line' }, t('lbl.pour_planned') + ': ' + C.fmt(work.header.pourPlannedAt)) : null));
         el.appendChild(h('div', { class: 'card' }, h('div', { class: 'chips' },
           C.chip('ok', t('result.ok') + ' ' + c.ok), C.chip('ng', t('result.ng') + ' ' + c.ng), C.chip('na', t('result.na') + ' ' + c.na))));
         var ngs = visibleItems().filter(function (it) { return work.items[it.itemId] && work.items[it.itemId].result === 'ng'; });

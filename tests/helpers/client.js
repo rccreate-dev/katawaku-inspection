@@ -13,7 +13,12 @@ const APP_VERSION = '1.0.0';
 const PINS = { u_tanaka: '1111', u_sugiant: '2222', u_sato: '3333', u_suzuki: '4444', u_lead: '9999' };
 const STAR = new Set(['changePin', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'deletePhoto', 'generateReport', 'requestJoin', 'decideJoin', 'revokeMembership', 'adminSetAbsence', 'adminRotateJoinKey']);
 const KEY_ITEMS = ['i2', 'i3', 'i9', 'i11', 'i12', 'i13', 'i15'];
-const ITEM_IDS = Array.from({ length: 16 }, (_, i) => `i${i + 1}`);
+// 版1.9: 新規の打設前記録は i1〜i16 + i58〜i69 の28項目、出来形は i50〜i57 の8項目(SPEC §2.6.1a)。
+// 既存シードの記録(a1〜c2)は版1.9より前の記録で i1〜i16 の16項目のまま。個々のテストは getRecord.items から項目を取るのが正。
+const LEGACY_ITEM_IDS = Array.from({ length: 16 }, (_, i) => `i${i + 1}`);
+const PRE_POUR_ITEM_IDS = [...LEGACY_ITEM_IDS, ...Array.from({ length: 12 }, (_, i) => `i${i + 58}`)];
+const POST_DEMOLD_ITEM_IDS = Array.from({ length: 8 }, (_, i) => `i${i + 50}`);
+const ITEM_IDS = PRE_POUR_ITEM_IDS;
 const SAMPLE = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'sample.jpg'));
 
 const rand = (n, alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789') => Array.from(crypto.randomBytes(n), (b) => alphabet[b % alphabet.length]).join('');
@@ -203,11 +208,13 @@ const bigJpeg = (n) => { const b = Buffer.alloc(n, 0x41); b[0] = 0xff; b[1] = 0x
 
 // ---------------------------------------------------------------------------
 // 記録のシナリオ補助
-const okPatches = (over = {}) => ITEM_IDS.map((id) => ({ itemId: id, result: 'ok', ...(over[id] || {}) }));
-async function createRecordFor(session, { siteId = 's_a', floor = '1F', zone = '', lot, pourPlannedAt, reinspectOf } = {}) {
+const okPatches = (over = {}, ids = ITEM_IDS) => ids.map((id) => ({ itemId: id, result: 'ok', ...(over[id] || {}) }));
+/** stage 既定=pre_pour(打設予定日時つき)。post_demold は pourPlannedAt を送らない(明示した場合だけ送る=「保存されない」の検証用)。 */
+async function createRecordFor(session, { siteId = 's_a', floor = '1F', zone = '', lot, pourPlannedAt, reinspectOf, stage = 'pre_pour' } = {}) {
   const recordId = newRecordId();
-  const params = { recordId, siteId, floor, zone, lot: lot || 'T' + rand(6), stage: 'pre_pour' };
-  params.pourPlannedAt = pourPlannedAt === undefined ? await pourPlanned() : pourPlannedAt;
+  const params = { recordId, siteId, floor, zone, lot: lot || 'T' + rand(6), stage };
+  if (stage === 'pre_pour') params.pourPlannedAt = pourPlannedAt === undefined ? await pourPlanned() : pourPlannedAt;
+  else if (pourPlannedAt !== undefined) params.pourPlannedAt = pourPlannedAt;
   if (params.pourPlannedAt === null) delete params.pourPlannedAt;
   if (reinspectOf) params.reinspectOf = reinspectOf;
   const r = await session.call('createRecord', params);
@@ -217,9 +224,11 @@ async function createRecordFor(session, { siteId = 's_a', floor = '1F', zone = '
 async function makeFilledDraft(session, opts = {}) {
   const { recordId, res, params } = await createRecordFor(session, opts);
   if (!res.ok) throw new Error('createRecord 失敗: ' + JSON.stringify(res.error));
-  const s = await session.call('saveDraft', { recordId, items: okPatches(opts.patches) });
+  // 項目は固定リストでなく createRecord が返した記録の項目(def)から決める(段階ごとに項目が違う。版1.9)
+  const recItems = res.data.record.items;
+  const s = await session.call('saveDraft', { recordId, items: okPatches(opts.patches, recItems.map((i) => i.itemId)) });
   if (!s.ok) throw new Error('saveDraft 失敗: ' + JSON.stringify(s.error));
-  for (const id of KEY_ITEMS) {
+  for (const id of recItems.filter((i) => i.def.key).map((i) => i.itemId)) {
     const u = await uploadPhoto(session, { recordId, itemId: id, side: 'self' });
     if (!u.ok) throw new Error('写真アップロード失敗: ' + JSON.stringify(u.error));
   }
@@ -233,11 +242,13 @@ async function makeSubmitted(session, opts = {}) {
 }
 /** QA入力(全項目ok、overrides で個別にng等)+必要な写真。claim済みであること。 */
 async function fillQa(qa, recordId, over = {}, { comment } = {}) {
-  const items = ITEM_IDS.map((id) => ({ itemId: id, result: 'ok', ...(over[id] || {}) }));
+  const rec = await getRecord(qa, recordId);
+  const keyIds = new Set(rec.items.filter((i) => i.def.key).map((i) => i.itemId));
+  const items = rec.items.filter((i) => i.def.audience !== 'foreman').map((i) => ({ itemId: i.itemId, result: 'ok', ...(over[i.itemId] || {}) }));
   const r = await qa.call('saveQaDraft', { recordId, items, ...(comment !== undefined ? { comment } : {}) });
   if (!r.ok) throw new Error('saveQaDraft 失敗: ' + JSON.stringify(r.error));
   for (const it of items) {
-    const need = it.result === 'ng' || (it.result === 'ok' && KEY_ITEMS.includes(it.itemId));
+    const need = it.result === 'ng' || (it.result === 'ok' && keyIds.has(it.itemId));
     if (!need) continue;
     const u = await uploadPhoto(qa, { recordId, itemId: it.itemId, side: 'qa' });
     if (!u.ok) throw new Error('QA写真失敗: ' + JSON.stringify(u.error));
@@ -247,6 +258,36 @@ async function getRecord(session, recordId) {
   const r = await session.call('getRecord', { recordId });
   if (!r.ok) throw new Error('getRecord 失敗: ' + JSON.stringify(r.error));
   return r.data.record;
+}
+/** 作成済みの下書きの全項目を ok にして、重点項目(def.key)に自己写真を付ける(項目は getRecord.items から決める。段階を問わない) */
+async function fillSelf(session, recordId, over = {}) {
+  const rec = await getRecord(session, recordId);
+  const items = rec.items.filter((i) => i.def.audience !== 'qa');
+  const s = await session.call('saveDraft', { recordId, items: okPatches(over, items.map((i) => i.itemId)) });
+  if (!s.ok) throw new Error('saveDraft 失敗: ' + JSON.stringify(s.error));
+  for (const i of items.filter((x) => x.def.key)) {
+    const u = await uploadPhoto(session, { recordId, itemId: i.itemId, side: 'self' });
+    if (!u.ok) throw new Error('写真アップロード失敗: ' + JSON.stringify(u.error));
+  }
+  return rec;
+}
+/** 作成済みの記録(draft)を 提出 → 確認中 → 合格(qa_ok) まで進める(段階を問わない。round=1 前提) */
+async function advanceToQaOk(tanaka, qa, recordId) {
+  await fillSelf(tanaka, recordId);
+  const sub = await tanaka.call('submitRecord', { recordId, round: 1 }, { pin: tanaka.pin });
+  if (!sub.ok) throw new Error('submitRecord 失敗: ' + JSON.stringify(sub.error));
+  const c = await qa.call('claimReview', { recordId, round: 1 });
+  if (!c.ok) throw new Error('claim失敗: ' + JSON.stringify(c.error));
+  await fillQa(qa, recordId);
+  const v = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
+  if (!v.ok) throw new Error('verdict失敗: ' + JSON.stringify(v.error));
+  return { submit: sub, verdict: v };
+}
+/** qa_ok → approved(元請サイン記録) */
+async function primeSign(qa, recordId, signerName = '山田') {
+  const r = await qa.call('recordPrimeSign', { recordId, signerName, method: 'paper' }, { pin: qa.pin });
+  if (!r.ok) throw new Error('recordPrimeSign 失敗: ' + JSON.stringify(r.error));
+  return r;
 }
 /** 提出済み → QA合格(qa_ok)まで進める */
 async function makeQaOk(tanaka, qa, opts = {}) {
@@ -259,4 +300,4 @@ async function makeQaOk(tanaka, qa, opts = {}) {
   return { recordId };
 }
 
-module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, issueCode, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, getRecord, makeQaOk };
+module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, LEGACY_ITEM_IDS, PRE_POUR_ITEM_IDS, POST_DEMOLD_ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, issueCode, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, fillSelf, advanceToQaOk, primeSign, getRecord, makeQaOk };

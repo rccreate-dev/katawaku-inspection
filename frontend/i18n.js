@@ -55,7 +55,7 @@
     ['stage.pre_pour', '打設前', 'Sebelum pengecoran'],
     ['stage.during_pour', '打設中巡回', 'Patroli saat pengecoran'],
     ['stage.demold', '脱型承認', 'Persetujuan bongkar bekisting'],
-    ['stage.post_demold', '脱型後出来形', 'Hasil setelah bongkar'],
+    ['stage.post_demold', '出来形', 'Hasil pekerjaan'],
     ['stage.cleanup', '解体後片付け', 'Pembersihan setelah pembongkaran'],
     ['result.ok', 'OK', 'OK'],
     ['result.ng', 'NG', 'NG'],
@@ -80,6 +80,16 @@
     ['warn.SELF_LATE', '職長の期限(前日15時)を過ぎて提出されました。', 'Dikirim setelah batas waktu mandor (jam 15 hari sebelumnya).'],
     ['warn.QA_BEFORE_OPEN', '検査開始時刻(前日16時)より前の判定です。', 'Penilaian dibuat sebelum waktu mulai pemeriksaan (jam 16 hari sebelumnya).'],
     ['warn.QA_LATE', 'QA検査の期限を過ぎています。', 'Melewati batas waktu pemeriksaan pengawas.'],
+
+    /* 段階別の上書きキー(`<基キー>@<stage>`。SPEC §9.4 版1.9)。出来形(post_demold)の記録だけ語を差し替える。
+     * ts(基キー, stage) が使う。網羅検査の数え上げからは除かれるが、基キーと ja/id の両方が必要 */
+    ['st.approved@post_demold', '出来形確認済', 'Hasil pekerjaan terkonfirmasi'],
+    ['ev.prime_signed@post_demold', '元請サインを記録。出来形確認済', 'Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi'],
+    ['act.prime_sign@post_demold', '元請サインを記録(出来形確認済にする)', 'Catat tanda tangan kontraktor (hasil pekerjaan terkonfirmasi)'],
+    ['msg.prime_signed@post_demold', '元請サインを記録しました。出来形確認済です', 'Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi'],
+    ['scr.M5.desc@post_demold', '元請の確認を受けた内容を記録します。PIN確認で出来形確認済になります。', 'Catat hasil konfirmasi kontraktor. Dengan PIN, status menjadi hasil pekerjaan terkonfirmasi.'],
+    ['scr.S10.confirm_major@post_demold', '重大な不適合として差し戻します。よろしいですか', 'Dikembalikan sebagai ketidaksesuaian berat. Lanjutkan?'],
+    ['scr.S09.major@post_demold', '重大不適合', 'Ketidaksesuaian berat'],
 
     /* 履歴ラベル(Events.kind と1対1) */
     ['ev.record_created', '記録を作成', 'Catatan dibuat'],
@@ -354,6 +364,8 @@
     ['scr.S05.title', '新しい記録', 'Catatan baru'],
     ['scr.S05.go', '作成して入力へ', 'Buat dan mulai mengisi'],
     ['scr.S05.lot_required', '打設箇所を入力してください', 'Isi lokasi pengecoran'],
+    ['scr.S05.stage_hint_post_demold', '出来形検査は、脱型・解体のあとに行う検査です。打設予定日時は要りません', 'Pemeriksaan hasil pekerjaan dilakukan setelah bongkar bekisting. Rencana waktu pengecoran tidak diperlukan'],
+    ['scr.S05.lot_suggest', '打設前の記録から選ぶ', 'Pilih dari catatan sebelum pengecoran'],
     ['scr.S05.plan_hint', '打設予定日時は提出までに入力してください', 'Isi rencana waktu pengecoran sebelum mengirim'],
     ['scr.S05.reinspect', '再検査の記録として作成します', 'Dibuat sebagai catatan pemeriksaan ulang'],
     ['scr.S05.exists_mine', 'この記録はすでにあります。続きを入力します', 'Catatan sudah ada. Lanjut mengisi'],

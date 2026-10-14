@@ -254,7 +254,10 @@ function authorize(actor, action, ctx) {
       break;
     }
     case 'recordPrimeSign': if (st !== 'qa_ok') return conflict(); break;
-    case 'stopPour': if (!['submitted', 'qa_ok', 'approved'].includes(st)) return conflict(); break;
+    case 'stopPour':
+      // 版1.9(§4・§6.8): 打設を止められるのは stage=pre_pour の記録のみ。出来形は STATE_CONFLICT
+      if (rec.stage !== 'pre_pour' || !['submitted', 'qa_ok', 'approved'].includes(st)) return conflict();
+      break;
     case 'addNote':
       if (actor.role === 'foreman' && st !== 'draft' && st !== 'fix') return locked();
       break;
@@ -345,11 +348,13 @@ function countsOf(rows, kinds, filledKey) {
   }
   return c;
 }
-function maskedView(rec) {
-  return { recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone || '', lot: rec.lot, stage: rec.stage, status: rec.status, team: rec.team || '', updatedAt: rec.updatedAt, version: rec.version, masked: true, actions: [] };
+function maskedView(rec, actor) {
+  // §5.1: masked 形の actions は stopPour が許される(同現場の有効な担当・stage=pre_pour・status∈{submitted,qa_ok,approved})ときだけ ["stopPour"]
+  const canStop = !!actor && authorize(actor, 'stopPour', { record: rec, params: { recordId: rec.recordId } }).ok;
+  return { recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone || '', lot: rec.lot, stage: rec.stage, status: rec.status, team: rec.team || '', updatedAt: rec.updatedAt, version: rec.version, masked: true, actions: canStop ? ['stopPour'] : [] };
 }
 function summaryView(actor, rec) {
-  if (actor.role === 'foreman' && !canViewDetail(actor, rec)) return maskedView(rec);
+  if (actor.role === 'foreman' && !canViewDetail(actor, rec)) return maskedView(rec, actor);
   const rows = itemsOf(rec.recordId);
   const c = countsOf(rows, ['both', 'foreman'], 'selfResult');
   const qc = countsOf(rows, ['both', 'qa'], 'qaResult');
@@ -464,7 +469,8 @@ function mailTo(users, subject, body) {
 const recordLink = (rec) => `${cfg('appBaseUrl')}/#/record/${rec.recordId}`;
 function mailSubject(kind, rec) {
   const s = siteRow(rec.siteId);
-  return `[型枠検査] ${kind} ${s ? s.name : ''} ${rec.floor}`;
+  // 版1.9(§6.6・§6.8): 出来形の記録は件名の末尾に ` 出来形` を付ける
+  return `[型枠検査] ${kind} ${s ? s.name : ''} ${rec.floor}${rec.stage === 'post_demold' ? ' 出来形' : ''}`;
 }
 const mailBody = (rec) => `記録を確認してください: ${recordLink(rec)}`;
 function qaRecipients(siteId) { const q = effectiveQa(siteId); return q.main && !q.mainAbsent ? [q.main] : q.actingSubs; }
@@ -872,7 +878,8 @@ function resetState(opts = {}) {
   }
 
   const planned = U.jstAt(U.addDays(U.jstDate(n), 1), 9);
-  const enabled = SEED_ITEMS.filter((i) => i.active);
+  // シードの記録は版1.9より前に作られた記録として扱う: 項目は i1〜i16 の16項目のみ(i50〜i69 は持たない。§11.5)
+  const enabled = SEED_ITEMS.filter((i) => i.active && i.stage === 'pre_pour' && /^i([1-9]|1[0-6])$/.test(i.itemId));
   const snap = (i) => ({ seq: i.seq, stage: i.stage, audience: i.audience, groupKey: i.groupKey, groupJa: i.groupJa, groupId: i.groupId, textJa: i.textJa, textId: i.textId, key: i.key, tol: i.tol, measure: i.measure, minMeasures: i.minMeasures, unit: i.unit });
   const sampleSha = U.sha256(SAMPLE_JPEG);
   const addPhoto = (rec, key, itemId, side, userId, at) => {
