@@ -141,6 +141,7 @@ function setupSheets() {
   } finally {
     lock.releaseLock();
   }
+  try { applyHandEditDropdowns(); } catch (e) { /* 検証の設定失敗は無視 */ }
   return 'OK: シートを準備しました';
 }
 
@@ -170,6 +171,36 @@ function addMissingSeedItems() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * 手編集するシートの列に、プルダウン(TRUE/FALSE など)を付ける(版1.9.1)。
+ * GASエディタ専用。Webアプリの action ではない。何度実行しても同じ結果。値・書式・既存の行は変えない。
+ * 対象: Items の active(表示する)・key(写真必須)・stage・audience、Assignments の active・assignRole。
+ * 値は文字列の TRUE/FALSE のまま(アプリの書込みと同じ形式。チェックボックスは真偽値を要求するため使わない)。
+ * リスト外の値は拒否する(誤入力防止)。
+ */
+function applyHandEditDropdowns() {
+  var ss = Repo.ss();
+  var plan = {
+    Items: { active: ['TRUE', 'FALSE'], key: ['TRUE', 'FALSE'], stage: ['pre_pour', 'during_pour', 'demold', 'post_demold', 'cleanup'], audience: ['both', 'foreman', 'qa'] },
+    Assignments: { active: ['TRUE', 'FALSE'], assignRole: ['qa_main', 'qa_sub', 'foreman', 'subforeman'] }
+  };
+  var done = [];
+  Object.keys(plan).forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var header = SCHEMA_COLUMNS[name];
+    Object.keys(plan[name]).forEach(function (col) {
+      var idx = header.indexOf(col);
+      if (idx < 0) return;
+      var rule = SpreadsheetApp.newDataValidation().requireValueInList(plan[name][col], true).setAllowInvalid(false).build();
+      sh.getRange(2, idx + 1, Math.max(sh.getMaxRows() - 1, 1), 1).setDataValidation(rule);
+      done.push(name + '.' + col);
+    });
+  });
+  Logger.log('プルダウンを設定しました: ' + done.join(', '));
+  return { done: done };
 }
 
 /**
