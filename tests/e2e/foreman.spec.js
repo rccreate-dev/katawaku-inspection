@@ -20,13 +20,7 @@ async function newRecord(s, floor, lot) {
   await page.getByRole('button', { name: s.t('scr.S05.go') }).click();
   await page.locator('#plan-row').waitFor();
 }
-async function answerAllOk(s, { ng = {} } = {}) {
-  const { page } = s;
-  for (let n = 1; n <= 16; n++) {
-    const it = page.locator(`#it-i${n}`);
-    await it.locator(ng[`i${n}`] ? '.v-ng' : '.v-ok').click();
-  }
-}
+const answerAllOk = (s, o) => E.answerAllOk(s, o); // 項目は画面(getRecord.items)から取る。新規の打設前記録は28項目(版1.9)
 async function photoOn(s, itemId) { await E.shoot(s, s.page.locator(`#it-${itemId} .cam`)); }
 
 describe('E-01 登録', () => {
@@ -102,7 +96,7 @@ describe('E-02 職長フロー', () => {
     // 何も入れずに確認へ → 違反が赤枠で出る(全項目 ANSWER_MISSING + 打設予定日時)
     await page.getByRole('button', { name: s.t('scr.S06.to_confirm') }).click();
     await page.locator('.item.err').first().waitFor();
-    assert.equal(await page.locator('.item.err').count(), 16);
+    assert.equal(await page.locator('.item.err').count(), 28, '新規の打設前記録は28項目(版1.9)');
     await page.getByText(s.t('scr.S06.problems')).waitFor();
 
     // 入力: i1=NG(備考なし・写真なし)、i4 は許容超え(+7)で ok

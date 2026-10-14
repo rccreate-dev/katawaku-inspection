@@ -25,7 +25,7 @@ describe('C-STATE 状態遷移', () => {
     assert.equal(res.ok, true, JSON.stringify(res.error));
     let rec = res.data.record;
     assert.equal(rec.status, 'draft'); assert.equal(rec.round, 1); assert.equal(rec.ownerUserId, 'u_tanaka'); assert.equal(rec.team, '田中班');
-    assert.equal(rec.items.length, 16);
+    assert.deepEqual(rec.items.map((i) => i.itemId), h.PRE_POUR_ITEM_IDS, '新規の打設前記録は28項目(i1〜i16+i58〜i69。版1.9)');
     assert.ok(rec.actions.includes('saveDraft') && rec.actions.includes('submitRecord'));
     assert.deepEqual(rec.signatures, { foreman: null, qa: null, prime: null });
     await t.ok('saveDraft', { recordId, items: h.okPatches() });
@@ -137,13 +137,18 @@ describe('C-STATE 状態遷移', () => {
         await h.reset();
         for (const [id, set] of Object.entries(cs.itemDefs || {})) await h.mock('patch', { sheet: 'Items', key: id, set });
         const t = await h.login('u_tanaka');
-        const { recordId, res } = await h.createRecordFor(t, { siteId: 's_a', floor: '1F', lot: cs.id, pourPlannedAt: cs.pourPlannedAt ? undefined : null });
+        const stage = cs.stage || 'pre_pour';
+        // pre_pour: pourPlannedAt=false は送らない。post_demold: 既定は送らず、true のときは(保存されない値を)あえて送る
+        const ppa = stage === 'pre_pour' ? (cs.pourPlannedAt ? undefined : null) : (cs.pourPlannedAt ? await h.pourPlanned() : undefined);
+        const { recordId, res } = await h.createRecordFor(t, { siteId: 's_a', floor: '1F', lot: cs.id, stage, pourPlannedAt: ppa });
         assert.equal(res.ok, true, JSON.stringify(res.error));
+        // 項目は固定リストでなく記録の項目(getRecord.items 相当)から決める。重点項目は def.key(版1.9: 段階ごとに項目が違う)
         const patches = [];
         const photoPlan = [];
-        for (const id of h.ITEM_IDS) {
+        for (const it of res.data.record.items) {
+          const id = it.itemId;
           const o = cs.items[id] || {};
-          const photos = 'photos' in o ? o.photos : (data.keyItems.includes(id) ? 1 : 0);
+          const photos = 'photos' in o ? o.photos : (it.def.key ? 1 : 0);
           const p = { itemId: id, result: 'result' in o ? o.result : 'ok' };
           if (o.values) p.values = o.values;
           if (o.note) p.note = o.note;
@@ -224,9 +229,20 @@ describe('C-STATE 状態遷移', () => {
     assert.equal((await sg.call('stopPour', { recordId: other, reason: '亀裂' })).error.code, 'FORBIDDEN_SITE', '他現場の職長');
     assert.equal((await sg.call('stopPour', { recordId: recordId, reason: '' })).error.data.violations[0].rule, 'REASON_REQUIRED');
     assert.equal((await t.call('stopPour', { recordId: draft, reason: '止める' })).error.code, 'STATE_CONFLICT');
+    // 他班の職長(masked の行)の actions: stopPour が許される記録(pre_pour・approved)だけ ['stopPour']、draft は []
+    const rows = (await sg.ok('listRecords', { siteId: 's_b' })).records;
+    const mrow = rows.find((r) => r.recordId === recordId);
+    assert.equal(mrow.masked, true); assert.equal(mrow.stage, 'pre_pour');
+    assert.deepEqual(mrow.actions, ['stopPour'], '他班の approved(打設前)の masked 行は actions=[stopPour]');
+    const drow = rows.find((r) => r.recordId === draft);
+    assert.equal(drow.masked, true); assert.deepEqual(drow.actions, [], 'draft の masked 行は actions=[]');
+    assert.equal((await sg.call('getRecord', { recordId })).error.code, 'FORBIDDEN_TEAM', '他班の職長の getRecord は FORBIDDEN_TEAM のまま');
     const s = await sg.call('stopPour', { recordId, reason: '型枠のはらみを確認' });
     assert.equal(s.ok, true, JSON.stringify(s.error));
-    assert.equal(s.data.record.status, 'fix'); // 他班の職長への応答は masked 形でも status は含まれる
+    assert.equal(s.data.record.masked, true, '他班の職長への応答 record は masked 形');
+    assert.deepEqual(Object.keys(s.data.record).sort(), ['actions', 'floor', 'lot', 'masked', 'recordId', 'siteId', 'stage', 'status', 'team', 'updatedAt', 'version', 'zone']);
+    assert.equal(s.data.record.status, 'fix'); // masked 形でも status は含まれる
+    assert.deepEqual(s.data.record.actions, [], '停止後(fix)の masked 行は actions=[]');
     let rec = await h.getRecord(t, recordId);
     assert.equal(rec.signatures.qa, null); assert.equal(rec.signatures.prime, null); assert.equal(rec.qaVerdict, null);
     assert.equal(rec.stopped, true);
@@ -264,8 +280,14 @@ describe('C-STATE 状態遷移', () => {
     assert.equal(re.res.data.record.reinspectOf, SEED.a1); assert.equal(re.res.data.record.round, 1); assert.equal(re.res.data.record.status, 'draft');
     const bad = await h.createRecordFor(t, { siteId: 's_b', floor: '1F', lot: 'L1', reinspectOf: SEED.b1 });
     assert.equal(bad.res.ok, false, 'approvedでない記録の再検査は不可');
-    const stage = await t.call('createRecord', { recordId: h.newRecordId(), siteId: 's_a', floor: '2F', lot: 'Z1', stage: 'demold' });
+    // 未有効段階は during_pour を使う(版1.9: post_demold は有効段階になったため)
+    const stage = await t.call('createRecord', { recordId: h.newRecordId(), siteId: 's_a', floor: '2F', lot: 'Z1', stage: 'during_pour', pourPlannedAt: await h.pourPlanned() });
     assert.equal(stage.error.code, 'STAGE_NOT_ENABLED');
+    // 同じ階・工区・ロットでも段階が違えば別スロット(C-STAGE-01)。post_demold の2件目は ALREADY_EXISTS
+    const pd = await h.createRecordFor(t, { siteId: 's_a', floor: '1F', lot: 'L1', stage: 'post_demold' });
+    assert.equal(pd.res.ok, true, JSON.stringify(pd.res.error));
+    const pd2 = await h.createRecordFor(t, { siteId: 's_a', floor: '1F', lot: 'L1', stage: 'post_demold' });
+    assert.equal(pd2.res.error.code, 'ALREADY_EXISTS'); assert.equal(pd2.res.error.data.recordId, pd.recordId);
     const nf = await t.call('createRecord', { recordId: h.newRecordId(), siteId: 's_a', floor: '9F', lot: 'Z1', stage: 'pre_pour' });
     assert.equal(nf.error.code, 'VALIDATION_FAILED');
     assert.ok(nf.error.data.violations.some((v) => v.rule === 'FIELD_INVALID' && v.path === 'floor'));

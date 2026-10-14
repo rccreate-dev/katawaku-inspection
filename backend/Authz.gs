@@ -223,6 +223,8 @@ function authorize(actor, action, ctx) {
       if (st !== 'qa_ok') return deny_('STATE_CONFLICT', '元請サインを記録できる状態ではありません', sdata);
       break;
     case 'stopPour':
+      // 版1.9(§4.2 の6・§6.8): 打設を止められるのは打設前(pre_pour)の記録だけ。出来形(post_demold)は STATE_CONFLICT
+      if (rec.stage !== 'pre_pour') return deny_('STATE_CONFLICT', '打設前の記録でないため打設停止できません', sdata);
       if (['submitted', 'qa_ok', 'approved'].indexOf(st) < 0) return deny_('STATE_CONFLICT', '打設停止できる状態ではありません', sdata);
       break;
     case 'addNote':

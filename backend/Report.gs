@@ -8,8 +8,15 @@ function esc_(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-var STAGE_LABEL_ = { pre_pour: '打設前', during_pour: '打設中巡回', demold: '脱型承認', post_demold: '脱型後出来形', cleanup: '解体後片付け' };
+/** 段階名(日本語のみ。SPEC §10.2 の1。版1.9: 使う段階は pre_pour=打設前 と post_demold=出来形) */
+var STAGE_LABEL_ = { pre_pour: '打設前', during_pour: '打設中巡回', demold: '脱型承認', post_demold: '出来形', cleanup: '解体後片付け' };
 var STATUS_LABEL_ = { draft: '入力中', submitted: '確認待ち', fix: '是正中', qa_ok: '元請待ち', approved: '打設可' };
+
+/** ステータスの表示名。approved は段階で決まる: 打設前=打設可、出来形=出来形確認済(SPEC §6.8・§10.2 の2) */
+function statusLabel_(rec) {
+  if (rec.status === 'approved' && rec.stage === 'post_demold') return '出来形確認済';
+  return STATUS_LABEL_[rec.status] || rec.status;
+}
 var RESULT_LABEL_ = { ok: '合', ng: 'NG', na: '該当なし' };
 var VERDICT_LABEL_ = { ok: '合格', minor: '軽微な不適合', major: '重大な不適合' };
 var METHOD_LABEL_ = { paper: '紙に署名', pdf: 'PDFへ署名・押印', onsite: '現地で対面確認' };
@@ -132,15 +139,20 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('table.pb .ngc{color:#c00;font-weight:bold}table.pb .lb{color:#555}');
   h.push('.foot{margin-top:10px;font-size:8px;color:#444;word-break:break-all}');
   h.push('</style></head><body>');
-  h.push('<!--REPORT ' + esc_(rec.recordId) + ' v' + version + ' ' + esc_(rec.status) + '-->');
+  h.push('<!--REPORT ' + esc_(rec.recordId) + ' v' + version + ' ' + esc_(rec.status) + ' stage=' + esc_(rec.stage) + '-->');
   h.push('<h1>' + esc_(reportSubject_(rec, site)) + '</h1>');
   h.push('<p>型枠工事 ' + esc_(stage) + '検査記録</p>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
   var ownerCompany = rec.ownerCompany || userCompany_(rec.ownerUserId);
   if (ownerCompany) h.push('<tr><th>職長の会社名</th><td>' + esc_(ownerCompany) + '</td><th>職長</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
-  h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
-  h.push('<tr><th>ステータス</th><td>' + esc_(STATUS_LABEL_[rec.status] || rec.status) + '</td><th>提出ラウンド</th><td>' + rec.round + '</td></tr>');
+  if (rec.stage === 'post_demold') {
+    // 出来形は打設予定日時を使わない(行ごと出さない。SPEC §6.8・§10.2 の2)
+    h.push('<tr><th>記録ID</th><td colspan="3">' + esc_(rec.recordId) + '</td></tr>');
+  } else {
+    h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
+  }
+  h.push('<tr><th>ステータス</th><td>' + esc_(statusLabel_(rec)) + '</td><th>提出ラウンド</th><td>' + rec.round + '</td></tr>');
   h.push('<tr><th>生成日時</th><td>' + esc_(dtShort_(nowDt)) + '</td><th>版</th><td>v' + version + '</td></tr></table>');
 
   // 3者サイン
@@ -265,7 +277,8 @@ function act_generateReport(ctx) {
   var version = prev.reduce(function (m, r) { return Math.max(m, r.version); }, 0) + 1;
   var now = Util.now(), nowIso = Util.fmtDt(now);
   var stamp = nowIso.slice(0, 10).replace(/-/g, '') + '-' + nowIso.slice(11, 13) + nowIso.slice(14, 16);
-  var name = Util.sanitizeName(reportSubject_(rec, site)) + '_v' + version + '_' + stamp + '.pdf';
+  // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。段階名=打設前/出来形(subject の次)
+  var name = Util.sanitizeName(reportSubject_(rec, site)) + '_' + (STAGE_LABEL_[rec.stage] || rec.stage) + '_v' + version + '_' + stamp + '.pdf';
   var file, bytes;
   try {
     var html = buildReportHtml_(rec, site, rows, photos, notes, events, version, nowIso);

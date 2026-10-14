@@ -69,16 +69,22 @@ function recordSummary_(actor, rec) {
   };
 }
 
-function recordMasked_(rec) {
+/**
+ * 職長が他班の記録を見るときの最小形(SPEC §5.1)。actions は stopPour が許されるとき(同現場の有効な担当・
+ * stage=pre_pour・status∈{submitted,qa_ok,approved})だけ ['stopPour']。出来形(post_demold)の行は常に []
+ */
+function recordMasked_(actor, rec) {
+  var canStop = authorize(actor, 'stopPour', { record: rec, siteId: rec.siteId, params: { recordId: rec.recordId } }).ok;
   return {
     recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone, lot: rec.lot, stage: rec.stage,
-    status: rec.status, team: rec.team, updatedAt: rec.updatedAt, version: rec.version, masked: true, actions: []
+    status: rec.status, team: rec.team, updatedAt: rec.updatedAt, version: rec.version, masked: true,
+    actions: canStop ? ['stopPour'] : []
   };
 }
 
 /** 一覧用: 職長が他班の記録を見るとき masked 形 */
 function recordListView_(actor, rec) {
-  if (actor.role === 'foreman' && !inTeamScope_(actor, rec)) return recordMasked_(rec);
+  if (actor.role === 'foreman' && !inTeamScope_(actor, rec)) return recordMasked_(actor, rec);
   return recordSummary_(actor, rec);
 }
 
@@ -380,6 +386,9 @@ function act_createRecord(ctx) {
   }
   if (site.status === 'closed') throw new ApiError('SITE_CLOSED', '閉鎖された現場です');
   if (Util.splitCsv(Cfg.get('enabledStages')).indexOf(p.stage) < 0) throw new ApiError('STAGE_NOT_ENABLED', 'この段階は有効ではありません');
+  // 版1.9(§5.4.3): その段階の有効項目が0件なら作らせない(項目0件の記録を作らない)
+  var stageItems = enabledItems_().filter(function (i) { return i.stage === p.stage; });
+  if (!stageItems.length) throw new ApiError('STAGE_NOT_ENABLED', 'この段階の有効な項目がありません');
 
   var v = [];
   var zone = p.zone || '';
@@ -387,8 +396,9 @@ function act_createRecord(ctx) {
   var zones = Util.splitCsv(site.zones);
   if (zones.length ? (zone !== '' && zones.indexOf(zone) < 0) : zone !== '') v.push({ rule: 'FIELD_INVALID', path: 'zone' });
   if (Util.blank(p.lot)) v.push({ rule: 'FIELD_INVALID', path: 'lot' });
+  // 打設予定日時は打設前(pre_pour)のときだけ保存する。出来形などで指定されても、エラーにせず保存しない(§5.4.3・§6.8)
   var planned = '';
-  if (p.pourPlannedAt) planned = Util.normDt(p.pourPlannedAt) || '';
+  if (p.stage === 'pre_pour' && p.pourPlannedAt) planned = Util.normDt(p.pourPlannedAt) || '';
   if (v.length) throw violation_(v);
 
   var reinspectOf = p.reinspectOf || '';
@@ -398,7 +408,7 @@ function act_createRecord(ctx) {
     if (orig.siteId !== p.siteId || orig.floor !== p.floor || orig.zone !== zone || orig.lot !== p.lot || orig.stage !== p.stage) {
       throw violation_([{ rule: 'FIELD_INVALID', path: 'reinspectOf' }]);
     }
-    if (orig.status !== 'approved') throw new ApiError('STATE_CONFLICT', '元記録が打設可ではありません', { status: orig.status, round: orig.round });
+    if (orig.status !== 'approved') throw new ApiError('STATE_CONFLICT', '元記録が承認済み(approved)ではありません', { status: orig.status, round: orig.round });
     var dup = Repo.all('Records').filter(function (r) { return r.reinspectOf === reinspectOf; })[0];
     if (dup) throw new ApiError('ALREADY_EXISTS', '再検査の記録が既にあります', { recordId: dup.recordId, mine: dup.ownerUserId === actor.userId });
   } else {
@@ -417,7 +427,7 @@ function act_createRecord(ctx) {
     reinspectOf: reinspectOf, ownerUserId: actor.userId, team: team, pourPlannedAt: planned, major: false, stopped: false,
     escNotified: 0, createdAt: now, updatedAt: now, version: 1, ownerCompany: userCompany_(actor.userId)
   });
-  var itemRows = enabledItems_().filter(function (i) { return i.stage === p.stage; }).map(function (i) {
+  var itemRows = stageItems.map(function (i) {
     return {
       recordItemId: p.recordId + ':' + i.itemId, recordId: p.recordId, itemId: i.itemId,
       snapshot: {
@@ -467,7 +477,8 @@ function act_saveDraft(ctx) {
       if (typeof z === 'string' && (zones.length ? (z === '' || zones.indexOf(z) >= 0) : z === '')) patch.zone = z;
       else v.push({ rule: 'FIELD_INVALID', path: 'header.zone' });
     }
-    if (Util.has(h, 'pourPlannedAt')) {
+    // 出来形(post_demold)では pourPlannedAt を使わない。指定されてもエラーにせず保存しない(§5.4.3・§6.8)
+    if (Util.has(h, 'pourPlannedAt') && rec.stage === 'pre_pour') {
       if (h.pourPlannedAt === null) patch.pourPlannedAt = '';
       else if (typeof h.pourPlannedAt === 'string' && Util.normDt(h.pourPlannedAt)) patch.pourPlannedAt = Util.normDt(h.pourPlannedAt);
       else v.push({ rule: 'FIELD_INVALID', path: 'header.pourPlannedAt' });
@@ -695,7 +706,8 @@ function act_stopPour(ctx) {
     siteId: rec.siteId, recordId: rec.recordId, from: prev, to: 'fix', round: rec.round,
     detail: { reason: reason, previousStatus: prev, mailed: mailed }
   });
-  return { record: recordSummary_(actor, rec) };
+  // 他班の職長への応答は masked 形(停止理由・項目・コメントは返さない。SPEC §5.4.3)
+  return { record: recordListView_(actor, rec) };
 }
 
 function act_addNote(ctx) {

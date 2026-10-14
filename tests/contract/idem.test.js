@@ -77,7 +77,7 @@ describe('C-IDEM 冪等キー', () => {
     assert.equal(n1.ok, true); assert.equal(n2.meta.replayed, true); assert.equal(n2.data.note.noteId, n1.data.note.noteId);
     const rec = await h.getRecord(t, recordId);
     assert.equal(rec.notes.filter((n) => n.text === '追記').length, 1);
-    assert.equal(rec.items.length, 16);
+    assert.deepEqual(rec.items.map((i) => i.itemId), h.PRE_POUR_ITEM_IDS, '新規の打設前記録は28項目(i1〜i16+i58〜i69。版1.9)');
 
     const { recordId: sub } = await h.makeSubmitted(t);
     const cl = h.newClientId();

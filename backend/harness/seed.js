@@ -74,7 +74,8 @@ function seed(ctx, nowMs, variant) {
   Repo.resetCache();
 
   /* Records */
-  const items = ctx.enabledItems_().filter((i) => i.stage === 'pre_pour');
+  // シードの記録は版1.9より前に作られた記録として扱う(SPEC §11.5): 項目は i1〜i16 の16項目だけで、i58〜i69 は持たない
+  const items = ctx.enabledItems_().filter((i) => i.stage === 'pre_pour' && Number(i.itemId.slice(1)) <= 16);
   const siteById = Object.fromEntries(sites.map((s) => [s[0], { name: s[1], zones: s[3] }]));
   const names = Object.fromEntries(users.map((u) => [u[0], u[1]]));
   let n = 0;

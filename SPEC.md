@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.8.2 / 作成日: 2026-10-07(最終改訂 2026-10-12) / 作成: 設計担当
+- 版: 1.9.0 / 作成日: 2026-10-07(最終改訂 2026-10-14) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -11,7 +11,7 @@
 ## 0. 共通規約(全担当が従う)
 
 ### 0.1 確定している変更不可の決定(CLAUDE.md §2 の再掲。ここから逸脱しない)
-参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は QA「合格」「打設可」と職長「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長コメントと管理者コメントは別フィールド・上書き禁止 / 提出後は職長編集不可(差し戻し時のみ可) / 重大不適合=打設不可・3者サインが揃うまで打設可にならない / 役割はサーバー名簿で決まる / 合否は人が決める。
+参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は QA「合格」「打設可」(出来形では「出来形確認済」)と職長「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長コメントと管理者コメントは別フィールド・上書き禁止 / 提出後は職長編集不可(差し戻し時のみ可) / 重大不適合=打設不可・3者サインが揃うまで打設可にならない(段階が出来形の記録では、最終状態の表示が「出来形確認済」になり、打設を止める操作は無い。§6.8) / 役割はサーバー名簿で決まる / 合否は人が決める。
 
 ### 0.2 列挙値(これ以外を作らない)
 
@@ -22,7 +22,7 @@
 | `assignRole`(担当表の役) | `qa_main` / `qa_sub` / `foreman` / `subforeman` |
 | `membershipStatus` | `pending` / `approved` / `rejected` / `revoked` |
 | `deviceStatus` | `active` / `revoked` |
-| `stage`(検査段階) | `pre_pour`(打設前) / `during_pour`(打設中巡回) / `demold`(脱型承認) / `post_demold`(脱型後出来形) / `cleanup`(解体後片付け) |
+| `stage`(検査段階) | `pre_pour`(打設前) / `during_pour`(打設中巡回) / `demold`(脱型承認) / `post_demold`(脱型後出来形=**出来形検査**) / `cleanup`(解体後片付け)。**版1.9: 使う段階は `pre_pour` と `post_demold` の2つだけ**(`Config.enabledStages` の既定)。他の3値は列挙値として残すが使わない(`during_pour`=打設中・管理項目表⑯は保留)。段階による違いは §6.8 |
 | `status`(記録ステータス。CLAUDE.md §3 の値のみ) | `none` / `draft` / `submitted` / `fix` / `qa_ok` / `approved`。**`none` は「記録行が未作成」の仮想値で、Records.status には保存しない** |
 | `result`(項目の結果) | `ok` / `ng` / `na` |
 | `severity`(NG項目の重さ) | `minor` / `major` |
@@ -286,10 +286,10 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | 列 | 型 | 必 | 説明 |
 |---|---|---|---|
 | itemId | str(`i`+数字) | 必PK | 不変。意味を変える変更は新ID+旧IDを `active=FALSE` |
-| seq | int | 必 | 表示順(昇順) |
+| seq | int | 必 | 表示順(昇順)。同じ段階の項目の間で重複させない(§2.6.1a) |
 | stage | enum(stage) | 必 | この項目を使う段階 |
 | audience | enum(both,foreman,qa) | 必 | `both`=職長・QA両方が入力、`foreman`=職長のみ、`qa`=QAのみ |
-| groupKey | str | 必 | グループ識別子(例 `prep`) |
+| groupKey | str | 必 | グループ識別子(例 `prep`)。画面は `seq` 昇順に並べ、`groupKey` が変わるたびに見出しを出す。そのため **同じ `groupKey` は `seq` 上で連続**させる(§2.6.1a) |
 | groupJa / groupId | str | 必 | グループ名(ja / id)。同一 `groupKey` の行は同じ値を入れる |
 | textJa / textId | str | 必 | 項目文(ja / id)。idは暫定訳(P-22) |
 | key | bool | 必 | 重点項目(`ok` でも写真必須) |
@@ -300,11 +300,11 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | active | bool | 必 | `FALSE` は新規記録に使わない(既存記録は影響なし) |
 | note | str | | 運用メモ |
 
-**記録作成時にスナップショット**: `createRecord` 時点の `active=TRUE` かつ `stage` 一致の項目を、`audience` に関わらず全て `RecordItems` に行として固定し(`snapshot` JSON)、以後マスタが変わっても既存記録の項目は変わらない。
+**記録作成時にスナップショット**: `createRecord` 時点の `active=TRUE` かつ `stage` 一致の項目を、`audience` に関わらず全て `RecordItems` に行として固定し(`snapshot` JSON)、以後マスタが変わっても既存記録の項目は変わらない。**段階ごとに項目が違う(版1.9)**: 同じ現場・階・工区・ロットでも、`pre_pour` の記録は `stage=pre_pour` の項目だけ、`post_demold` の記録は `stage=post_demold` の項目だけを持つ(互いの項目は混ざらない)。`getBootstrap.items` は複数の段階の項目をまとめて返すので、クライアントは **記録の `stage` で項目を絞る**(オフラインで作る仮の項目リストも同じ。§9.2 S05)。作成できる段階は、その段階の有効項目が1件以上あるものに限る(§5.4.3)。
 
-#### 2.6.1 初期値(`SEED_ITEMS`。i1〜i49の49行 = 16項目 `active=TRUE` + 追加案33項目 `active=FALSE`)
+#### 2.6.1 初期値(`SEED_ITEMS`。**i1〜i69の69行 = `active=TRUE` が36項目(打設前28: i1〜i16 の16項目+i58〜i69 の12項目 / 出来形8: i50〜i57)+ 追加案33項目 `active=FALSE`(i17〜i49)**。版1.9で i50〜i69 を追加。i1〜i49 は版1.8.2 から変更なし)
 
-共通: `stage=pre_pour` / `audience=both` / `unit=mm` / `minMeasures`: `tol`のある項目は `2`、他は `0` / `measure`: `tol`のある項目は `optional`、他は `none`(プロトタイプと同じ挙動。必須化は運用でシート編集)。**例外: i48・i49 のみ `stage=post_demold`**(下記)。i1〜i16 は変更しない。グループ名: `prep`=準備・墨 / Persiapan dan marking、`dim`=寸法・精度 / Dimensi dan akurasi、`tie`=締付け・支保工 / Pengencangan dan penyangga、`embed`=埋込み・設備 / Benda tertanam dan MEP、`safe`=安全・清掃 / Keselamatan dan kebersihan。
+共通: `stage=pre_pour` / `audience=both` / `unit=mm` / `minMeasures`: `tol`のある項目は `2`、他は `0` / `measure`: `tol`のある項目は `optional`、他は `none`(プロトタイプと同じ挙動。必須化は運用でシート編集)。**例外: i48・i49・i50〜i57 は `stage=post_demold`**(下記・§2.6.1a)。i50〜i69(版1.9)は §2.6.1a の表に `measure`/`minMeasures` を明記してあり、**この共通規則より表の値を優先**する。i1〜i16 は変更しない。グループ名: `prep`=準備・墨 / Persiapan dan marking、`dim`=寸法・精度 / Dimensi dan akurasi、`tie`=締付け・支保工 / Pengencangan dan penyangga、`embed`=埋込み・設備 / Benda tertanam dan MEP、`safe`=安全・清掃 / Keselamatan dan kebersihan。版1.9 の新グループ(`demold_check`・`ctl_*`)は §2.6.1a。
 
 | itemId | seq | groupKey | key | tol | textJa | textId | active |
 |---|---|---|---|---|---|---|---|
@@ -347,7 +347,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 
 追加案B(i32〜i49。`active=FALSE`。**元資料xlsxとの突合(docs/item-reconciliation.md (c))で「元Excelにあるが落ちていた」18項目**。決定: A案=activeのi1〜i16は変えず、本18項目は無効のまま置き、責任者が必要に応じて有効化する。突合済 P-26):
 
-共通は上記と同じ(`audience=both`・`unit=mm`・`tol` のある項目は `measure=optional`/`minMeasures=2`、他は `none`/`0`)。**元Excelの職長用/管理者用の別は付けない(全項目 `both`)**。全数/抽出の列は作らない(寸法の代表実測は `measure`/`minMeasures` と運用で表す)。`textId` は暫定訳(P-22。ネイティブ確認)。`note` は i48・i49 のみ(下記)で他は空。
+共通は上記と同じ(`audience=both`・`unit=mm`・`tol` のある項目は `measure=optional`/`minMeasures=2`、他は `none`/`0`)。**元Excelの職長用/管理者用の別は付けない(全項目 `both`)**。全数/抽出の列は作らない(寸法の代表実測は `measure`/`minMeasures` と運用で表す)。`textId` は暫定訳(P-22。ネイティブ確認)。`note` は i48・i49 のみ(下記)で、i32〜i47 は空(i50〜i69 の `note` は §2.6.1a)。
 
 | itemId | seq | stage | groupKey | key | tol | textJa | textId | active |
 |---|---|---|---|---|---|---|---|---|
@@ -370,10 +370,82 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 | i48 | 48 | post_demold | dim | FALSE |  | 出来形(コンクリートはらみ・段差) | Hasil pekerjaan: beton menggembung dan perbedaan tinggi | FALSE |
 | i49 | 49 | post_demold | embed | FALSE |  | 出来形(開口部の位置・大きさ) | Hasil pekerjaan: posisi dan ukuran bukaan | FALSE |
 
-- 正確な全列値(JSON)は `docs/new-items.json`(16列: itemId〜note)。`tests/fixtures/seed-items.json`・`Seed.gs`・`mock/seed.js` は i1〜i31 の後ろに i32〜i49 をこの値で追加する(計49行)。
+- 正確な全列値(JSON)は `docs/new-items.json`(16列: itemId〜note)。`tests/fixtures/seed-items.json`・`Seed.gs`・`mock/seed.js` は i1〜i31 の後ろに i32〜i49、その後ろに i50〜i69(§2.6.1a)をこの値で追加する(計69行)。**版1.9: `docs/new-items.json` にも i50〜i69 の20行を追記する**(バックエンド担当が `Seed.gs` と同時に更新する)。
 - **i45**: 元Excel管理者用⑧「固め状況」は「型枠の締付け」の意味(ユーザー決定)。打設時の締固め(バイブレータ)ではない。`group=tie`。
-- **i48・i49(出来形)**: 打設後の確認のため `stage=post_demold`(脱型後の検査)。`Config.enabledStages` が v1 では `pre_pour` のみ(P-10)なので `createRecord` で作成できず、**責任者が `active=TRUE` にしても打設前の画面・記録(スナップショット・`getBootstrap.items`)には出ない**。脱型後検査を有効にする段階(v2)で初めて使われる。
+- **i48・i49(出来形・旧案)**: 版1.9 でも **行は変更せず `active=FALSE` のまま残す**。`stage=post_demold` なので、責任者が `active=TRUE` にすると(`Config.enabledStages` に `post_demold` がある間は)以後に作る出来形の記録に加わる。i48(はらみ・段差)は i56・i57 と意味が重なるため、有効化は非推奨。i49(開口部の位置・大きさ)に相当する項目は i50〜i57 に無いので、必要なら有効化してよい(`seq=49` なので出来形の記録では先頭側に出る)。`note` 列の旧文言(「v1は…createRecord 不可」)は版1.9 では実態と合わないが、**行を変えない決定のため直さない**(運用メモ。本文の記述が正)。
 - 統合の粒度は変えない(i6=開口の建入れ・高さ、i16=清掃、i17=かぶり厚さは原紙の複数行を1項目にまとめたまま。i4・i7 の文言も変更しない)。
+
+#### 2.6.1a 版1.9 の追加項目 i50〜i69(ユーザー決定 2026-10-14。全て `active=TRUE`)
+
+出来形検査(`stage=post_demold`)を打設前検査と並べて使うため、**20項目を追加**する(出来形8+打設前12)。共通: `audience=both` / `unit=mm` / **`key=FALSE`(写真必須の指定は責任者が後で決める。§2.6.2)**。既存の i1〜i49 の行は **一切変更しない**(`seq`・`active`・`note` を含む)。`Config.enabledStages` の既定は `pre_pour,post_demold`(§2.14)。`measure`/`minMeasures` は表に明記し、§2.6.1 の共通規則より **表の値を優先**する。
+
+**追加案C: 出来形の項目(i50〜i57。`stage=post_demold`。管理項目表⑰〜㉓由来)**
+
+| itemId | seq | stage | groupKey | key | tol | measure | minMeasures | textJa | textId | active |
+|---|---|---|---|---|---|---|---|---|---|---|
+| i50 | 50 | post_demold | demold_check | FALSE | | none | 0 | 解体時のコンクリート破損(脱型時のコンクリート面の欠け・ジャンカ確認)/基準:欠け・ジャンカなし、目視確認 | Kerusakan beton saat pembongkaran (cek gompal dan keropos/honeycomb pada permukaan beton setelah bekisting dilepas)/Standar: tidak ada gompal dan keropos, cek visual | TRUE |
+| i51 | 51 | post_demold | demold_check | FALSE | | none | 0 | 解体後の片付け・清掃(スラブ下)(スラブ下の型枠材・釘の撤去、廃材の分別・処理)/基準:釘・廃材なし | Pembersihan dan perapian setelah pembongkaran (bawah pelat) (lepas sisa bekisting dan paku di bawah pelat, pilah dan buang sisa material)/Standar: tidak ada paku dan sisa material | TRUE |
+| i52 | 52 | post_demold | demold_check | FALSE | | none | 0 | 解体後の片付け・清掃(スラブ上)(スラブ上の型枠材・端太材の撤去)/基準:材料なし | Pembersihan dan perapian setelah pembongkaran (atas pelat) (lepas sisa bekisting dan balok pengaku di atas pelat)/Standar: tidak ada material tersisa | TRUE |
+| i53 | 53 | post_demold | demold_check | FALSE | | none | 0 | 梁ロックセパ折り(梁部のセパレーター折り込み、折り込み後の補修状態)/基準:全箇所折り込み完了 | Pelipatan sparator lock pada balok (sparator balok dilipat, kondisi perbaikan setelah dilipat)/Standar: semua titik sudah dilipat | TRUE |
+| i54 | 54 | post_demold | demold_check | FALSE | | none | 0 | 各所Pコン処理(Pコン取外し後のモルタル補修状態、補修色・仕上げ)/基準:補修完了・仕上げ良好 | Penanganan P-con di setiap bagian (kondisi perbaikan mortar setelah P-con dilepas, warna dan hasil akhir perbaikan)/Standar: perbaikan selesai, hasil akhir baik | TRUE |
+| i55 | 55 | post_demold | demold_check | FALSE | | none | 0 | 梁下・スラブ解体後の清掃・釘取り(釘・番線・廃材の完全撤去、分別・処理)/基準:残材なし | Pembersihan bawah balok dan pelat setelah pembongkaran, cabut paku (paku, kawat bendrat, sisa material dilepas total, dipilah dan dibuang)/Standar: tidak ada sisa material | TRUE |
+| i56 | 56 | post_demold | dim | FALSE | 10 | optional | 0 | 出来形 はらみ(コンクリートはらみの計測。脱型後)/基準:±10mm以内、スケール・目視 | Hasil pekerjaan: beton menggembung (ukur penggembungan beton setelah bekisting dilepas)/Standar: ±10 mm, penggaris dan visual | TRUE |
+| i57 | 57 | post_demold | dim | FALSE | 3 | optional | 0 | 出来形 段差(段差・不陸の計測。脱型後)/基準:3mm以下、スケール・目視 | Hasil pekerjaan: perbedaan tinggi (ukur perbedaan tinggi dan ketidakrataan setelah bekisting dilepas)/Standar: maks 3 mm, penggaris dan visual | TRUE |
+
+- `note` 列: i50〜i55 = `管理項目表⑰〜㉓(出来形)由来`、i56 = `管理項目表㉓(はらみ)。㉓を「はらみ」「段差」の2項目に分けた`、i57 = `管理項目表㉓(段差)。㉓を「はらみ」「段差」の2項目に分けた`。
+- `textJa`/`textId` の組み立て(i50〜i57): `{項目名}({確認内容})/基準:{基準}`。ユーザー指定の項目名・確認内容・基準を1つの文にした(基準を画面に出すため文中に入れる。P-42)。`textId` は暫定訳(P-22)。
+- i56・i57 は `tol` があるのに `minMeasures=0`(ユーザー指定。§2.6.1 の共通規則「`tol` のある項目は 2」の例外)。`measure=optional` なので動作に影響しない。
+- 元請提出PDFの項目表は項目列が約62mmで1行固定のため、長い項目文は途中で切れる(§10.2b-A。全文はアプリと写真ページで読める)。
+
+**追加案D: 打設前の項目(i58〜i69。`stage=pre_pour`。管理項目表①〜⑮由来)**
+
+管理項目表の⑥建入精度=i4、⑦外部通り=i5、⑨締付け金物=i9 は既存で足りるため追加しない(ユーザー指定)。番号は管理項目表①〜⑮の順(⑥⑦⑨は欠ける)。
+
+| itemId | seq | stage | groupKey | key | tol | measure | minMeasures | textJa | textId | active | note |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| i58 | 58 | pre_pour | ctl_base | FALSE | 3 | optional | 2 | 親墨・子墨位置(±3mm) | Posisi marking induk dan marking anak (±3 mm) | TRUE | 管理項目表① |
+| i59 | 59 | pre_pour | ctl_base | FALSE | | none | 0 | 鉄筋かぶり(設計かぶり厚以上) | Selimut beton tulangan (minimal sesuai tebal selimut desain) | TRUE | 管理項目表②。下限だけの基準で `tol`(±)に表せないため実測欄なし |
+| i60 | 60 | pre_pour | ctl_base | FALSE | | none | 0 | ベニヤ表面の汚れ・損傷・変形 | Permukaan triplek: kotor, rusak, berubah bentuk | TRUE | 管理項目表③ |
+| i61 | 61 | pre_pour | ctl_open | FALSE | 5 | optional | 2 | スリット位置・寸法(±5mm) | Posisi dan ukuran slit (±5 mm) | TRUE | 管理項目表④ |
+| i62 | 62 | pre_pour | ctl_open | FALSE | 5 | optional | 2 | 開口部位置・大きさ(±5mm) | Posisi dan ukuran bukaan (±5 mm) | TRUE | 管理項目表⑤ |
+| i63 | 63 | pre_pour | ctl_support | FALSE | 5 | optional | 2 | コーナー型枠建入精度(直下段差5mm以内) | Ketegakan bekisting sudut (selisih tinggi di bawah maks 5 mm) | TRUE | 管理項目表⑧ |
+| i64 | 64 | pre_pour | ctl_support | FALSE | 50 | optional | 2 | 支保工ピッチ(計画値±50mm) | Jarak (pitch) penyangga (±50 mm dari rencana) | TRUE | 管理項目表⑩ |
+| i65 | 65 | pre_pour | ctl_support | FALSE | | none | 0 | 押し引きピッチ・位置(計画通り) | Jarak (pitch) dan posisi push-pull (sesuai rencana) | TRUE | 管理項目表⑪ |
+| i66 | 66 | pre_pour | ctl_embed | FALSE | 5 | optional | 2 | 面木・目地棒打込み位置(±5mm) | Posisi pemasangan chamfer dan strip nat (±5 mm) | TRUE | 管理項目表⑫ |
+| i67 | 67 | pre_pour | ctl_embed | FALSE | 5 | optional | 2 | 各種打込金物の位置・個数(±5mm、個数確認) | Posisi dan jumlah besi tanam (±5 mm, cek jumlah) | TRUE | 管理項目表⑬。位置は実測、個数は目視確認 |
+| i68 | 68 | pre_pour | ctl_clean | FALSE | | none | 0 | 型枠内の清掃(木片・ゴミ) | Pembersihan dalam bekisting (serpihan kayu, sampah) | TRUE | 管理項目表⑭ |
+| i69 | 69 | pre_pour | ctl_clean | FALSE | | none | 0 | 打設前の片付け・清掃 | Perapian dan pembersihan sebelum pengecoran | TRUE | 管理項目表⑮ |
+
+- `tol`/`measure` の決め方(管理項目表の「管理基準値」から): `±N mm` と数値で決まるものは `tol=N`・`measure=optional`・`minMeasures=2`(i4〜i7 と同じ流儀)。「設計かぶり厚以上」(i59)・「計画通り」(i65)・目視確認だけの項目は `tol` なし・`measure=none`。i59 は下限だけの基準で、符号付きの差を `±tol` で判定する仕組みに乗らないため実測欄を付けない(P-42)。i63「直下段差5mm以内」は i44 と同じ `tol=5`。i67 は位置を `±5mm` で実測し、個数は目視で確認する(文中に明記)。
+- 既存の i17〜i47(無効)と意味が重なるもの(i34〜i36・i17=かぶり ↔ i59、i33 ↔ i60、i37 ↔ i61、i44 ↔ i63、i42 ↔ i64、i38 ↔ i66、i43 ↔ i69)は、**無効のまま残して新しい itemId で足す**(§2.6.2 の規則2「意味を変える→新ID」。ユーザー指定)。**有効な既存項目と実質重なりうる組**は i58 ↔ i2(墨)、i62 ↔ i6(開口。許容が ±5mm と ±2mm で違う)、i67 ↔ i14(打込み金物)、i68 ↔ i16(型枠内の清掃)の4組。ユーザー指示どおり別項目で追加するが、現場で重複して聞かれるため要確認(§14.2 の13)。
+- `textId` は全て暫定訳(P-22)。
+
+**グループ**(同一 `groupKey` の行は `groupJa`/`groupId` を同一にする。`dim` は既存):
+
+| groupKey | groupJa | groupId | 使う項目 |
+|---|---|---|---|
+| demold_check | 脱型後・解体後 | Setelah bongkar bekisting dan pembongkaran | i50〜i55(出来形) |
+| dim | 寸法・精度 | Dimensi dan akurasi | i56・i57(出来形。既存グループ) |
+| ctl_base | 墨・配筋・型枠面 | Marking, pembesian, dan permukaan bekisting | i58〜i60(打設前) |
+| ctl_open | スリット・開口 | Slit dan bukaan | i61・i62(打設前) |
+| ctl_support | 建入れ・支保工 | Ketegakan dan penyangga | i63〜i65(打設前) |
+| ctl_embed | 面木・目地・打込金物 | Chamfer, strip nat, dan besi tanam | i66・i67(打設前) |
+| ctl_clean | 清掃・片付け | Pembersihan dan perapian | i68・i69(打設前) |
+
+**表示順の方針(`seq`・`groupKey`)**:
+1. `seq` は itemId の数字と同じ(i50→50)。同じ段階の項目の間で重複させない。新しい項目は常に末尾(その時点の最大 `seq`+1 以降)に足し、**既存項目の `seq` は変えない**(既存の画面番号を動かさないため。i1〜i16 の `seq` もそのまま)。
+2. 画面・PDFは `seq` 昇順に並べ、`groupKey` が変わるたびにグループ見出しを出す(現行実装の動き。§9.2 S06)。そのため **同じ `groupKey` は `seq` 上で連続**させる。i58〜i69 を既存5グループ(`prep` など)へ入れず `ctl_*` の新グループにしたのは、既存グループへ入れると i16 の後ろで同じ見出しが二重に出るため。管理項目表の番号順(①②③…⑮)に並べると、そのままグループ単位で連続する。出来形は `demold_check`(i50〜i55)の後に `dim`(i56・i57)が続く。
+3. 画面の項目番号(No.)は、その記録の項目だけを `seq` 昇順に数えた添字(§7.7)。打設前の新規記録は No.1〜16 = i1〜i16(従来どおり)、No.17〜28 = i58〜i69。出来形の新規記録は No.1〜8 = i50〜i57。段階が違う記録の番号は無関係。
+4. 無効項目 i17〜i49 は `seq` がグループ単位で連続していない(版1.2 までの追加案)。責任者が有効化する場合は、見出しが二重に出るのを許容するか、新しい itemId+`seq` で足し直す(§2.6.2)。
+5. 版1.9 の有効項目の数: 打設前28(i1〜i16、i58〜i69)、出来形8(i50〜i57)、合計36。
+
+#### 2.6.1b 既存のスプレッドシートへの反映(版1.9。バックエンド担当・運用向け)
+
+- `setupSheets()` は **Items が空のときだけ** 初期値を入れ、Config は **不足キーだけ** 追記する(既存の挙動。既存の値は上書きしない)。したがって **本番の既存スプレッドシートには、i50〜i69 も `enabledStages` の新しい既定も自動では入らない**。
+- GASエディタ専用関数 **`addMissingSeedItems()`**(`backend/Schema.gs`。§3.6.1 の `setupFirstLead` と同じく Webアプリの action ではない=action数は43のまま)を新設する: `SEED_ITEMS` のうち、Items シートに `itemId` が無い行だけを末尾に追加する。**既存の行は変更・削除しない**(値が違っていても触らない)。スクリプトロック内で行い、追加した `itemId` の一覧を `Logger` に出す。書込み後に参照キャッシュを破棄する(§2.15-4)。何度実行しても結果は同じ(2回目以降は0件追加)。
+- `Config.enabledStages` は、責任者の依頼で Claude が Config シートの値を `pre_pour,post_demold` に書き換える(REQUIREMENTS §14 の運用)。
+- 反映の推奨順: ①バックエンド配布 ②フロント配布(`SW_VERSION` を上げる) ③`addMissingSeedItems()` を実行(これで i58〜i69 が **以後に作る打設前の記録** に入り、i50〜i57 が入る。既存の記録は変わらない) ④古い端末が出来形を「打設可」と表示しないよう、必要なら `minClientVersion` を新版へ上げる ⑤`enabledStages` を `pre_pour,post_demold` にする。**⑤を③より先にしない**(出来形の項目が無いまま作成できてしまうのを防ぐため、サーバーは項目0件の段階の `createRecord` を `STAGE_NOT_ENABLED` にする。§5.4.3)。
+- 手順と確認方法は `docs/OPERATIONS.md` に書く(バックエンド担当)。
 
 #### 2.6.2 項目マスタ編集ルール(運用。P-26・P-36)
 
@@ -382,7 +454,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 1. **編集権限**: スプレッドシートの共有設定で責任者のみ(編集者)とする。**QA・職長にはスプレッドシート自体を共有しない**(アプリ経由のみ。サーバー側の権限判定とは別の運用上の防御)。
 2. **IDの意味は変えない**: 既存 `itemId` の `textJa/textId/tol/key/measure/stage/audience` の意味が変わる変更はせず、**新しい `itemId`(末尾の次番号)で行を追加し、旧IDを `active=FALSE` にする**(§2.6 の `itemId` 説明どおり)。誤字訂正など意味が変わらない修正のみ同じ行を直してよい。`active` の切替・`seq` の変更は可。
 3. **反映範囲**: 変更は **以後に新規作成される記録から** 反映される。既存記録は作成時のスナップショット(§2.6)で不変(`active` を下げても既存記録は影響なし)。
-4. **編集後の検証**: 名簿の `adminValidateRoster`(§5.4.7)と同様に責任者が管理者操作で行える Items 検証が望ましい。**現行SPECには Items の整合チェックが無い**ため、v1 は編集後に責任者が目視確認する(`itemId` の重複なし・`seq` の重複なし・`tol` があれば `measure` が `optional` 以上・`stage` が §0.2 の値・`groupKey` ごとに `groupJa/groupId` 同一・`audience`/`measure` が §0.2 の値)。自動化は **SPEC変更要望として §14.2 の10に記載**(P-36)。
+4. **編集後の検証**: 名簿の `adminValidateRoster`(§5.4.7)と同様に責任者が管理者操作で行える Items 検証が望ましい。**現行SPECには Items の整合チェックが無い**ため、v1 は編集後に責任者が目視確認する(`itemId` の重複なし・`seq` の重複なし・`tol` があれば `measure` が `optional` 以上・`stage` が §0.2 の値・`groupKey` ごとに `groupJa/groupId` 同一・`audience`/`measure` が §0.2 の値・**同じ段階の有効項目で同じ `groupKey` が `seq` 順に連続していること(版1.9。§2.6.1a)**・`pre_pour` と `post_demold` の有効項目が各1件以上)。自動化は **SPEC変更要望として §14.2 の10に記載**(P-36)。
 5. **インドネシア語**: 追加・変更した `textId` は暫定訳のまま使い、ネイティブ確認を行う(P-22)。
 6. **反映の遅れ(版1.4)**: アプリが `Items` をキャッシュする(§2.15)ため、編集がアプリへ届くまで最大60秒かかる(「以後に新規作成される記録から反映」の規則は変わらない)。編集後に動作を確認するときは約1分待つ。
 
@@ -397,13 +469,13 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | floor | str | 必 | `Sites.floors` のいずれか |
 | zone | str | | 空可。`Sites.zones` が空でない現場では、そのいずれか(空も可) |
 | lot | str | 必 | 打設ロット名(自由入力 ≤40文字。例 `L1`) |
-| stage | enum(stage) | 必 | v1は `pre_pour` のみ作成可(`Config.enabledStages`。P-10) |
+| stage | enum(stage) | 必 | `Config.enabledStages` にある段階のみ作成可。**版1.9 の既定は `pre_pour`(打設前)と `post_demold`(出来形)**(P-10、§6.8) |
 | status | enum(draft,submitted,fix,qa_ok,approved) | 必 | `none`は保存しない |
 | round | int | 必 | 提出ラウンド。作成時1、`fix→submitted` の再提出で+1 |
 | reinspectOf | id | | 再検査の元記録(`approved`だった記録)。通常は空 |
 | ownerUserId | id | 必 | 作成した職長 |
 | team | str | | 作成時の作成者の班(Assignments.team)。空可 |
-| pourPlannedAt | dt | | 打設予定日時(提出時必須。P-06) |
+| pourPlannedAt | dt | | 打設予定日時(提出時必須。P-06)。**`stage=pre_pour` のみ**。`post_demold` では使わず常に空(§6.8) |
 | firstSubmittedAt | dt | | 最初の提出時刻(期限遅れ判定用) |
 | submittedBy | id | | 直近の提出者 |
 | submittedAt | dt | | 直近の提出時刻(エスカレーションの起点) |
@@ -418,14 +490,14 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | primeSignedAt | dt | | |
 | primeSignerName | str | | 元請担当者名(自由入力≤40文字) |
 | primeSignMethod | enum(paper,pdf,onsite) | | |
-| stopped | bool | 必 | 打設停止中か(既定FALSE。§6.3) |
+| stopped | bool | 必 | 打設停止中か(既定FALSE。§6.3)。`pre_pour` のみTRUEになりうる(`post_demold` では常にFALSE。§6.8) |
 | stoppedBy / stoppedAt / stopReason | id/dt/str | | |
 | escNotified | int | 必 | 通知済みエスカレーション段階 0/1/2(提出ごとに0へ戻す) |
 | createdAt / updatedAt | dt | 必 | |
 | version | int | 必 | 更新ごとに+1(UIの更新検知用。楽観ロックには使わない) |
 | ownerCompany | str | | **作成時の作成者の会社名の写し**(版1.8。`createRecord` 時に `Users.company` を写す。後で名簿が変わっても過去の記録は変わらない。**列は末尾に追加**(§2.9a)。この列が空の既存記録は、表示・PDFとも作成者の現在の `Users.company` で代用する) |
 
-一意制約: 同一 `(siteId,floor,zone,lot,stage)` に対し `reinspectOf` が空の記録は1件まで。2件目の作成は `ALREADY_EXISTS`。`approved` 済みスロットを再検査するときだけ `reinspectOf=その記録` で追加作成でき、その記録は元記録が `approved` であること(P-31)。
+一意制約: 同一 `(siteId,floor,zone,lot,stage)` に対し `reinspectOf` が空の記録は1件まで。2件目の作成は `ALREADY_EXISTS`。`approved` 済みスロットを再検査するときだけ `reinspectOf=その記録` で追加作成でき、その記録は元記録が `approved` であること(P-31)。**一意性は段階を含む**ので、同じ現場・階・工区・ロットでも `pre_pour` と `post_demold` は別の記録として1件ずつ作れる(版1.9。既存の実装のまま)。`reinspectOf` の元記録は同じ現場・階・工区・ロット・**段階**であること(違えば `VALIDATION_FAILED`(`FIELD_INVALID`、path=`reinspectOf`))。
 
 ### 2.8 RecordItems(項目別入力)  PK=`recordItemId`(=`{recordId}:{itemId}`)
 
@@ -568,7 +640,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | photoMaxBytes | `600000` | 本体の最大バイト数 |
 | photoSingleMaxChars | `1200000` | **単発モード(`total=1`)** の `data`(base64全体)の最大文字数(4の倍数)。`photoMaxBytes`(600000)のbase64(800000文字)を十分に含む値。責任者が `photoMaxBytes` を上げるときは `ceil(photoMaxBytes/3)*4` 以上に合わせる(下回っても動作する。クライアントが分割にフォールバックするだけ)。**版1.5で整合を確認**: 既定の `photoMaxBytes=600000` → base64長は `ceil(600000/3)*4=800000` 文字 ≤ `photoSingleMaxChars=1200000`(余裕150%)。リクエスト本文は `data`+`thumb`(≤`photoThumbMaxChars` 100,000)+メタで約0.9MB以下。本文サイズは遅さの原因ではない(実測: 400KB本文でも約1.6秒)ので上限は変えない |
 | photoParallel | `3` | 1端末から同時に送ってよい写真アップロード(`uploadPhotoChunk` の行)の最大数。サーバーは `Config` の `int` 変換(`parseInt`)で整数として返す(空・非数のセルは既定値3が返る)。クライアントはその値を §8.4-0 の規則で1〜6に収める。§8.4 |
-| enabledStages | `pre_pour` | カンマ区切り。作成可能な段階 |
+| enabledStages | `pre_pour,post_demold` | カンマ区切り。作成可能な段階。**版1.9 の既定は `pre_pour,post_demold`**。`during_pour` などは入れない(項目が無く、サーバーも有効項目0件の段階は作成させない)。既存の本番シートの値は自動では変わらない(§2.6.1b) |
 | pollIntervalSec | `60` | クライアントのポーリング間隔 |
 | driveRootFolderId | (setupで作成) | |
 | pdfShareMode | `anyone_with_link` | または `private`(P-32) |
@@ -607,7 +679,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 ## 3. 認証
 
 ### 3.1 全体方針
-- 本人確認は「氏名(=userId)選択 + 4桁PIN」で **端末登録**し、以後は端末に保存した `deviceToken` のみで認証する(PIN不要)。PINは「職長の提出」「QA/責任者の合格(`verdict=ok`)」「元請サイン記録(打設可)」でのみ再入力する(§3.4)。
+- 本人確認は「氏名(=userId)選択 + 4桁PIN」で **端末登録**し、以後は端末に保存した `deviceToken` のみで認証する(PIN不要)。PINは「職長の提出」「QA/責任者の合格(`verdict=ok`)」「元請サイン記録(打設可。出来形では出来形確認済)」でのみ再入力する(§3.4)。
 - **役割はサーバーの `Users.role` と `Assignments` だけで決まる**。リクエストに役割・ユーザーIDを載せても信用しない(そもそも契約に含めない。ユーザーは `deviceToken`→`Devices.userId` で決まる)。
 - セッション有効期限は設けない(トークンは失効操作まで有効)。紛失は責任者が端末登録解除(§3.7)。
 
@@ -630,7 +702,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 |---|---|
 | `submitRecord` | 常に必須(初回提出・再提出とも) |
 | `submitVerdict` | `verdict=ok` のときのみ必須(`minor`/`major` は不要) |
-| `recordPrimeSign` | 常に必須(=打設可の確定) |
+| `recordPrimeSign` | 常に必須(=打設可の確定。出来形の記録では出来形確認済の確定) |
 
 例外: `changePin` は現在のPINの確認が必須(封筒 `pin` に現在PIN、`params.newPin` に新PIN)。`registerDevice` はPINをparamsに持つ。
 
@@ -717,7 +789,7 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | saveQaDraft | × | ○ | ○ | claim者本人のみ。status=submitted |
 | submitVerdict | × | ○ | ○ | claim者本人のみ。status=submitted。`ok` は **PIN必須** |
 | recordPrimeSign | × | ○ | ○ | 担当QAまたは責任者。status=qa_ok。**PIN必須** |
-| stopPour | ○ | ○ | ○ | **その現場に有効な担当(職長は班を問わず)** または責任者。status∈{submitted,qa_ok,approved}。異常時は誰でも止められる。**他班(`masked`)の記録からも実行できる**(理由必須。内容は引き続きマスクのまま。応答・`actions` も masked 形) |
+| stopPour | ○ | ○ | ○ | **その現場に有効な担当(職長は班を問わず)** または責任者。status∈{submitted,qa_ok,approved}。異常時は誰でも止められる。**他班(`masked`)の記録からも実行できる**(理由必須。内容は引き続きマスクのまま。応答・`actions` も masked 形)。**`stage=pre_pour` の記録のみ**(版1.9。`post_demold` の記録では `STATE_CONFLICT`、`actions` にも入らない。§6.8) |
 | addNote | ○ | ○ | ○ | 職長=編集可能な自班記録(status∈{draft,fix})に `kind=foreman`。QA/責任者=担当現場の記録に `kind=manager`(status不問) |
 | uploadPhotoChunk | ○ | ○ | ○ | `side=self`: 編集可能な職長。`side=qa`: claim者(status=submitted)。`side=prime`: 担当QA/責任者(status=qa_ok) |
 | deletePhoto | ○ | ○ | ○ | 撮影者本人、かつ同一ラウンド、かつその side が編集可能な状態。削除済みの写真は `NOT_FOUND` |
@@ -732,7 +804,7 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | adminListUsers / adminIssueInvite / adminUnlockUser / adminSetUserStatus / adminRevokeDevice / adminSetAbsence / adminCancelAbsence / adminGetJoinInfo / adminRotateJoinKey / adminValidateRoster | × | × | ○ | 責任者のみ |
 
 重要な不変条件(テスト対象 §12):
-- 職長は **他現場**の記録を一覧・詳細・写真・PDFで見られない。他班の記録は `masked`(詳細・写真・コメントは見えない)。**唯一の例外として、同じ現場に有効な担当がある職長は、`masked` の記録に対して `stopPour` だけ実行できる**(`actions` に `stopPour` が入る。それ以外の action は不可)。
+- 職長は **他現場**の記録を一覧・詳細・写真・PDFで見られない。他班の記録は `masked`(詳細・写真・コメントは見えない)。**唯一の例外として、同じ現場に有効な担当がある職長は、`masked` の打設前(`pre_pour`)の記録に対して `stopPour` だけ実行できる**(`actions` に `stopPour` が入る。それ以外の action は不可。出来形の `masked` 記録の `actions` は常に空)。
 - QAは **担当外現場**の記録を claim/判定/元請サイン記録/PDF生成できない。
 - 職長は提出後(status∈{submitted,qa_ok,approved})に編集・写真追加・コメント追加ができない。`fix` のときだけ可。
 - `foremanNote`/`selfResult` 等の職長列は QA/責任者のいかなる action でも書き換えられない。QAのコメントは `qaNote`/`qaComment`/Notes(kind=manager)にのみ書かれる。Notes の行は更新・削除されない。
@@ -757,14 +829,14 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
    - `lead` → 常に有り。`qa` → 有効Assignment(`qa_main`/`qa_sub`)がある。`foreman` → 有効Assignment(`foreman`/`subforeman`)がある。
    - 有効Assignment = §2.3 の定義(active・期間内・役割整合)。
 5. 班スコープ(職長×記録。4と合わせて「範囲」): `record.ownerUserId == actor.userId` または(`actor` の当該現場の `team` が空でなく `record.team` と一致)でなければ `FORBIDDEN_TEAM`。ただし `stopPour`・`requestJoin` は班スコープを適用しない。
-6. 状態条件: §6 の遷移表の「from」に合わない → 編集系は `RECORD_LOCKED`、遷移系は `STATE_CONFLICT`(`error.data={status,round}`)。`params.round` を取るactionは現在の `round` と不一致でも `STATE_CONFLICT`。
+6. 状態条件: §6 の遷移表の「from」に合わない → 編集系は `RECORD_LOCKED`、遷移系は `STATE_CONFLICT`(`error.data={status,round}`)。`stopPour` の段階条件(`stage=pre_pour` のみ。版1.9)もここで評価し、満たさなければ `STATE_CONFLICT`。`params.round` を取るactionは現在の `round` と不一致でも `STATE_CONFLICT`。
 7. 個別条件: claim済み→`ALREADY_CLAIMED` / claim者でない→`NOT_CLAIMER`(未claimなら `NOT_CLAIMED`)/ 引き継ぎ不可→`TAKEOVER_NOT_ALLOWED` / `decideJoin` の不在条件 / `deletePhoto` の条件(他人の写真→`FORBIDDEN_TEAM`、別ラウンド・編集不可の状態→`RECORD_LOCKED`)。
 
 補助関数(同ファイルに置き、モックも同名で実装):
 - `isAbsent(userId, date)`: 有効な(`cancelledAt`空)Absencesに `dateFrom<=date<=dateTo` がある。
 - `effectiveQaMain(siteId)`: `qa_main` が不在なら有効な `qa_sub`(不在でない者)を「代行中」として扱う(表示と `decideJoin` の許可に使う)。
 - `canEditRecord(actor, record)`: 職長で `FORBIDDEN_TEAM` でなく status∈{draft,fix}。
-- `allowedActions(actor, record) -> string[]`: 記録に対して `authorize` が ok になる action 名の配列。対象は `saveDraft, submitRecord, claimReview, releaseClaim, takeoverReview, saveQaDraft, submitVerdict, recordPrimeSign, stopPour, addNote, uploadPhotoChunk, generateReport`。**`RecordSummary.actions` と `RecordDetail.actions` にそのまま返す**。PIN・入力検証など入力に依存する条件は含めない(権限と状態だけ)。`masked` の記録の `actions` は `stopPour` だけ(§5.1)。
+- `allowedActions(actor, record) -> string[]`: 記録に対して `authorize` が ok になる action 名の配列。対象は `saveDraft, submitRecord, claimReview, releaseClaim, takeoverReview, saveQaDraft, submitVerdict, recordPrimeSign, stopPour, addNote, uploadPhotoChunk, generateReport`。**`RecordSummary.actions` と `RecordDetail.actions` にそのまま返す**。PIN・入力検証など入力に依存する条件は含めない(権限と状態だけ)。`stopPour` は `stage=pre_pour` の記録でだけ含める(版1.9。`post_demold` では、誰に対しても・どの status でも含めない)。`masked` の記録の `actions` は `stopPour` だけ(§5.1)。
 - `escLevel(record, now)`(§6.4)、`computeTiming(record)`(§6.5)。
 
 ---
@@ -788,7 +860,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 ```
 (責任者は全現場。`myAssignRole`/`myTeam` は該当なしなら `null`。`qa.main` は有効な `qa_main` が無ければ `null`。)
 
-**Item**(`getBootstrap.items[]`。`active=TRUE` かつ `Config.enabledStages` の段階のみ)
+**Item**(`getBootstrap.items[]`。`active=TRUE` かつ `Config.enabledStages` の段階のみ。**複数の段階の項目が混ざって返る**(版1.9 の既定は打設前28+出来形8)ので、クライアントは **記録の `stage` で絞る**。§2.6)
 `{ "itemId","seq","stage","audience","groupKey","groupJa","groupId","textJa","textId","key":false,"tol":5|null,"measure":"none|optional|required","minMeasures":0,"unit":"mm" }`
 
 **RecordSummary**
@@ -806,7 +878,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
   "masked":false, "actions":["claimReview","stopPour","addNote"] }
 ```
 - `counts` は職長入力(`audience` が both/foreman の項目)、`qaCounts` はQA入力(both/qa)。`total` は対象項目数。
-- **masked 形**(職長が他班の記録を一覧したとき): `{recordId,siteId,floor,zone,lot,stage,status,team,updatedAt,version,"masked":true,"actions":[]}` のみ。それ以外のキーは含めない。**`actions` は `stopPour` が許される(同現場の有効な担当、かつ `status∈{submitted,qa_ok,approved}`)ときだけ `["stopPour"]`、それ以外は `[]`**(他のaction名は入れない)。`stopPour` の応答の `record` も、呼出者が他班の職長ならこの masked 形で返す。
+- **masked 形**(職長が他班の記録を一覧したとき): `{recordId,siteId,floor,zone,lot,stage,status,team,updatedAt,version,"masked":true,"actions":[]}` のみ。それ以外のキーは含めない。**`actions` は `stopPour` が許される(同現場の有効な担当、かつ `stage=pre_pour`、かつ `status∈{submitted,qa_ok,approved}`)ときだけ `["stopPour"]`、それ以外は `[]`**(出来形の記録は常に `[]`)(他のaction名は入れない)。`stopPour` の応答の `record` も、呼出者が他班の職長ならこの masked 形で返す。
 
 **ItemEntry**(`RecordDetail.items[]`)
 ```json
@@ -881,14 +953,14 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | FORBIDDEN_TEAM | 他班の記録/他人の写真 | × | |
 | NOT_FOUND | 対象IDなし(権限がなく存在を隠す場合も含む) | × | |
 | VALIDATION_FAILED | 入力不備 | × | `{violations:[{rule,itemId?,path?}]}`(§5.3.1) |
-| STATE_CONFLICT | 遷移できない状態/`round`不一致 | × | `{status,round}` |
+| STATE_CONFLICT | 遷移できない状態/`round`不一致/打設を止められない段階の記録(出来形への `stopPour`。版1.9) | × | `{status,round}` |
 | RECORD_LOCKED | 編集不可の状態(提出後等) | × | `{status}` |
 | ALREADY_EXISTS | 同一スロットの記録が既にある | × | `{recordId,mine}` |
 | ALREADY_CLAIMED | 先に確認中にされた | × | `{claimedBy,claimedByName,claimedAt}` |
 | NOT_CLAIMER | claim者ではない | × | `{claimedBy,claimedByName}` |
 | NOT_CLAIMED | 未claimで操作しようとした | × | |
 | TAKEOVER_NOT_ALLOWED | 引き継ぎ条件未達 | × | `{availableAt}` |
-| STAGE_NOT_ENABLED | 未有効の段階 | × | |
+| STAGE_NOT_ENABLED | 未有効の段階(`Config.enabledStages` に無い値・列挙外の値・その段階の有効項目が0件のときを含む。版1.9) | × | |
 | SITE_CLOSED | 閉鎖現場 | × | |
 | PHOTO_INVALID | 画像形式・ハッシュ・サムネ不備、`data` 文字数が上限超過(単発=`photoSingleMaxChars`、分割=`photoChunkChars`)、base64不正、デコード後バイト数と `bytes` の不一致、既存の同一 `photoId` と内容(`recordId`/`itemId`/`side`/`sha256`)または撮影者(`takenBy`)が食い違う | × | |
 | PHOTO_LIMIT | 項目あたり上限超過(ロック内で確定判定する) | × | `{max}` |
@@ -975,6 +1047,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 **getBootstrap** `{}` → `{ "user":<Me>, "sites":[<Site>], "items":[<Item>], "itemsHash":"<Itemsのactive行のSHA-256 hex>", "config":{ …公開設定 }, "serverTime" }`
 公開設定 `config` のキー(値は §2.14 の型。`photoParallel` のクライアント側の解釈は §8.4-0): `escalationMin1, escalationMin2, claimTakeoverMin, selfDeadlineHour, qaOpenHour, qaLeadMinutes, photoMaxEdge, photoJpegQuality, photoThumbEdge, photoMaxPerItem, photoChunkChars, photoSingleMaxChars, photoParallel, photoMaxBytes, enabledStages, pollIntervalSec, pinMaxFail, minClientVersion`。
 `sites` は見える現場のみ(職長/QA=有効担当あり、責任者=全て。`closed` も含む)。
+`items` は `active=TRUE` かつ `enabledStages` に含まれる段階の項目(**版1.9 の既定では36項目=打設前28+出来形8**。`seq` 昇順で段階が混ざる)。`itemsHash` もその全体から計算する。クライアントは記録(または作ろうとしている記録)の `stage` で絞る。
 
 #### 5.4.3 記録
 
@@ -985,16 +1058,23 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **getRecord** `{ "recordId" }` → `{ "record":<RecordDetail> }`。エラー: `NOT_FOUND` / `FORBIDDEN_SITE` / `FORBIDDEN_TEAM`(masked対象の詳細要求)。
 
-**createRecord** ★ Q `{ "recordId", "siteId", "floor", "zone"?:"", "lot", "stage":"pre_pour", "pourPlannedAt"?:"dt", "reinspectOf"?:"r_…" }` → `{ "record":<RecordDetail> }`(status=draft, round=1, `ownerUserId`=自分, `team`=自分の当該現場の班。項目行を作成時点の `active` 項目で生成)
+**createRecord** ★ Q `{ "recordId", "siteId", "floor", "zone"?:"", "lot", "stage":"pre_pour|post_demold", "pourPlannedAt"?:"dt", "reinspectOf"?:"r_…" }` → `{ "record":<RecordDetail> }`(status=draft, round=1, `ownerUserId`=自分, `team`=自分の当該現場の班。項目行を作成時点の `active` かつ `stage` 一致の項目で生成)
 エラー: `FORBIDDEN_SITE` / `SITE_CLOSED` / `STAGE_NOT_ENABLED` / `VALIDATION_FAILED`(`FIELD_INVALID`:floor/zone/lot/recordId形式) / `ALREADY_EXISTS`(`{recordId,mine}`。同一 `recordId` を同一ユーザーが再送した場合は冪等成功として扱う)/ **`STATE_CONFLICT`(`reinspectOf` を指定したが元記録の `status` が `approved` でない。`error.data={status,round}` は元記録の値。P-31)**。Events `record_created`。
+- **`stage`(版1.9)**: §0.2 の値。`Config.enabledStages` に無い値(`during_pour` 等・列挙外を含む)、またはその段階の `active` 項目が0件のときは `STAGE_NOT_ENABLED`(項目0件の記録を作らせない)。`pre_pour` と `post_demold` は、同じ現場・階・工区・ロットでも別の記録として1件ずつ作れる(§2.7。`ALREADY_EXISTS` は同じ段階の2件目だけ)。
+- **`pourPlannedAt`**: `stage=pre_pour` のときだけ保存する。`post_demold` で指定されても **エラーにせず保存しない**(空のまま。オフライン再送の古い内容を落とさないため)。`saveDraft` の `header.pourPlannedAt` も同じ。
 例:
 ```json
 {"v":1,"action":"createRecord","clientId":"c_0a1b2c3d4e5f6a7b8c9d","deviceToken":"…","appVersion":"1.0.0",
  "params":{"recordId":"r_8k2m4n6p8q0s2u4w","siteId":"s_a","floor":"2F","zone":"","lot":"L1","stage":"pre_pour","pourPlannedAt":"2026-10-08T09:00:00+09:00"}}
 ```
+出来形の例(`pourPlannedAt` は送らない):
+```json
+{"v":1,"action":"createRecord","clientId":"c_0a1b2c3d4e5f6a7b8c9e","deviceToken":"…","appVersion":"1.0.0",
+ "params":{"recordId":"r_9k3m5n7p9q1s3u5w","siteId":"s_a","floor":"2F","zone":"","lot":"L1","stage":"post_demold"}}
+```
 
 **saveDraft** ★ Q `{ "recordId", "header"?:{ "lot"?, "zone"?, "pourPlannedAt"?:"dt|null" }, "items"?:[<ItemPatch>] }` → `{ "record":<RecordSummary> }`
-- status∈{draft,fix}・編集権限(§4.1)。**部分更新**(指定した項目・キーのみ)。`siteId/floor/stage/recordId` は変更不可(指定→`BAD_REQUEST`)。完全性は検査しない(形式のみ)。
+- status∈{draft,fix}・編集権限(§4.1)。**部分更新**(指定した項目・キーのみ)。`siteId/floor/stage/recordId` は変更不可(指定→`BAD_REQUEST`)。`header.pourPlannedAt` は `stage=pre_pour` の記録だけ保存し、出来形では指定されても保存しない(エラーにしない。§6.8)。完全性は検査しない(形式のみ)。
 - 同一項目への書込は後勝ち(項目×列単位)。`selfUpdatedAt` を更新、`Records.updatedAt`/`version` を+1。Eventsには記録しない。
 - エラー: `NOT_FOUND` / `FORBIDDEN_SITE` / `FORBIDDEN_TEAM` / `RECORD_LOCKED`(`{status}`)/ `VALIDATION_FAILED`。
 例(items は変更分だけ):
@@ -1007,7 +1087,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 **submitRecord** ★ PIN `{ "recordId", "round" }` → `{ "record":<RecordSummary>, "warnings":["SELF_LATE"?] }`
 - status∈{draft,fix} かつ `round` 一致 → §5.3.1 の提出検査を **全て満たす**こと。成功: draft→submitted(初回)/ fix→submitted(再提出。`round+1`、`qa*` 列とQA判定列(`qaVerdict,qaVerdictBy,qaVerdictAt,qaComment,major`)・`claim*`・`stopped*`・`prime*` を空にし `escNotified=0`)。`submittedBy/At`=自分/今。初回は `firstSubmittedAt`。
 - 職長の項目コメント(空でないもの)を Notes に `kind=foreman, source=submit` で追記(提出ごと)。Events `submitted`/`resubmitted`(detail に項目結果。`late`)。
-- `warnings`: `SELF_LATE`(§6.5 の職長期限超過。提出は拒否しない)。
+- `warnings`: `SELF_LATE`(§6.5 の職長期限超過。提出は拒否しない。`stage=pre_pour` のみ。出来形では出ない)。
 - エラー: `NOT_FOUND`/`FORBIDDEN_SITE`/`FORBIDDEN_TEAM`/`STATE_CONFLICT`/`VALIDATION_FAILED`(violations全列挙)/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 - クライアントは提出前に、その記録のoutboxが空(全て送信済み)であることを確認する(§8.6)。
 
@@ -1024,16 +1104,17 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - claim者本人・status=submitted・`round`一致。§5.3.1 の判定検査を全て満たす。成功:
   - `ok` → status=`qa_ok`、`qaVerdict=ok`、`major=FALSE`。
   - `minor` → status=`fix`、`qaVerdict=minor`、`major=FALSE`。
-  - `major` → status=`fix`、`qaVerdict=major`、`major=TRUE`(**重大不適合=打設不可**)。責任者へ即時通知(§6.6)。
+  - `major` → status=`fix`、`qaVerdict=major`、`major=TRUE`(**重大不適合=打設不可**。出来形の記録では「承認に進めない(差し戻し)」の意味で、状態の動きは同じ。§6.8)。責任者へ即時通知(§6.6)。
   - 共通: `qaVerdictBy/At`=自分/今、`qaComment`=採用した総合コメント(上記。`comment` 指定があればその値、なければ保存済みの値)、`claimedBy/At` は `ok` では残し(判定者の記録)、`minor`/`major` では空にする。QAの項目コメント(空でないもの)と総合コメント(採用した値)を Notes に `kind=manager, source=verdict` で追記。Events `verdict_*`(detail に項目結果)。
-- `warnings`: `QA_BEFORE_OPEN`(§6.5の検査開始前)/ `QA_LATE`(§6.5のQA期限超過)。いずれも拒否しない。
+- `warnings`: `QA_BEFORE_OPEN`(§6.5の検査開始前)/ `QA_LATE`(§6.5のQA期限超過)。いずれも拒否しない。`stage=pre_pour` のみで、出来形では出ない。
 - エラー: `NOT_CLAIMER`/`NOT_CLAIMED`/`STATE_CONFLICT`/`VALIDATION_FAILED`/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 
 **recordPrimeSign** ★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordSummary> }`
-- status=`qa_ok` のみ。**3者サイン検査**: 職長提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
+- status=`qa_ok` のみ。**3者サイン検査**: 職長提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**。出来形の記録では **出来形確認済**。状態の値はどちらも `approved`。§6.8)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
 - エラー: `STATE_CONFLICT` / `VALIDATION_FAILED` / `PIN_*` / `FORBIDDEN_SITE`。
 
 **stopPour** ★ Q(高優先) `{ "recordId", "reason":"≤200文字" }` → `{ "record":<RecordSummary> }`
+- **対象の段階(版1.9)**: `stage=pre_pour` の記録のみ。`post_demold`(出来形)の記録に送ると `STATE_CONFLICT`(`error.data={status,round}`。状態・Events・通知は何も変えない)。出来形は打設の後の検査で、打設を止める意味がないため。
 - **異常時は誰でも止められる**: その現場の有効な担当者(職長は班を問わず)または責任者。status∈{submitted,qa_ok,approved} のとき → status=`fix`、`stopped=TRUE`、`stoppedBy/At/Reason`。**3者サインを無効化**(`prime*`・判定列・`claim*` を空に。履歴は Events/Notes に残る)。`draft`/`fix` の記録には不要(`STATE_CONFLICT`)。
 - **他班(`masked`)の記録でも実行できる**(班スコープを適用しない §4.2)。ただし呼出者が他班の職長のとき、応答の `record` は masked 形(§5.1)で、停止理由・項目・コメント等は返さない。`getRecord` は従来どおり `FORBIDDEN_TEAM`。
 - Events `stopped`(detail `{reason,previousStatus}`)。責任者・担当QAへ通知(§6.6)。再開は職長が是正→再提出→再度QA/元請の手順(§6.2 T8)。
@@ -1137,13 +1218,13 @@ PDF: `generateReport` `listReports`
 ## 6. ステータス遷移と時間ルール
 
 ### 6.1 状態
-`none`(記録なし=仮想)→ `draft`(入力中)→ `submitted`(確認待ち)→ `qa_ok`(QA合格・元請待ち)→ `approved`(打設可)。差し戻しは `fix`(是正中)。**これ以外のstatusを作らない**。「確認中」は status ではなく `claimedBy` で表す。「打設停止」は `stopped=TRUE` + `fix` で表す。
+`none`(記録なし=仮想)→ `draft`(入力中)→ `submitted`(確認待ち)→ `qa_ok`(QA合格・元請待ち)→ `approved`(打設可。**出来形の記録では「出来形確認済」と表示する**。状態の値はどちらも `approved`。§6.8)。差し戻しは `fix`(是正中)。**これ以外のstatusを作らない**。「確認中」は status ではなく `claimedBy` で表す。「打設停止」は `stopped=TRUE` + `fix` で表す。
 
 ### 6.2 遷移表(これ以外の遷移はサーバーが拒否)
 
 | # | from | to | action | 実行者 | 条件 | PIN | 主な副作用 |
 |---|---|---|---|---|---|---|---|
-| T1 | none | draft | createRecord | 職長(担当現場) | 現場active、スロット未使用、段階が有効 | 不要 | Records+RecordItems生成、Events `record_created` |
+| T1 | none | draft | createRecord | 職長(担当現場) | 現場active、スロット(現場・階・工区・ロット・段階)未使用、段階が有効(`enabledStages` に含まれ、有効項目が1件以上) | 不要 | Records+RecordItems生成、Events `record_created` |
 | T2 | draft / fix | 同じ | saveDraft | 職長(自班/自分) | 形式検査のみ | 不要 | `updatedAt`・`version`更新 |
 | T3 | draft | submitted | submitRecord | 職長(自班/自分) | §5.3.1 提出検査を全て満たす、`round`一致 | **要** | `firstSubmittedAt`/`submittedAt/By`、Notes追記(職長コメント)、Events `submitted` |
 | T4 | submitted | submitted | claimReview | 担当QA / 責任者 | 未claim、`round`一致。**先着のみ** | 不要 | `claimedBy/At`、Events `claimed` |
@@ -1151,14 +1232,14 @@ PDF: `generateReport` `listReports`
 | T6 | submitted | fix | submitVerdict(minor/major) | claim者 | 判定検査 OK、`round`一致 | 不要 | `major`(majorのみTRUE)、`claim*`を空に、Notes追記、Events `verdict_*`、majorは責任者へ即時通知 |
 | T8 | fix | submitted | submitRecord | 職長(自班/自分) | T3と同じ検査 | **要** | `round+1`、QA列・判定列・`claim*`・`stopped*`・`prime*` を空に、`escNotified=0`、Events `resubmitted` |
 | T9 | qa_ok | approved | recordPrimeSign | 担当QA / 責任者 | 3者サイン検査(職長提出・QA合格・元請担当者名) | **要** | `prime*`記録、Events `prime_signed` |
-| T10 | submitted / qa_ok / approved | fix | stopPour | その現場の担当者(職長は班不問) / 責任者 | 理由必須 | 不要 | `stopped=TRUE`、署名無効化(`prime*`・判定列・`claim*`を空に)、Events `stopped`、責任者・担当QAへ通知 |
+| T10 | submitted / qa_ok / approved | fix | stopPour | その現場の担当者(職長は班不問) / 責任者 | 理由必須。**`stage=pre_pour` の記録のみ**(出来形は不可。§6.8) | 不要 | `stopped=TRUE`、署名無効化(`prime*`・判定列・`claim*`を空に)、Events `stopped`、責任者・担当QAへ通知 |
 
 - `approved` は終端。`approved→fix` は T10(停止)のみ。`submitted→draft`(取り下げ)・`qa_ok→submitted` などは存在しない(提出後の職長編集不可を守るため。P-05と同系)。
 - **3者サイン** = ①職長の提出(T3/T8のPIN)、②QAの合格(T5のPIN)、③元請サイン記録(T9のPIN、元請担当者名+方法)。T9は①②③の充足をサーバーが検査する。重大(`major`)・`minor`判定は `fix` に落ちるため打設可にならない。
 - 重大不適合=打設不可: `qaVerdict=major` の記録は `fix`。是正→再提出→再度の合格→元請サインを経ないと `approved` にならない。`stopped=TRUE` も同様(T8で解除)。
 - T10 で `fix` に戻した記録の再提出時は、停止中だった事実を Notes/Events(`stopped`)が保持する。
 - 再検査(別レコード): `approved` になった記録について、打設延期等で再度検査が必要なとき、職長が `createRecord` で `reinspectOf=元recordId` を指定して新規レコードを作る(`round=1`から。P-31)。**元記録が `approved` でない(`draft`/`submitted`/`fix`/`qa_ok`)場合は `STATE_CONFLICT`**(是正は同一レコードの `round+1` で行う)。`fix` の是正再提出は **同一レコードの `round+1`**(別レコードにしない)。
-- 段階(`stage`)ごとに別レコード。v1は `pre_pour` のみ有効(P-10)。
+- 段階(`stage`)ごとに別レコード(版1.9: `pre_pour` と `post_demold`。P-10)。両段階とも T1〜T9 は同じで、違いは §6.8。
 
 ### 6.3 ステータスごとの編集可否まとめ
 
@@ -1171,7 +1252,7 @@ PDF: `generateReport` `listReports`
 | approved | **不可** | `addNote(manager)` のみ | |
 
 ### 6.4 エスカレーション(30分 / 60分)
-- 対象: `status=submitted` かつ `claimedBy` が空の記録。起点は直近の `submittedAt`。
+- 対象: `status=submitted` かつ `claimedBy` が空の記録。起点は直近の `submittedAt`。**段階を問わず同じ規則で働く**(版1.9: 出来形の記録にも適用する。提出後の無応答を見るだけで打設に関係せず、実装の変更は不要。§6.8)。
 - `escLevel(record, now)`:
   - `ref = (claimedAt があれば claimedAt、なければ now)`、`m = floor((ref - submittedAt) / 60秒)`。
   - `status≠submitted` → 0。`m >= escalationMin2(60)` → 2、`m >= escalationMin1(30)` → 1、それ以外 0。
@@ -1193,7 +1274,7 @@ PDF: `generateReport` `listReports`
 | selfLate | `firstSubmittedAt > selfDeadlineAt`(未提出なら `now > selfDeadlineAt`) |
 | qaLate | 判定済み: `qaVerdictAt > qaDeadlineAt` / 未判定: `now > qaDeadlineAt` |
 
-`pourPlannedAt` なし・他段階では4つの時刻は `null`、`selfLate`/`qaLate` は `false`。`submitRecord` の `warnings` に `SELF_LATE`(`selfLate`)、`submitVerdict` の `warnings` に `QA_BEFORE_OPEN`(`now < qaOpenAt`)と `QA_LATE`(`now > qaDeadlineAt`)を入れる。画面は期限超過を警告色で表示する。
+`pourPlannedAt` なし・他段階では4つの時刻は `null`、`selfLate`/`qaLate` は `false`。**出来形(`post_demold`)はこの「他段階」にあたり、時間ルールは一切適用しない**(版1.9。実装の変更は不要。§6.8)。`submitRecord` の `warnings` に `SELF_LATE`(`selfLate`)、`submitVerdict` の `warnings` に `QA_BEFORE_OPEN`(`now < qaOpenAt`)と `QA_LATE`(`now > qaDeadlineAt`)を入れる。画面は期限超過を警告色で表示する。
 
 - 引き継ぎ可能時刻: `takeoverReview`(担当QAによる)は `max(claimedAt, qaDraftAt) + claimTakeoverMin(30分)` 以降、または claim 者が当日不在登録中。責任者は常時可。
 - 重大不適合の報告(30分以内): `verdict=major` の保存と同時に責任者へ即時通知(§6.6)することでこの要件を満たす(P-25。責任者の確認ボタンは作らない)。
@@ -1201,7 +1282,7 @@ PDF: `generateReport` `listReports`
 
 ### 6.6 通知(v1はアプリ内表示+メール。Web Pushはv2。P-09)
 - **アプリ内**: 前景で `Config.pollIntervalSec` ごとに `listRecords`(`since`)と `listJoinRequests` をポーリング。QA/責任者のボード(S09)に「確認待ち(提出順)」「エスカレーション表示(30分超過/60分超過)」「重大不適合」「参加申請」を出す。タブのバッジに件数。
-- **メール**(`Users.email` があり `Config.mailEnabled=TRUE` のときのみ。`MailApp`。件名 `[型枠検査] {種別} {現場名} {階}`、本文は日本語・`appBaseUrl/#/record/{recordId}` へのリンクのみ(`requestJoin` は `appBaseUrl/#/joins`)。個人情報・PIN等を含めない。`{階}` は記録に紐づく通知のみ(`requestJoin` は記録がないので `[型枠検査] 参加申請 {現場名}`)。**`{種別}` の語は下表の「種別」列の文字列に固定**(`backend/Notify.gs` の `subject_`・`Records.gs`・`Membership.gs` の実装と一致。mock・テストも同じ語を使う):
+- **メール**(`Users.email` があり `Config.mailEnabled=TRUE` のときのみ。`MailApp`。件名 `[型枠検査] {種別} {現場名} {階}`、本文は日本語・`appBaseUrl/#/record/{recordId}` へのリンクのみ(`requestJoin` は `appBaseUrl/#/joins`)。個人情報・PIN等を含めない。`{階}` は記録に紐づく通知のみ(`requestJoin` は記録がないので `[型枠検査] 参加申請 {現場名}`)。**`stage=post_demold` の記録に紐づく通知は、件名の末尾に半角スペース+`出来形` を付ける**(版1.9。例 `[型枠検査] 提出 A現場(仮) 2F 出来形`)。打設前は付けない(従来どおり)。**`{種別}` の語は下表の「種別」列の文字列に固定**(`backend/Notify.gs` の `subject_`・`Records.gs`・`Membership.gs` の実装と一致。mock・テストも同じ語を使う):
 
 | 契機 | 種別(件名の `{種別}`) | 宛先 |
 |---|---|---|
@@ -1209,7 +1290,7 @@ PDF: `generateReport` `listReports`
 | escalate_30 | `30分経過` | 代行者 |
 | escalate_60 | `60分経過` | 責任者 |
 | verdict=major | `重大な不適合` | 責任者全員+その現場の担当QA(実行者除く) |
-| stopPour | `打設停止` | 責任者全員+その現場の担当QA(実行者除く) |
+| stopPour | `打設停止` | 責任者全員+その現場の担当QA(実行者除く)。打設前の記録のみ(出来形では起きない。§6.8) |
 | requestJoin | `参加申請` | 主担当QA(不在なら有効な代行者) |
 
 - 種別は上の6語のみ。**差し戻し(`minor`)・合格・打設可(`approved`)・再提出の区別ではメールを送らない**(再提出も `提出`。職長宛のメールは無いため)。語を足す・変えるときは本表を先に直す。
@@ -1219,6 +1300,29 @@ PDF: `generateReport` `listReports`
 ### 6.7 トリガー(`setupTriggers()` をエディタから手動実行して設置)
 - `escalationTick`: 5分ごと。
 - `dailyMaintenance`: 毎日 03:00 JST。`Idem` の30日超行の削除、期限切れ `Invites` の `expiresAt` 超過行へ `usedAt=expired` を記入。端末の定期整理はしない(登録上限超過時のみ自動整理 §2.5。P-34)。
+
+### 6.8 段階(stage)による違い(版1.9。ユーザー決定 2026-10-14)
+
+使う段階は `pre_pour`(打設前)と `post_demold`(出来形)の2つ(§0.2)。**出来形検査は打設前検査と同じ仕組みを再利用する**(流れ: 職長の自主検査 → 品質管理者の検査 → 元請に提出)。違いは下の表だけで、**表に無いことは両段階で完全に同じ**: 状態(`none`/`draft`/`submitted`/`fix`/`qa_ok`/`approved`)と遷移 T1〜T9、PIN再入力の3操作、差し戻し(`minor`/`major`)、提出後の職長編集不可、claim・引き継ぎ、職長コメントと管理者コメントの分離、元請サイン記録(3者サイン)、写真・図面、権限、エスカレーション。
+
+| 項目 | 打設前 `pre_pour` | 出来形 `post_demold` |
+|---|---|---|
+| 項目(§2.6) | `stage=pre_pour` の有効項目(版1.9: 28) | `stage=post_demold` の有効項目(版1.9: 8) |
+| 記録の単位(§2.7) | (現場,階,工区,ロット,段階)で1件 | 同じ。同じ現場・階・工区・ロットの打設前の記録とは別の行(状態・項目・版は互いに影響しない) |
+| 打設予定日時 `pourPlannedAt` | 提出時必須(P-06) | **使わない**。常に空(指定されても保存しない)。S05〜S08・PDFに欄を出さない。`POUR_PLAN_REQUIRED` も出ない |
+| 時間ルール(§6.5: 自主検査の締切・QA開始・QA期限、`SELF_LATE`/`QA_BEFORE_OPEN`/`QA_LATE`) | 適用 | **適用しない**(`computeTiming` は全て `null`/`false`、`warnings` なし。既存の「`pourPlannedAt` なし・他段階は null」の規則のとおりで、実装の変更は要らない) |
+| エスカレーション 30/60分(§6.4) | 適用 | **適用する**(提出後に誰も確認しない時間を見るだけで、打設に関係しないため。実装の変更は要らない) |
+| 打設を止める `stopPour`(T10) | できる | **できない**(`STATE_CONFLICT`。`actions` に出ない。他班の `masked` の行の `actions` も `[]`)。メール「打設停止」も起きない |
+| 最終状態 `approved` の表示名 | 打設可 | **出来形確認済**(状態の値・遷移・PINは同じ) |
+| 重大な不適合(`major`) | 打設不可(`fix` に差し戻し) | `fix` に差し戻し(承認に進めない)。画面に「打設」の語を出さない |
+| 画面・PDFに出さない語 | — | 「打設可」「打設を止める」「打設停止」「打設予定日時」(§9.4 の上書きキーで語を差し替える) |
+| PDF(§10) | 見出し「型枠工事 打設前検査記録」。ファイル名に「打設前」 | 見出し「型枠工事 出来形検査記録」。ファイル名に「出来形」。打設予定日時の行なし。`approved` のステータスは「出来形確認済」 |
+| メール件名(§6.6) | 従来どおり | 末尾に ` 出来形` |
+
+- **決め方(最小変更)**: 時間ルールとエスカレーションは、現行実装のまま成り立つ側を選んだ(時間ルールは `pourPlannedAt` が無いので自然に外れ、エスカレーションは段階を見ていない)。エスカレーションを出来形から外すには `escLevel`・`escalationTick`・画面に段階条件を足す必要があり、変更が大きくなる。
+- 出来形の `approved` を取り消す操作は無い(`stopPour` が使えないため)。誤って承認した場合は `reinspectOf` で再検査の記録を作る(P-31)。取消が要るかは §14.2 の13。
+- 出来形の作成条件に、同じスロットの打設前の状態は含めない(順序を縛らない)。
+- `during_pour`(打設中・管理項目表⑯)は保留。列挙値は残すが `enabledStages` に入れず、項目も作らない。
 
 ---
 
@@ -1256,7 +1360,7 @@ PDF: `generateReport` `listReports`
 {ルート}/
   photos/{siteId}_{現場名}/{階}/{YYYY-MM-DD}/{recordId}_{itemId|prime}_{side}_{photoId}.jpg
   thumbs/{photoId}.jpg
-  reports/{siteId}_{現場名}/{subject}_v{version}_{YYYYMMDD-HHmm}.pdf   (subject は §10.2a。禁止文字は Util.sanitizeName で置換)
+  reports/{siteId}_{現場名}/{subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf   (subject と段階名は §10.2a。禁止文字は Util.sanitizeName で置換)
 ```
 - フォルダ名は `\ / : * ? " < > |` を `_` に置換し前後空白を除き最大60文字。現場名が後で変わっても `siteId` 接頭辞でフォルダを特定する(`Sites.driveFolderId` に現場フォルダIDを保存。階・日付フォルダは「名前で探して無ければ作る」)。
 - 日付フォルダ = `takenAt`(検証後)のJST日付。工区はフォルダに含めない(ファイル名の `recordId` で特定)。
@@ -1299,7 +1403,7 @@ PDF: `generateReport` `listReports`
 
 **4. 表示**
 - S06/S10/S08 の「図面」欄にサムネを並べ、タップで M3(拡大。印が焼き込まれているのでそのまま見える)。自分が登録した図面は、編集可能な間だけ削除できる(§5.4.4 `deletePhoto`。送信中は削除×を無効にする点も検査写真と同じ)。
-- **番号**: 画面の項目番号(S06/S10/S08 の「番号」)=項目を `seq` 昇順に並べた1始まりの添字。現行の項目マスタは全項目が `audience=both` のため職長・管理者・PDFで同じ番号になる。将来 `audience` が分かれる場合は SPEC変更要望とする(P-40)。
+- **番号**: 画面の項目番号(S06/S10/S08 の「番号」)=**その記録の項目**を `seq` 昇順に並べた1始まりの添字(版1.9: 段階の違う項目は数えない)。現行の項目マスタは全項目が `audience=both` のため職長・管理者・PDFで同じ番号になる。将来 `audience` が分かれる場合は SPEC変更要望とする(P-40)。
 
 ---
 
@@ -1392,7 +1496,7 @@ PDF: `generateReport` `listReports`
 
 ### 8.8 下書き
 - 下書きは **現場ごと**に保持・表示する。S04(現場の階・スロット一覧)に「下書きあり」(`drafts` に `dirty=true` があるか `status=draft`)を出し、他現場の下書きは混ぜない。
-- 編集画面(S06)の上部には常に **現場名・階・工区・ロット** を固定表示する。確認画面(S07)にも現場・階・工区・ロット・打設予定日時を表示する。
+- 編集画面(S06)の上部には常に **現場名・階・工区・ロット** を固定表示する。確認画面(S07)にも現場・階・工区・ロット・段階(打設前のときは打設予定日時も)を表示する。
 - 入力の保存: 変更のたび(デバウンス500ms)と `visibilitychange`/`pagehide` で `drafts` に保存し、outboxへ `saveDraft` を積む(統合 §8.3)。アプリを閉じても復元できる。
 - サーバーの値で `drafts` を置き換える条件: その記録のoutbox行が0件のときのみ(未送信変更があるときは §8.7 のマージ)。
 
@@ -1431,15 +1535,15 @@ PDF: `generateReport` `listReports`
 | S00 | (起動) | 全員 | `me`,`getBootstrap` | スプラッシュ | トークン無→S01、`locked`→S02、それ以外→ホーム(職長S03/他S09)。保留の参加QR(`pendingJoin`)があればS13へ |
 | S01 | `#/register` | 未登録端末 | `lookupInvite`,`registerDevice` | ①招待コード(6桁)欄と「次へ」。②「○○さんですね」と確認し、③**会社名欄**(初期値=名簿の会社名。初回は必須)とPIN4桁(新規)を入力して「登録する」。氏名リストは出さない。「コードが違う/期限切れ」は責任者に再発行を依頼する案内 | 登録成功で `deviceToken` 保存→S00。エラーは `err.<CODE>`。`RATE_LIMITED` は待つ案内、`USER_LOCKED`→S02 |
 | S02 | `#/locked` | ロック中 | `me`(60秒ごと) | 「ロックされています。責任者に解除を依頼してください」 | 解除されたら自動で復帰。「この端末をログアウト」(`logoutDevice`) |
-| S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
-| S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
-| S05 | `#/site/:siteId/new` | 職長 | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(v1は「打設前」固定表示)、打設予定日時(`datetime-local`、提出時必須)、再検査のとき元記録の表示 | 「作成して入力へ」→`createRecord`(Q)→S06。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
-| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目をグループ見出し付きで列挙。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「図面を追加」ボタン・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
-| S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階・打設予定日時** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
-| S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5、「打設を止める」(`stopPour`)→M4、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
-| S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
-| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「図面を追加」・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
-| S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
+| S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数。**版1.9: `enabledStages` が複数のときは段階ごとの行にする**(`打設前 未着手 a / 是正中 b / 確認待ち c` と `出来形 …`。階数は段階ごとに数える)。有効な段階が1つだけのときは従来どおり段階名なしの1行)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
+| S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。**版1.9: 階のカードは段階ごとに分ける**(見出し=段階名 `stage.*` と、その段階の代表ステータスのチップ。代表ステータスは従来の階ごとの規則を、その段階の記録だけに適用する。記録の無い段階は「未着手」)。1つの階の「打設前」と「出来形」の状態が並んで見える。各記録の行にも段階名を出す。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05。S05 で段階を選べる。S04 から `?stage=` を渡して事前選択してもよい)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる(打設前の記録のみ。出来形では `actions` に出ない)。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
+| S05 | `#/site/:siteId/new` | 職長 | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(**版1.9: 「打設前」「出来形」から選ぶ**。選択肢は `config.enabledStages` に含まれ、かつ `getBootstrap.items` にその段階の項目が1件以上ある段階。既定は打設前。選択肢が1つだけなら選択欄を出さず固定表示。出来形を選ぶと説明 `scr.S05.stage_hint_post_demold` を出す。出来形では、同じ階・工区の打設前の記録の打設箇所(ロット)を候補に出してよい(推奨。入力の手間を減らすだけで、APIと一意制約は変えない))、打設予定日時(`datetime-local`。**打設前のときだけ**表示し、提出時必須。出来形では欄も `scr.S05.plan_hint` も出さない)、再検査のとき元記録の表示(段階は元記録の段階に固定) | 「作成して入力へ」→`createRecord`(Q。`stage` は選んだ段階。出来形では `pourPlannedAt` を送らない。オフラインで作る仮の記録の項目は `getBootstrap.items` を **選んだ段階で絞って** 作る)→S06。同じ階・工区・ロットでも段階が違えば別の記録なので `ALREADY_EXISTS` にならない。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
+| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**(打設予定日時の入力欄は打設前だけ。版1.9)、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目を `seq` 昇順にグループ見出し付きで列挙(`groupKey` が変わるたびに見出し。§2.6.1a)。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「図面を追加」ボタン・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
+| S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階(打設前のときは打設予定日時も)** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
+| S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大。**`approved` の表示名は段階で決まる**: 打設前=打設可、出来形=出来形確認済。§6.8)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色。出来形では全て `null` なので欄ごと出さない)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5(語は段階で変わる)、「打設を止める」(`stopPour`)→M4(`actions` に `stopPour` がある=打設前の記録のみ。出来形には出ない)、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
+| S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人。②③④の各行に段階名)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド(**版1.9: 1つの階のセルに段階ごとのチップを並べる**。段階名つきで `打設前 確認待ち` / `出来形 未着手` のように出す。段階内の代表ステータスは S04 と同じ規則)。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
+| S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット・段階、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「図面を追加」・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信(`major` の確認文は、出来形では「打設」の語を含まない `scr.S10.confirm_major@post_demold`)。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
+| S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・段階・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
 | S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17 |
 | S13 | `#/join?site=&k=&n=` | 職長 | `requestJoin` | 「『{n}』に参加申請しますか」。承認後に有効になる旨 | 「申請する」→`requestJoin`→「承認待ち」表示。未登録端末は `pendingJoin` を保存しS01→登録後ここへ戻る。アプリ内読み取り(`BarcodeDetector`対応端末)と、URL/合言葉の貼り付け入力の両方を用意。標準カメラでQRを読んでURLを開く方法も案内(P-27) |
 | S14 | `#/joins` | QA・責任者 | `listJoinRequests`,`decideJoin`,`revokeMembership` | 全申請(状態別)。承認済みの取消(理由必須) | S09の参加申請から「すべて見る」で遷移 |
@@ -1457,8 +1561,8 @@ PDF: `generateReport` `listReports`
 | M1 | PIN入力(4桁・数字キーボード・`type=password`)。誤り→「あと{remaining}回」。`USER_LOCKED`→S02。送信中はボタン無効 |
 | M2 | アプリ内カメラ(全画面。シャッター・撮り直し・使う・枚数表示・スタンプのプレビュー。§7.1) |
 | M3 | 写真拡大(`getPhoto`、スタンプ文字列、閉じる) |
-| M4 | 打設停止(理由必須テキスト、大きい赤ボタン。圏外では「送信待ちになります。至急電話で連絡」)。`masked`(他班)の記録から開いたときは、現場・階・ロット・班名だけを表示し、記録の内容は出さない |
-| M5 | 元請サイン記録(担当者名・方法 paper/pdf/onsite・証跡写真(任意)→PIN入力M1→`recordPrimeSign`) |
+| M4 | 打設停止(**打設前の記録だけ**。出来形からは開かない。理由必須テキスト、大きい赤ボタン。圏外では「送信待ちになります。至急電話で連絡」)。`masked`(他班)の記録から開いたときは、現場・階・ロット・班名だけを表示し、記録の内容は出さない |
+| M5 | 元請サイン記録(担当者名・方法 paper/pdf/onsite・証跡写真(任意)→PIN入力M1→`recordPrimeSign`)。説明文の語は段階で変わる(出来形は「出来形確認済」。`scr.M5.desc@post_demold`) |
 | M6 | 元請提出用PDF(`generateReport`の進捗→版・URL・「共有」(`navigator.share`、無ければリンクコピー)・「開く」・過去版一覧) |
 | M7 | 汎用確認ダイアログ |
 | M8 | 招待コード表示(コード・有効期限・「再表示できません」) |
@@ -1480,9 +1584,9 @@ PDF: `generateReport` `listReports`
 | `nav.*` | タブ・戻る | `nav.home`,`nav.board`,`nav.history`,`nav.roster`,`nav.admin`,`nav.settings`,`nav.back` |
 | `role.*` | 役割 | `role.foreman`=職長/Mandor、`role.qa`=品質管理者/Pengawas mutu、`role.lead`=管理責任者/Penanggung jawab |
 | `assign.*` | 担当の役 | `assign.qa_main`,`assign.qa_sub`,`assign.foreman`,`assign.subforeman` |
-| `st.*` | ステータス | `st.none`=未着手、`st.draft`=入力中、`st.submitted`=確認待ち、`st.fix`=是正中、`st.qa_ok`=元請待ち、`st.approved`=打設可(idはプロトタイプの訳を流用) |
+| `st.*` | ステータス | `st.none`=未着手、`st.draft`=入力中、`st.submitted`=確認待ち、`st.fix`=是正中、`st.qa_ok`=元請待ち、`st.approved`=打設可(idはプロトタイプの訳を流用)。**出来形の記録の `approved` だけ `st.approved@post_demold`=出来形確認済**(下の「段階別の上書きキー」) |
 | `badge.*` | 補助バッジ | `badge.stopped`=打設停止中、`badge.major`=重大不適合、`badge.draft_local`=下書きあり、`badge.masked`=他班が入力中 |
-| `stage.*` | 段階 | `stage.pre_pour` … |
+| `stage.*` | 段階(版1.9) | `stage.pre_pour`=打設前/Sebelum pengecoran、`stage.post_demold`=出来形/Hasil pekerjaan(値を「脱型後出来形」から変更)。`during_pour`・`demold`・`cleanup` の語は辞書に残す(使わない)。一覧・ボード・履歴・詳細のチップに `t('stage.'+stage)` を出す |
 | `result.*` / `sev.*` / `verdict.*` | 結果・重さ・判定 | `result.ok`,`result.ng`,`result.na` / `sev.minor`,`sev.major` / `verdict.ok`=合格、`verdict.minor`=軽微な不適合、`verdict.major`=重大な不適合 |
 | `method.*` | 元請サイン方法 | `method.paper`,`method.pdf`,`method.onsite` |
 | `ev.*` | 履歴ラベル(Events.kind と1対1) | `ev.submitted`,`ev.verdict_major`,… |
@@ -1495,12 +1599,25 @@ PDF: `generateReport` `listReports`
 | `photo.*` `outbox.*` `admin.*` `pin.*` `time.*` | 各機能の文言 | `time.min_ago`=「{n}分前」 |
 | `drawing.*` | 図面(§7.7)の文言(版1.6) | `drawing.add`=図面を追加、`drawing.title`=図面、`drawing.pick_item`=番号を選んでタップ、`drawing.delete_mark`、`drawing.undo`、`drawing.save`、`drawing.zoom`、`drawing.rotate`、`drawing.hint`(=確認した箇所の番号を図面に書き込みます)。`err.drawing_unreadable` も追加 |
 
+- **段階別の上書きキー(版1.9)**: 出来形の記録だけ語を変えたいときは、基キーに `@<stage>` を付けた上書きキーを辞書に置く(ja/id の両方)。API `ts(key, stage, params?)`: `stage` が空でなく `<key>@<stage>` が辞書にあればそれ、無ければ `t(key, params)`。ステータスチップ・ボタン・トースト・履歴ラベル・確認文で `approved` や元請サインの語を出すときは、その記録の `stage` を渡す。上書きキーは当面 `@post_demold` だけ:
+
+| 基キー(現行の ja) | `@post_demold` の ja | id(暫定訳) |
+|---|---|---|
+| `st.approved`(打設可) | 出来形確認済 | Hasil pekerjaan terkonfirmasi |
+| `ev.prime_signed`(元請サインを記録。打設可) | 元請サインを記録。出来形確認済 | Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi |
+| `act.prime_sign`(元請サインを記録(打設可にする)) | 元請サインを記録(出来形確認済にする) | Catat tanda tangan kontraktor (hasil pekerjaan terkonfirmasi) |
+| `msg.prime_signed`(元請サインを記録しました。打設可です) | 元請サインを記録しました。出来形確認済です | Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi |
+| `scr.M5.desc`(…PIN確認で打設可になります。) | 元請の確認を受けた内容を記録します。PIN確認で出来形確認済になります。 | Catat hasil konfirmasi kontraktor. Dengan PIN, status menjadi hasil pekerjaan terkonfirmasi. |
+| `scr.S10.confirm_major`(…打設はできません。…) | 重大な不適合として差し戻します。よろしいですか | Dikembalikan sebagai ketidaksesuaian berat. Lanjutkan? |
+| `scr.S09.major`(重大不適合・打設停止中) | 重大不適合 | Ketidaksesuaian berat |
+
+- 版1.9 で足す通常のキー: `scr.S05.stage_hint_post_demold`=「出来形検査は、脱型・解体のあとに行う検査です。打設予定日時は要りません」/ id「Pemeriksaan hasil pekerjaan dilakukan setelah bongkar bekisting. Rencana waktu pengecoran tidak diperlukan」。段階名の表示は既存の `stage.*`、ステータスは `st.*`、`lbl.stage` を使う(段階とステータスを並べる表示は `t('stage.x')` と `t('st.y')` をつなげて作る)。
 - 項目マスタ・グループ名は辞書ではなくマスタ列を使う: `lang==='id' ? textId : textJa`、`groupJa/groupId`。
 - 言語の決定: ログイン後は `Me.lang`、未ログインは `kv.lang`、なければ `navigator.language` が `id` で始まれば `id`、それ以外 `ja`。ヘッダの言語ボタンで即時切替(再描画)し、`kv.lang` に保存、オンラインなら `setLang`(失敗しても無視)。
 - 日時表示は言語に依らず `MM/DD HH:mm`(JST固定)。経過は `time.min_ago`/`time.hour_ago`。
 - **インドネシア語は暫定訳**(P-22)。辞書に `meta.idProvisional=true` を置き、設定画面に注記を出す。prototype の `L.id`(現行の暫定訳)を土台にキー名だけ新体系へ移す。
 - インドネシア語は日本語より長くなる(目安+30%)ため、固定幅・`white-space:nowrap`・省略(`…`)で意味が欠けないこと。ボタン・チップは折り返し可、`min-width:0`。**日本語/インドネシア語の両方で375px幅の全画面を検査する**(§12 E-07/E-08)。
-- 辞書の不変条件(テストで検査): `Object.keys(ja)` と `Object.keys(id)` が完全一致/値が空でない/コードが参照する `t('…')` のキーが全て存在/`err.*` は §5.3 の全コード、`rule.*` は §5.3.1 の全rule、`ev.*` は §2.11 の全kind、`st.*` は6値。
+- 辞書の不変条件(テストで検査): `Object.keys(ja)` と `Object.keys(id)` が完全一致/値が空でない/コードが参照する `t('…')` のキーが全て存在/`err.*` は §5.3 の全コード、`rule.*` は §5.3.1 の全rule、`ev.*` は §2.11 の全kind、`st.*` は6値。**版1.9**: `@` を含むキー(段階別の上書きキー)は、この網羅検査の数え上げから除く。ただし `@<stage>` キーは基キーが存在し、ja/id の両方にあること。
 
 ---
 
@@ -1513,8 +1630,8 @@ PDF: `generateReport` `listReports`
 
 ### 10.2 内容(日本語のみ。A4縦、余白12mm)
 0. **件名 `subject`**(§10.2a)。PDFの1ページ目の見出し(タイトルの直下)に大きく表示し、HTMLの `<title>` にも同じ文字列を入れる。
-1. タイトル「型枠工事 {段階名}検査記録」。
-2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(記録の `ownerCompany`。空なら作成者の現在の `company`、それも空なら項目ごと出さない。版1.7/1.8)**、階・工区・打設ロット、段階、打設予定日時、記録ID、ステータス(生成時点)、提出ラウンド数、生成日時、版(`v{n}`)。
+1. タイトル「型枠工事 {段階名}検査記録」。**段階名**(日本語のみ): `pre_pour`=「打設前」、`post_demold`=「出来形」(例「型枠工事 出来形検査記録」)。
+2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(記録の `ownerCompany`。空なら作成者の現在の `company`、それも空なら項目ごと出さない。版1.7/1.8)**、階・工区・打設ロット、段階、打設予定日時(**打設前のみ**。出来形は行ごと出さない)、記録ID、ステータス(生成時点。**表示名は段階で決まる**: `qa_ok`=「元請待ち」、`approved` は打設前=「打設可」・出来形=「出来形確認済」。§6.8)、提出ラウンド数、生成日時、版(`v{n}`)。
 3. **3者サイン欄**: 職長(**会社名**・氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(**会社名**・氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(差mm/許容)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。折り返し・行の高さ・列幅は §10.2b-A(版1.5.3)。
@@ -1526,7 +1643,8 @@ PDF: `generateReport` `listReports`
 ### 10.2a 件名(subject)とファイル名(版1.5.2。ユーザー決定)
 - `subject = {現場名} {階}` + (`zone` が空でなければ ` {工区}`) + ` {打設箇所(lot)}`。**半角スペース1つ区切り**。各要素は記録の値をそのまま使う(前後空白は除く)。
   - 例: 現場「奥沢中学校」・階「基礎」・工区なし・lot「L2」→ `奥沢中学校 基礎 L2` / 現場「Jビル赤坂」・階「1F」・工区「東工区」・lot「L1」→ `Jビル赤坂 1F 東工区 L1`。
-- **PDFファイル名** = `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(日時はJST・生成時刻)。`subject` 部分に `Util.sanitizeName`(§7.4 のフォルダ名と同じ置換: `\ / : * ? " < > |` を `_`、前後空白除去、最大60文字)を適用する。従来の `{recordId}_v...` 形式は廃止(`recordId` はPDF本文・フッタに残る)。同名ファイルがあっても別ファイルとして保存する(`version` と生成時刻で通常は重ならない)。保存先フォルダは変更なし。
+- **PDFファイル名** = `{subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf`(日時はJST・生成時刻。**版1.9: 段階名=「打設前」または「出来形」を subject の次に入れる**。同じ現場・階・工区・ロットの打設前と出来形のPDFを名前で区別するため。`subject` 自体は変えない。版1.9 より前に作ったPDFの名前は変わらない)。`subject` 部分に `Util.sanitizeName`(§7.4 のフォルダ名と同じ置換: `\ / : * ? " < > |` を `_`、前後空白除去、最大60文字)を適用する。従来の `{recordId}_v...` 形式は廃止(`recordId` はPDF本文・フッタに残る)。同名ファイルがあっても別ファイルとして保存する(`version` と生成時刻で通常は重ならない)。保存先フォルダは変更なし。
+  - 例(版1.9): `奥沢中学校 基礎 L2_打設前_v1_20261014-0930.pdf` / `奥沢中学校 基礎 L2_出来形_v1_20261020-1500.pdf`。
 - `Reports` の列・`Report` 応答(§5.1)・API契約は変更なし(`subject` は応答に含めない。PDF名とPDF本文のみ)。
 
 ### 10.2b レイアウト詳細(版1.5.3。ユーザー決定。項目5・7の具体化。API契約・列名は変更なし)
@@ -1569,7 +1687,7 @@ PDF: `generateReport` `listReports`
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
 2. インラインCSSのみのHTML文字列を組み立てる(**レイアウトは table と固定サイズのみ。§10.2b**。`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
 3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む(`kind=photo` のみ。図面は §10.2c で本体を埋め込む。写真ページの60枚上限・並びに図面を含めない)。
-4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
+4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
 5. `reports/{siteId}_{現場名}/` に保存。`Config.pdfShareMode=anyone_with_link` なら `file.setSharing(ANYONE_WITH_LINK, VIEW)`、`private` なら共有しない(P-32)。`url = file.getUrl()`。
 6. PDF本体の SHA-256 を計算し `Reports` に追記(`version` = その記録の既存最大+1)。Events `report_generated`。応答 `Report`(§5.1)。
 7. タイムアウト目安120秒。写真が多い場合は上記60枚上限で抑える。
@@ -1595,13 +1713,14 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 ### 11.3 ロジック(§1.6のdispatcher順を同一に実装)
 - 全43 actionを実装し、権限(§4。`authorize` と同名関数)・検証(§5.3.1)・状態遷移(§6)・エラーコード/`error.data`(§5.3)を本書通りに返す。
+- **段階(版1.9。§6.8)**: `createRecord` は `enabledStages` に無い値・その段階の有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は `pre_pour` のみ保存。`stopPour` と `allowedActions` の `stopPour` は `stage=pre_pour` のみ(出来形は `STATE_CONFLICT`)。`computeTiming` は `post_demold` で全て `null`/`false`(`warnings` なし)。エスカレーションは段階を見ない。メール件名は出来形のとき末尾に ` 出来形`。PDFは段階名・ステータス表示名・打設予定日時の有無が §10 のとおり。
 - **ロック**: 更新系は1本のFIFOミューテックスで直列化し、「冪等キー確認→authorize→PIN→更新→Events→Idem保存」を原子的に行う(同時claimで先着のみ成功する)。`--latency` は直列化の前に適用する(並行到着を再現)。**例外 `uploadPhotoChunk`(版1.4)**: 認証・検証・仮想Drive保存はミューテックスの **外**、再認証〜既存行確認〜上限確認〜Photos追記〜touchだけをミューテックスの **内** で行い(§5.4.4)、ミューテックスの前後で必ずイベントループに制御を返す(`await`)こと(別リクエストが間に割り込める。`/__mock/interleave` もこの境界で適用する)。仮想Driveに作ったファイルは、ロック内で `Photos` 行にならなかった場合に削除(ゴミ箱扱い)する。
 - **冪等キー**: §5.2 通り(`replayed:true`、`IDEMPOTENCY_CONFLICT`、RecordDetail系の再構築)。
 - **PIN/トークン**: §3 通り。`pinHash`/`tokenHash` は同アルゴリズムで保持(ペッパー=`mock-pepper`)。状態ダンプ(`/__mock/state`)に `pinHash`/`pinSalt`/`tokenHash`/招待`codeHash` を出さない。
 - **時計**: すべての時刻・期限・エスカレーションはモックの仮想時計 `now()` を使う(初期値=起動時の実時刻。`/__mock/clock` で変更)。`meta.serverTime` も仮想時計。
 - **エスカレーション**: `escalationTick` を **各リクエスト処理の直前に遅延実行**し、`/__mock/tick` でも実行可。送信メールは送らず記録だけ(`/__mock/mails`)。
 - **写真**: 単発(`total=1`)はキャッシュを使わず、1リクエストで §5.4.4 の検証→「仮想Drive」(メモリのMap。パスは§7.4の構造)に保存→ロック内で Photos 追記。分割は、チャンクをメモリのキャッシュ(仮想時計で6時間TTL。`/__mock/evictChunks` で全消去)に保存し、最終チャンクで検証→仮想Driveに保存。仮想Driveの作成・削除は `lockHeld` 付きで履歴に残す(`/__mock/driveLog`)。`/__mock/drive` は **削除(ゴミ箱)されていない** ファイルの一覧。`getPhotoThumbs`/`getPhoto` は保存したバイト列を `data:` URLで返す。参照シートのキャッシュ(§2.15)はモックでは実装しなくてよい(常に最新を返すのは契約に適合する)。
-- **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status}` の行を含む、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信(`{名前}` は §10.2a のファイル名。日本語を含むので `url` は `encodeURIComponent` した形、配信側は復号して照合)、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
+- **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status} stage={stage}` の行を含む(版1.9: 末尾に段階を付ける)、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信(`{名前}` は §10.2a のファイル名。日本語を含むので `url` は `encodeURIComponent` した形、配信側は復号して照合)、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
 - **メール**: 送らず `mails` 配列に `{to,subject,body,at}` を追記(§6.6の宛先規則通り)。
 - **Idem/Events/Notes**: 追記専用の挙動(更新・削除しない)を本物と同じに。
 
@@ -1657,7 +1776,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 (Memberships は上記職長3行を `approved` で用意。承認者は各現場の `qa_main`。)
 → 見える現場: 田中=s_a,s_b / スギアント=s_b,s_c / 佐藤=s_a,s_b(**s_c は担当外**)/ 鈴木=s_c(主)・s_a,s_b(代行)/ 責任者=全て。
 
-**Records**(`stage=pre_pour`、`lot=L1`、項目は16の `active` 項目。`pourPlannedAt`=reset時の翌日09:00 JST。ID は右列)
+**Records**(`stage=pre_pour`、`lot=L1`、項目は i1〜i16 の16項目(**版1.9より前に作られた記録として扱い、i58〜i69 は持たない。シードの記録は変えない**)。`pourPlannedAt`=reset時の翌日09:00 JST。ID は右列)
 
 | recordId | 現場/階(工区) | status | 作成者 | 内容 |
 |---|---|---|---|---|
@@ -1671,7 +1790,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 - 写真はテスト用の小さなJPEG(`tests/fixtures/sample.jpg`。5KB未満、有効なJPEG)を全て共有してよい。
 - `escNotified` は全て0(`/__mock/tick` で `escalate_30`/`escalate_60` が生成される)。
-- 不在登録なし。Config は §2.14 の既定。Items は §2.6.1(i1〜i49の49行。16有効+33無効)。Notes/Events はこの状態を説明する最小限(各記録の `record_created`・提出・判定等)を整合するように用意。
+- 不在登録なし。Config は §2.14 の既定(`enabledStages` は `pre_pour,post_demold`)。Items は §2.6.1・§2.6.1a(i1〜i69の69行。36有効(打設前28+出来形8)+33無効)。**シードに出来形(`post_demold`)の記録は入れない**(既存テストの件数を変えないため。出来形のテストは `createRecord` で作る)。Notes/Events はこの状態を説明する最小限(各記録の `record_created`・提出・判定等)を整合するように用意。
 
 ---
 
@@ -1682,7 +1801,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - ユニットテスト(`tests/unit/*.test.js`): フロントの純関数(`validate.js`・outboxの統合/バックオフ/送信可否規則・`time.js`・単発/分割の選択とチャンク分割・スタンプ文字列・i18n)とmock/harness共通の純関数(canonicalJSON・ハッシュ)。
 - E2E(`tests/e2e/*.spec.js`。**`playwright` 本体(`chromium` API)+ `node:test`(`node --test`)で実行し、`@playwright/test` と `playwright.config.js` は使わない**。`tests/package.json` の devDependency は `playwright` のみ。**ブラウザ未導入環境では `npx playwright install chromium` が必要**(環境メモ))。静的サーバー(`tests/helpers/static-server.js`)で `frontend/` を配り、`config.js` の `API_URL` をmock(またはharness)へ向ける。Chromium起動引数 `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`、モバイル(375×667、`isMobile`、`hasTouch`)、ロケールja-JP/id-IDの両方。**コンソールエラー・未処理例外・失敗リクエスト(想定外)があれば全テストで失敗**とする共通フィクスチャ。
 - 構文: `tests/check-syntax.js` が `backend/*.gs`(一時`.js`コピー)・`frontend/**/*.js`・`mock/**/*.js`・`tests/**/*.js` に `node --check`。
-- **SPEC同期** `tests/spec-sync.test.js`: SPEC.md から §5.5の action名・§5.3のエラーコード・§5.3.1のrule・§2.14のConfigキー・§2の全シート列名・§2.6.1の項目を抽出し、`/__mock/meta`、`backend/Schema.gs`+`Seed.gs`+`Code.gs`(vmで評価)、`frontend/i18n.js` のキー(`err.*`/`rule.*`/`ev.*`/`st.*`)と一致することを検査する(= 「実装がSPECと一致」)。
+- **SPEC同期** `tests/spec-sync.test.js`: SPEC.md から §5.5の action名・§5.3のエラーコード・§5.3.1のrule・§2.14のConfigキー・§2の全シート列名・§2.6.1・§2.6.1aの項目を抽出し、`/__mock/meta`、`backend/Schema.gs`+`Seed.gs`+`Code.gs`(vmで評価)、`frontend/i18n.js` のキー(`err.*`/`rule.*`/`ev.*`/`st.*`)と一致することを検査する(= 「実装がSPECと一致」)。
 - 実行: `node tests/run-all.js`(構文→unit→mock起動→contract(mock)→harness起動→contract(harness)→E2E(mock)→E2E(harness)。いずれか失敗で非0)。
 
 ### 12.2 完了の定義 → テスト対応表
@@ -1701,6 +1820,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | コンソールエラー0、`node --check`、テスト全通過 | 共通フィクスチャ, `check-syntax.js`, `run-all.js` |
 | 写真送信の高速化(単発・並行・ロック範囲・参照キャッシュ。版1.4) | C-PHOTO-01,03,07〜12, C-CONC-04,05, C-CACHE-01,02, U-PHOTO-03, U-OUTBOX-04, E-13 |
 | 写真送信・応答時間の性能目標(版1.5。**自動テストではなく手動確認**) | §12.6(実GASで手動。`run-all.js` の対象外) |
+| 段階(打設前/出来形)をまたいだ記録の分離、出来形に打設可/打設を止める操作が出ない、項目の絞り込み、`enabledStages` 既定(版1.9) | C-STAGE-01〜06, C-ITEM-01〜03, U-SEED-01, U-I18N-01, E-15 |
 | 実装がSPECと一致 | `spec-sync.test.js` |
 
 ### 12.3 契約テスト(C-)
@@ -1745,8 +1865,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-STATE-04(不正遷移): submittedへの `submitRecord`、draftへの `claimReview`/`submitVerdict`/`recordPrimeSign`、submittedへの `recordPrimeSign`、`round` 不一致 → `STATE_CONFLICT`/`RECORD_LOCKED`(`error.data.status`)。
 - C-STATE-05(提出検査。職長 `submitRecord` のみ。`PHOTO_REQUIRED` はここだけで検査する): 未回答・NGの写真/備考欠落・重点項目okの写真欠落・許容超えok・`pourPlannedAt` なし → `VALIDATION_FAILED` で **violationsが全て列挙**(`ANSWER_MISSING`,`PHOTO_REQUIRED`,`NOTE_REQUIRED`,`MEASURE_OVER_TOL_OK`,`POUR_PLAN_REQUIRED`,`MEASURE_REQUIRED`)。データ駆動(`tests/fixtures/validation-cases.json`。ユニットと共用)。
 - C-STATE-06(判定検査): `ok` でQAにNGあり→`VERDICT_OK_WITH_NG`、`minor` でNGなし→`VERDICT_NEEDS_NG`、`major` で重大項目なし→`VERDICT_MAJOR_NEEDS_MAJOR_ITEM`、`minor` に重大項目→`VERDICT_MINOR_HAS_MAJOR_ITEM`、`minor/major` でコメントなし(`comment` 未指定かつ保存済み `qaComment` も空)→`COMMENT_REQUIRED`、`saveQaDraft` で `comment` を保存済みなら `submitVerdict` で `comment` 未指定でも成功し、`qaComment` と Notes にその値が入る、QA未回答→`ANSWER_MISSING`、QAのNGで備考/重さ欠落→`NOTE_REQUIRED`/`SEVERITY_REQUIRED`(**写真が無くても通る**。QA側で `PHOTO_REQUIRED` は返らない。NGでも `key` 項目のokでも `side=qa` の写真0枚で `submitVerdict` が成功することを必ず確認する。版1.5.1)。
-- C-STATE-07(打設停止): `approved` を田中(他班の職長でも同現場なら可)が `stopPour`→`fix`・`stopped=TRUE`・署名無効(`prime`/判定が空)。**他班の職長(`masked` の記録)の `listRecords` 行は `actions=["stopPour"]` で、`stopPour` は成功し応答 `record` は masked 形、同じ職長の `getRecord` は `FORBIDDEN_TEAM` のまま**。他現場の職長は `FORBIDDEN_SITE`、`draft` へは `STATE_CONFLICT`、理由なし→`REASON_REQUIRED`。停止後に是正・再提出・再合格・元請サインを経て初めて `approved`。
-- C-STATE-08(スロット): 同一(現場,階,工区,ロット,段階)の2件目→`ALREADY_EXISTS`。`approved` 記録には `reinspectOf` 付きでのみ追加可。`reinspectOf` の元記録が `approved` でなければ(例 `fix`/`qa_ok`)`STATE_CONFLICT`(`error.data` は元記録の `status`/`round`)。未有効段階→`STAGE_NOT_ENABLED`。閉鎖現場→`SITE_CLOSED`。
+- C-STATE-07(打設停止。`stage=pre_pour` の記録): `approved` を田中(他班の職長でも同現場なら可)が `stopPour`→`fix`・`stopped=TRUE`・署名無効(`prime`/判定が空)。**他班の職長(`masked` の記録)の `listRecords` 行は `actions=["stopPour"]` で、`stopPour` は成功し応答 `record` は masked 形、同じ職長の `getRecord` は `FORBIDDEN_TEAM` のまま**。他現場の職長は `FORBIDDEN_SITE`、`draft` へは `STATE_CONFLICT`、理由なし→`REASON_REQUIRED`。停止後に是正・再提出・再合格・元請サインを経て初めて `approved`。
+- C-STATE-08(スロット): 同一(現場,階,工区,ロット,段階)の2件目→`ALREADY_EXISTS`。`approved` 記録には `reinspectOf` 付きでのみ追加可。`reinspectOf` の元記録が `approved` でなければ(例 `fix`/`qa_ok`)`STATE_CONFLICT`(`error.data` は元記録の `status`/`round`)。未有効段階(`during_pour`、または `patch` で `enabledStages` から外した段階)→`STAGE_NOT_ENABLED`。閉鎖現場→`SITE_CLOSED`。同じ階・工区・ロットでも段階が違えば別スロット(C-STAGE-01)。
 - C-STATE-09(3者サイン): `signerName` 空→`PRIME_SIGNER_REQUIRED`。`qa_ok` 以外では `STATE_CONFLICT`。`approved` 後は `signatures` の3者が揃って返る。
 
 **同時操作**
@@ -1786,7 +1906,15 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-TIME-04: 不在登録中の主担当の現場では `listAssignments.absentToday=true`、`Site.qa.mainAbsent=true`。
 
 **マスタ・名簿・PDF**
-- C-ITEM-01: `getBootstrap.items`=§2.6.1の有効16項目(`itemsHash` あり。無効のi17〜i49は含まれない)。(mock-only)`patch` で i48 を `active=TRUE` にしても `stage=post_demold` のため `getBootstrap.items` にも新規記録にも含まれない。(mock-only)`patch` で i17 を `active=TRUE` にすると新規記録に含まれ、既存記録の項目は変わらない(スナップショット)。`audience=qa` の項目は職長の提出検査対象外。
+- C-ITEM-01: `getBootstrap.items`=§2.6.1・§2.6.1a の有効36項目(打設前28=i1〜i16+i58〜i69、出来形8=i50〜i57。`seq` 昇順、`itemsHash` あり。無効の i17〜i49 は含まれない)。(mock-only)`patch` で `Config.enabledStages` を `pre_pour` にすると28項目になり出来形の項目が消える(`pre_pour,post_demold` に戻すと36)。(mock-only)`patch` で i48 を `active=TRUE` にすると、`enabledStages` に `post_demold` がある間は `getBootstrap.items` と **以後に作る出来形の記録**に含まれ(打設前の記録には含まれない)、既存記録の項目は変わらない(スナップショット)。(mock-only)`patch` で i17 を `active=TRUE` にすると新規の打設前記録に含まれ、既存記録の項目は変わらない。`audience=qa` の項目は職長の提出検査対象外。
+- C-ITEM-02(版1.9。Items の形): `SEED_ITEMS` は69行で `itemId`・`seq` に重複がない。i50〜i57 は `stage=post_demold`・`active=TRUE`・`audience=both`・`key=FALSE`、i56 は `tol=10`、i57 は `tol=3`(ともに `measure=optional`・`minMeasures=0`)、他の6項目は `tol` なし・`measure=none`。i58〜i69 は `stage=pre_pour`・`active=TRUE`・`audience=both`・`key=FALSE` で §2.6.1a の表と完全一致(`tol` は i58=3、i61=5、i62=5、i63=5、i64=50、i66=5、i67=5。他は空)。i1〜i49 は版1.8.2 と同一(`active` は i1〜i16 だけ TRUE、i48・i49 は `post_demold` で FALSE)。各段階の有効項目を `seq` 昇順に並べたとき、同じ `groupKey` が連続している(打設前=prep,dim,tie,embed,safe,ctl_base,ctl_open,ctl_support,ctl_embed,ctl_clean / 出来形=demold_check,dim)。`during_pour`・`demold`・`cleanup` の項目は無い。
+- C-ITEM-03(版1.9。既存シートへの追加。harness単体): Items が i1〜i49 だけのシートに対し `addMissingSeedItems()` を実行すると、i50〜i69 だけが末尾に追加され、既存の行(値を書き換えた行を含む)は一字も変わらない。もう一度実行すると0件追加。Items が空のシートでの `setupSheets()` は69行を入れる。
+- C-STAGE-01(版1.9。段階をまたいだ記録の分離): 同じ(現場,階,工区,ロット)で `pre_pour` と `post_demold` を続けて `createRecord` → 両方成功(`ALREADY_EXISTS` にならない)で別の `recordId`。それぞれの `stage`・`round`・`status`・`version`・項目が独立で、片方の `saveDraft`/`submitRecord`/判定/差し戻し/`approved` がもう片方の `status`・`version`・項目を変えない。同じ段階の2件目は `ALREADY_EXISTS`(`mine` も段階ごとに判定)。`reinspectOf` は同じ段階の `approved` 記録だけ指定でき、別の段階の記録を指すと `VALIDATION_FAILED`(`FIELD_INVALID`、path=`reinspectOf`)。他班の職長から見た出来形の記録は `masked`(最小キー+`stage`)で、`getRecord` は `FORBIDDEN_TEAM`(打設前と同じ)。`listRecords` の各行に `stage` が出る。
+- C-STAGE-02(版1.9。項目の絞り込み・有効な段階): 新規の打設前記録の `getRecord.items` は i1〜i16+i58〜i69 の28項目(`seq` 昇順)、新規の出来形記録は i50〜i57 の8項目で、互いの項目を含まない(i48・i49 も含まない)。`getBootstrap.items`(36項目)を記録の `stage` で絞った結果が、それぞれ `createRecord` で作られた記録の項目と一致する(フロントのオフライン仮項目の根拠)。`createRecord` の `stage` が `during_pour`/`demold`/`cleanup`/列挙外(例 `foo`)→ `STAGE_NOT_ENABLED`。(mock-only)`patch` で `enabledStages=pre_pour` → 出来形の `createRecord` が `STAGE_NOT_ENABLED`(既存の出来形記録の閲覧・提出・判定は影響なし)、`pre_pour,post_demold` に戻すと作成できる。(mock-only)出来形の有効項目を全て `active=FALSE` にすると出来形の `createRecord` は `STAGE_NOT_ENABLED`(項目0件の記録を作らせない)。`Config` の既定 `enabledStages` は `pre_pour,post_demold` で、`getBootstrap.config.enabledStages` もそれを返す。
+- C-STAGE-03(版1.9。出来形に打設の操作が出ない): 出来形の記録は `submitted`/`qa_ok`/`approved` のどれでも、`actions` に `stopPour` を含まない(職長・同現場の他班の職長・QA・責任者のどれから見ても)。他班の職長から見た出来形の `masked` 行は `actions=[]`。出来形に `stopPour` を送ると `STATE_CONFLICT`(`error.data={status,round}`)で、状態・`stopped`・Events・Notes・メールが変わらない。打設前の記録の `stopPour` は C-STATE-07 のまま成功する。出来形の `pourPlannedAt` は常に `null`、`stopped` は常に `false`。
+- C-STAGE-04(版1.9。出来形の流れは打設前と同じ仕組み): 出来形を `createRecord`(`pourPlannedAt` なし)→ `saveDraft`(8項目)→ `submitRecord`(PIN)が `POUR_PLAN_REQUIRED` なしで成功し `warnings` に `SELF_LATE` が出ない → 佐藤 `claimReview` → `submitVerdict(ok, PIN)` が `warnings` なし(仮想時計をいつにしても `QA_BEFORE_OPEN`/`QA_LATE` が出ない)→ `recordPrimeSign`(PIN)で `approved`。`signatures` の3者、Events の `kind` の並びが C-STATE-01 と同じ、`timing` の4つの時刻が `null` で `selfLate`/`qaLate` が `false`。`createRecord`/`saveDraft` で `pourPlannedAt` を渡しても保存されない(`null` のまま・エラーにならない)。`minor`→`fix`→再提出で `round=2`、`major` で `major=TRUE`、提出後の職長編集不可(`RECORD_LOCKED`)、他班の編集不可(`FORBIDDEN_TEAM`)、PIN誤り5回でロック、冪等キーの再送は、いずれも打設前と同じ結果。エスカレーション(§6.4)は出来形にも同じに働く(未claim で40分→`escLevel` 1、`/__mock/tick` で `escalate_30` が1回)。
+- C-STAGE-05(版1.9。PDF): `qa_ok` の出来形の `generateReport`: ファイル名(復号後)が `{subject}_出来形_v1_{YYYYMMDD-HHmm}.pdf`、打設前の記録は `{subject}_打設前_v1_{YYYYMMDD-HHmm}.pdf`。(harness)生成HTMLの `<title>` は subject のまま、タイトルが「型枠工事 出来形検査記録」(打設前は「型枠工事 打設前検査記録」)で、出来形のHTMLに「打設可」「打設停止」「打設予定日時」が含まれない。`approved` の出来形のステータス欄は「出来形確認済」、打設前の `approved` は「打設可」(従来どおり)。
+- C-STAGE-06(版1.9。メール件名): (mock-only)出来形の記録の `提出`/`30分経過`/`60分経過`/`重大な不適合` のメール件名は末尾が ` 出来形`(例 `[型枠検査] 提出 A現場(仮) 2F 出来形`)、打設前は従来どおり末尾に段階名が付かない。出来形では `打設停止` のメールは作られない。
 - C-CACHE-01(キャッシュが権限を跨がない): 事前に `getBootstrap` などで参照キャッシュを温めた状態で、`/__mock/patch`(`keepCache:true`)により ①田中の `Users.status=disabled` → **直後の** 田中のtokenでの任意のaction(`me` 以外)が `USER_DISABLED` ②田中の s_a の `Assignments` を `active=FALSE` → **直後の** `listRecords(siteId=s_a)` が `FORBIDDEN_SITE`、`getBootstrap.sites` から s_a が消える ③佐藤の `Absences` を挿入 → **直後の** `listAssignments.absentToday=true`、鈴木が主担当の代行として `decideJoin` 可 ④`adminRevokeDevice` 直後に当該端末が `DEVICE_REVOKED` いずれも遅延が許されない。(mock/harness共通。モックは常に最新なので自明に通る)
 - C-CACHE-02: (harness-only。`/__mock/cacheStats.enabled=true` のときだけ実行)①温めた後 `Config.photoMaxPerItem` を `keepCache:true` で変更 → 直後の `getBootstrap.config.photoMaxPerItem` は旧値(`hits` が増える)、`/__mock/clock` で+61秒後は新値 ②`keepCache` 無しの `patch` は直後に新値 ③`adminRotateJoinKey` の直後に旧 `joinKey` の `requestJoin` が `JOIN_KEY_INVALID`(`Sites` 破棄+`joinKey` 照合はキャッシュを使わない) ④`Config` に1行120,000文字の `description` を持つ行を `patch` で追加し、キャッシュ値が100KB(102,400バイト)を超える状態で `getBootstrap` が正常応答・`skippedTooLarge` が増え、`Items`/`Sites` のキャッシュは影響を受けない ⑤`Sites` を `keepCache:true` で `status=closed` に変更 → +61秒後は `createRecord` が `SITE_CLOSED`(60秒以内は成功/`SITE_CLOSED` のどちらも許す=assertしない)。
 - C-ROSTER-01: `adminValidateRoster` はシードで `problems` にerrorなし。(mock-only)`patch` で `qa_sub` を外す→`SITE_NO_QA_SUB`、`qa_main==qa_sub`→`QA_MAIN_EQ_SUB`、職長のUserにQA担当→`ROLE_MISMATCH`。
@@ -1800,7 +1928,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
 ### 12.4 ユニットテスト(U-)
-- U-VALID-01: `frontend/js/validate.js` が `tests/fixtures/validation-cases.json` の全ケースで §5.3.1 と同じ rule・itemId を返す(契約テストと同じデータ)。
+- U-VALID-01: `frontend/js/validate.js` が `tests/fixtures/validation-cases.json` の全ケースで §5.3.1 と同じ rule・itemId を返す(契約テストと同じデータ)。**版1.9**: `stage=post_demold` で `pourPlannedAt` なしのケースは `POUR_PLAN_REQUIRED` を返さず、`stage=pre_pour` では返す。
 - U-OUTBOX-01: 同一recordIdの `saveDraft` 統合で `clientId` が新規採番され内容がマージされる。`sending` 中の行は統合せず、その間の変更は別の `pending` 行(次回送信分)になる。送信直前の再読込で、統合後の `params`・新しい `clientId` が送られる(§8.4 の不変条件)。
 - U-OUTBOX-02: 順序(同一record内FIFO・`stopPour` 優先)、バックオフ列(2,5,15,30,60,60…秒)、確定エラーで後続行が `blocked`、`CHUNK_MISSING` で `nextIndex=0`、認証エラーで全停止→同一ユーザー再登録で再開。
 - U-OUTBOX-03: 作成から30日超の行が `failed`(`lastError.code='EXPIRED'`)になり、送信ループは送らず、S20 は「破棄」のみ出す(「再送」「今すぐ送信」を出さない・呼んでも送信しない)。29日の行は通常どおり送る。
@@ -1809,13 +1937,13 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-PHOTO-02: `stampText` 生成が §7.2 通り(工区あり/なし、JST固定、`skewMs` 補正)。圧縮の段階的再エンコード(400KB超→0.6→0.5→0.85倍)。
 - U-PHOTO-03(モード選択。対象は `planUpload`): `L ≤ photoSingleMaxChars` → `total=1`(`photoMaxBytes` 600,000 の最大 `L=800,000` も単発)。`L > photoSingleMaxChars` → 分割。`config` に `photoSingleMaxChars` が無い → 常に分割(旧サーバー互換)。送信直前(`nextIndex=0`)に config を見て決め直せるが、`nextIndex>0` では変えない。
 - U-TIME-01: JST整形が端末TZ(UTC/America/Los_Angeles/Asia/Jakarta)に依らず同一。
-- U-I18N-01: ja/idのキー集合が一致・値が空でない・コード内の `t('…')` の参照キーが全て存在・`err.*`/`rule.*`/`ev.*`/`st.*` が網羅。HTML/JSに日本語リテラルが無い(`i18n.js`・コメント除く)。
+- U-I18N-01: ja/idのキー集合が一致・値が空でない・コード内の `t('…')` の参照キーが全て存在・`err.*`/`rule.*`/`ev.*`/`st.*` が網羅。HTML/JSに日本語リテラルが無い(`i18n.js`・コメント除く)。**版1.9**: 段階別の上書きキー(`<基キー>@<stage>`。§9.4)は網羅検査の数え上げから除き、基キーがあること・ja/id の両方にあることだけを検査する。`ts(key,stage)` は上書きキーがあればそれ、無ければ基キーを返す(`stage` が空・未知でも基キー)。
 - U-HASH-01: PINハッシュ・招待ハッシュ・`paramsHash`・`canonicalJSON` が `tests/fixtures/hash-vectors.json`(テスト担当がNodeで生成して固定)と mock・harness の双方で一致。
-- U-SEED-01: `Seed.gs` の `SEED_ITEMS`・mockのシード・SPEC §2.6.1 が完全一致(`tests/fixtures/seed-items.json` を基準。i1〜i49の49行)。
+- U-SEED-01: `Seed.gs` の `SEED_ITEMS`・mockのシード・SPEC §2.6.1・§2.6.1a が完全一致(`tests/fixtures/seed-items.json` を基準。i1〜i69の69行)。
 
 ### 12.5 E2Eテスト(E-。Playwright、375×667、ja/id)
 - E-01 登録: S01で田中を選びPIN→ホーム。リロードしてもPIN不要。誤PIN×5で S02。責任者が解除(別コンテキスト)→復帰。`invited` の氏名では招待コード欄が出る。
-- E-02 職長フロー: 現場A→2F→記録作成(ロット入力)→16項目入力(OK/NG/該当なし、実測、コメント)→NGと重点項目で写真撮影(fakeカメラ)→違反が赤枠で出てから修正→確認画面(現場・階・工区・ロット表示)→PIN→「確認待ち」。田中のホームに s_c が出ない。他班の記録が「他班が入力中」で無効。
+- E-02 職長フロー: 現場A→2F→記録作成(ロット入力)→打設前の新規記録の28項目入力(i1〜i16+i58〜i69。OK/NG/該当なし、実測、コメント)→NGと重点項目で写真撮影(fakeカメラ)→違反が赤枠で出てから修正→確認画面(現場・階・工区・ロット表示)→PIN→「確認待ち」。田中のホームに s_c が出ない。他班の記録が「他班が入力中」で無効。
 - E-03 QAフロー: 佐藤がボードで確認待ち(提出順・エスカレーション表示)→「確認中にする」→全項目入力(NGは備考・重さが必須、写真は任意=写真なしでも判定できる)→「合格」ボタンの有効条件→PIN→`qa_ok`→元請PDF生成(M6)→元請サイン記録(M5, PIN)→`approved`(打設可)。3者サイン欄が全て済。
 - E-04 差し戻し: 軽微な不適合→`fix`→職長は是正コメントを見て編集可→再提出(PIN)→`round2`。提出後の画面は読み取り専用(編集ボタンなし)。
 - E-05 オフライン(圏外で下書き・撮影 → 復帰で自動送信 → オンラインで提出(PIN)): `context.setOffline(true)` で下書き入力・撮影 → outboxバッジ件数・「圏外」表示・提出ボタン無効(`msg.offline_required`。圏外では提出できない) → 復帰で自動送信されバッジが0に → サーバー側に二重なし(`/__mock/state` の件数) → **オンラインになってから提出(PIN入力 M1)して `submitted`**。`/__mock/fail`(after:true)で応答喪失を起こしても二重にならない。リロードしても下書きとoutboxが残る。
@@ -1824,10 +1952,11 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-08 i18n: 言語切替で全画面の文字が切り替わり、キー文字列(`scr.`/`err.` などのプレフィックス)が画面に露出しない。項目文・グループ名がマスタの `textId/groupId` になる。
 - E-09 ロック: 5回誤りでロック画面、ロック中は全操作不可、責任者(S16)で解除。
 - E-10 参加: 職長がQR(URL)から参加申請→「承認待ち」→主担当QAが承認(班名入力)→職長の現場一覧に出る。旧QR(合言葉更新後)では申請できない。
-- E-11 打設停止: `approved` の記録で職長が「打設を止める」(理由)→`fix`・停止バナー・責任者のボードに表示。
+- E-11 打設停止: `approved` の記録で職長が「打設を止める」(理由)→`fix`・停止バナー・責任者のボードに表示。出来形の記録(`approved` を含む)の画面には「打設を止める」ボタンが出ない(E-15)。
 - E-12 管理: 責任者が招待コード発行(コードは1回だけ表示)・端末登録解除(解除された端末はS01へ)・不在登録・QR表示/合言葉更新。
 - E-14 図面の書き込み(版1.6): 職長でS06を開き「図面を追加」→ファイル選択(テスト用の図面画像)→M10で項目番号④(測定項目)を選び図面上を2回タップ → 印が `④-1`・`④-2`、番号①(測定なし)を1回置くと `①`、2回置くと `①-1`・`①-2` に付け替わる。「ひとつ戻す」「この印を削除」で枝番が連番に戻る。印の周りに枠(楕円・白い塗り)の要素・描画が無いことを確認(試作用に `data-testid` を持つ印要素、またはエクスポートした画像の画素検査で、印の周囲が元画像のまま=白い塗りが無い)。「登録」→outboxバッジ→S06の「図面」欄にサムネ→mockの `getRecord.drawings` が1件・`markers` が2件以上。提出済みにすると「図面を追加」「削除×」が無効。管理者(S10)でも追加でき、職長のS06(`submitted`)には出ない。ja/id両方で表示が崩れない(文言は辞書経由)。
 - E-13 写真の単発・並行送信(mockを `--latency 300` で起動): オンラインで5枚を続けて撮影(別項目)→ Playwright のリクエスト監視で ①各 `photoId` につき `uploadPhotoChunk` が **ちょうど1回**(`total=1`) ②同時に進行する `uploadPhotoChunk` の最大が 2 以上かつ `photoParallel`(3)以下 ③全て完了後にoutboxバッジ0、サーバーの `Photos` が5行・仮想Driveの有効ファイルが本体5+サムネ5。さらに写真送信中は「提出する」が無効で「送信中(残りN件)」が出て、全完了後に提出でき `PHOTO_REQUIRED` にならない(§8.6)。写真の1枚が確定失敗(`/__mock/fail` の `mode:"error",code:"PHOTO_INVALID",match:"uploadPhotoChunk"`)しても他の4枚は送られ、S20 に失敗1件が出る。
+- E-15 出来形検査(版1.9。ja/id、375px): 職長でS04を開くと各階のカードに「打設前」「出来形」の段が並び、記録の無い段階は「未着手」。S05で段階を「出来形」にすると打設予定日時の欄とヒントが消え、「打設前」に戻すと出る。同じ階・工区・ロットで打設前と出来形をそれぞれ作成でき(2件目で `ALREADY_EXISTS` にならない)、S06 に出来形の8項目(No.1〜8)、打設前の新規記録に28項目(No.17〜28 が i58〜i69。グループ見出しが二重に出ない)が出る。出来形を入力→提出(PIN)→QA(S10。ヘッダに段階)が合格(PIN)→元請サイン記録(M5。説明文・ボタンの語が「出来形確認済」)→S08/S04/S09/S11 のステータスが「出来形確認済」になる(打設前の `approved` は「打設可」のまま)。出来形の画面(S04〜S08・S10・S11・M4/M5・S09・PDFのM6)のどこにも「打設可」「打設を止める」「打設停止」「打設予定日時」が出ない(打設前の記録には従来どおり出る)。S09 のグリッドは階ごとに段階別のチップ、S03 の現場カードは段階ごとの件数行。他班の職長から見た出来形の行に「打設を止める」ボタンが出ない。
 
 ### 12.6 性能の受け入れ基準(版1.5。実GASでの目標。手動確認項目)
 
@@ -1907,7 +2036,7 @@ katawaku-inspection/
 
 | 担当 | 作るもの | 触ってよい場所 | 完了条件(共通: CLAUDE.md §5 + 下記) |
 |---|---|---|---|
-| バックエンド | `backend/`・`docs/DEPLOY_GAS.md`・`docs/OPERATIONS.md` | `backend/`,上記docs | harness経由で契約テスト全通過。`node --check`。**全ての時刻は `Util.now()`、乱数/ID は `Util.newId()` 経由**(`new Date()`/`Math.random` を他で直接使わない。harnessが時計を差し替えるため)。権限判定は `Authz.gs` の `authorize` のみ。シークレット・PIN平文をログ/シートに残さない。**読み込みは §2.16 に従う(リクエスト内メモ・必要な行/列だけ読む。可変データはリクエストをまたいでキャッシュしない)**。性能目標 §12.6 を実GASで手動確認し結果を `docs/OPERATIONS.md` に残す |
+| バックエンド | `backend/`・`docs/DEPLOY_GAS.md`・`docs/OPERATIONS.md` | `backend/`,上記docs | harness経由で契約テスト全通過。`node --check`。**全ての時刻は `Util.now()`、乱数/ID は `Util.newId()` 経由**(`new Date()`/`Math.random` を他で直接使わない。harnessが時計を差し替えるため)。権限判定は `Authz.gs` の `authorize` のみ。シークレット・PIN平文をログ/シートに残さない。**読み込みは §2.16 に従う(リクエスト内メモ・必要な行/列だけ読む。可変データはリクエストをまたいでキャッシュしない)**。性能目標 §12.6 を実GASで手動確認し結果を `docs/OPERATIONS.md` に残す。**版1.9**: `Seed.gs` を69行・`enabledStages` 既定を `pre_pour,post_demold` にし、`addMissingSeedItems()`(§2.6.1b)と本番への反映手順を `docs/OPERATIONS.md` に書く |
 | フロント | `frontend/`・`docs/DEPLOY_PWA.md` | `frontend/`,上記docs | mock相手にE2E全通過。権限判定をフロントに書かない(`actions` のみ)。直書き文字列なし。375pxで崩れない |
 | モック | `mock/` | `mock/` | 契約テスト全通過。§11の全機能(`/__mock/*` 含む)。SPECとの同期テスト通過 |
 | テスト | `tests/` | `tests/` | §12の全ケースを実装。`run-all.js` で一括実行できる。失敗時は原因がどの担当かわかる出力 |
@@ -1937,11 +2066,11 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-03 | 初回PINの設定方法 | 責任者が発行する6桁の招待コード(72時間有効)で、本人が初回にPINを決める。名簿(Users)は責任者がシートに行追加 |
 | P-04 | 手書きサイン | 作らない。PIN再入力+氏名・日時の自動記録を「電子サイン」とする(prototypeの手書きサイン画面は廃止) |
 | P-05 | オフラインでのPIN必須操作 | 提出・合格・元請サイン記録はオンライン限定(PIN平文をキューに残さないため)。下書き・写真・コメントはオフライン可 |
-| P-06 | 時間ルール(前日15:00/16:00/打設2h前) | 警告・フラグのみで操作は拒否しない。提出時に `pourPlannedAt` は必須 |
+| P-06 | 時間ルール(前日15:00/16:00/打設2h前) | 警告・フラグのみで操作は拒否しない。提出時に `pourPlannedAt` は必須(打設前のみ。出来形には適用しない。§6.8) |
 | P-07 | `minor` 判定の扱い | `minor`/`major` とも status は `fix`(差し戻し)。`major` は重大フラグ(`major=TRUE`)を立て責任者へ通知 |
 | P-08 | 異常時の打設停止 | status を `fix`+`stopped=TRUE` に戻し、3者サインを無効化(statusを増やさない) |
 | P-09 | 通知 | アプリ内(ポーリング)+メール(`Users.email` があるときのみ)。Web Push はv2。職長へメールしない |
-| P-10 | 段階(`stage`) | v1は `pre_pour` のみ作成可(`Config.enabledStages`)。他段階は列・項目マスタの `stage` で拡張できる |
+| P-10 | 段階(`stage`) | **版1.9: `pre_pour`(打設前)と `post_demold`(出来形)の2つを使う**(`Config.enabledStages` の既定 `pre_pour,post_demold`。ユーザー決定 2026-10-14)。同じ現場・階・工区・ロットでも段階ごとに別の記録。`during_pour`(打設中・⑯)は保留(列挙値は残すが `enabledStages` に入れない)、`demold`・`cleanup` は未使用。段階による違いは §6.8 |
 | P-11 | 元請サインの記録方法 | QA/責任者が担当者名+方法(paper/pdf/onsite)+任意で証跡写真を記録。元請の独自書式・電子サイン受入は未確定 |
 | P-12 | QA欄の事前入力 | しない(職長の結果をコピーしない。形骸化防止)。QAが全項目を入力 |
 | P-13 | 実測値 | 「設計値との差(mm)」の数値配列(最大10点)。`measure` は初期 `optional`(必須化はマスタ編集)。要件の「各面2箇所以上」は `minMeasures=2`+`measure=required` で運用化 |
@@ -1957,7 +2086,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-23 | 氏名一覧の公開 | **解消(版1.7)**: 他社の職長を招待するため `listLoginUsers` を廃止し、招待コード先入力(`lookupInvite`)に変更 |
 | P-24 | 弱いPIN(0000等) | 拒否しない(4桁の制約上。ロックと端末登録制で緩和) |
 | P-25 | 重大不適合の30分報告 | 判定時に責任者へ即時通知で充足。責任者の確認(ack)機能は作らない |
-| P-26 | 項目マスタ | prototypeの16項目(active)+追加案15項目(i17〜i31)+元Excel突合で追加した18項目(i32〜i49)(計49行)。i17〜i49 の33項目は無効。**突合済**(`docs/item-reconciliation.md`)。i48・i49 は `stage=post_demold`(v1では作成不可)。編集ルールは §2.6.2 |
+| P-26 | 項目マスタ | prototypeの16項目(active)+追加案15項目(i17〜i31)+元Excel突合で追加した18項目(i32〜i49)(計49行)。i17〜i49 の33項目は無効。**突合済**(`docs/item-reconciliation.md`)。i48・i49 は `stage=post_demold`(版1.9でも無効のまま)。**版1.9: 出来形8項目(i50〜i57)+打設前12項目(i58〜i69)を有効で追加(計69行、有効36)**。編集ルールは §2.6.2 |
 | P-36 | 項目マスタの検証 | v1は責任者が編集後に目視確認(§2.6.2)。Items検証の管理者操作(`adminValidateItems` 等)は未定義。SPEC変更要望として §14.2 の10 |
 | P-27 | QR参加 | QRはURL(`#/join?site&k&n`)。標準カメラで開く/アプリ内読み取り(`BarcodeDetector`対応端末)/URL貼り付けの3経路 |
 | P-28 | 端末時計 | 写真スタンプ・`takenAt` は端末時刻(`skewMs`補正)。サーバーが範囲外を `clockSuspect` にする |
@@ -1972,6 +2101,8 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-38 | 参照シートの読み取りキャッシュ(版1.4。1.5でTTL上限60秒固定を明記) | `Config`/`Items`/`Sites` のみ最大60秒。直接編集の反映は最大60秒遅れる(§2.15。**確定**)。権限判定に使うシートはキャッシュしない |
 | P-39 | 性能の目標値と手動確認(版1.5) | ping 約1.5秒以内 / 写真1枚(約300KB)約10秒以内 / 写真10枚約40秒以内(3並列)。手動確認で自動テストにしない(§12.6)。1リクエスト内の読み込み最小化(§2.16)は設計担当の追加判断で、結果が素朴な実装と同じであることを条件に実装裁量。目標値は本番実測(1往復1.3〜2.8秒、写真1枚6秒/リクエスト)からの推定で、実機測定後に見直す可能性あり |
 | P-40 | 図面(版1.6) | PDFファイルの直接取り込みは対象外(pdf.js追加が必要=CLAUDE.md §4の例外。ユーザー判断待ち)。元画像(印なし)は保存せず、やり直しは削除→取り込み直し。上限は記録×sideあたり5枚(固定)。項目番号は `seq` 昇順の添字(現行は全項目 both のため役割間で一致。将来分かれたらSPEC変更要望)。印の色は職長ピンク/管理者青(仮)。iPhoneのHEIC画像はブラウザが読めた場合のみ対応(未確認) |
+| P-41 | 出来形検査の流れ(版1.9。REQUIREMENTS §14 の「Claudeの解釈。ユーザー未確認」を本書で確定した仮置き) | 最終状態の表示名は「出来形確認済」。`stopPour` は打設前のみ(出来形は `STATE_CONFLICT`)。時間ルール(§6.5)は出来形に適用しない・エスカレーション(§6.4)は適用する(現行実装のまま成り立つ側)。`pourPlannedAt` は出来形で使わない(指定されても保存しない)。出来形の取消手段は無い(誤承認は再検査 `reinspectOf`)。出来形の作成に打設前の承認を要件としない。メール件名の末尾に「出来形」。PDF名に段階名(打設前の新規PDFの名前も変わる)。詳細は §6.8、確認事項は §14.2 の13 |
+| P-42 | 追加項目 i50〜i69 の決め方(版1.9) | `key` は全て FALSE(責任者が後で決める)。`textJa` に基準を文中で入れた(i50〜i57。PDFの項目列では切れる)。i59(設計かぶり厚以上)は片側基準のため `tol` なし・`measure=none`。i58/i2・i62/i6・i67/i14・i68/i16 は有効項目同士で意味が重なりうるが、ユーザー指示どおり別項目で追加。`seq` は itemId の数字・末尾追加・同じ `groupKey` を連続(§2.6.1a)。`textId` は暫定訳(P-22) |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -1982,10 +2113,11 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 6. **P-12 QA欄の事前入力なし**(QAの入力負担が増える)。
 7. **P-15 責任者が代行者・最終代行を兼ねる**点。
 8. **P-23 氏名一覧が未認証で見える**点、**P-32 PDFリンク共有**(組織のGoogle共有ポリシー)。
-9. 現場名・管理者・職長・代行者の初期データ、インドネシア語の訳確認(P-22。i32〜i49 の訳を含む)。元資料xlsxとの項目突合(P-26)は済。
+9. 現場名・管理者・職長・代行者の初期データ、インドネシア語の訳確認(P-22。i32〜i69 の訳を含む)。元資料xlsxとの項目突合(P-26)は済。
 10. **SPEC変更要望(Items検証)**: 名簿の `adminValidateRoster` と同様の、責任者向け Items 整合チェック(例 `adminValidateItems`。`itemId`/`seq` の重複・`tol` と `measure` の整合・enum値・`groupKey` ごとのグループ名一致)が無い。v1は目視確認(§2.6.2)。追加するなら action 追加(43→44)・§4.1・§5.4.7・S12 相当の画面・C-ITEM テストが必要。要否の判断を求める。
 11. **版1.4の確認(1.4.1で①②は確定済み。参考として残す)**: ①P-38 直接編集の反映が最大60秒遅れる運用(責任者への周知)で良いか ②P-37 実行強制終了時の孤児ファイルを自動掃除しない扱いで良いか ③参照キャッシュの対象に `Sites` を含めたが、`joinKey` を扱う `requestJoin`/`adminGetJoinInfo`/`adminRotateJoinKey` は `Sites` をキャッシュなしで読む(設計担当の追加判断)。
 12. **版1.5の確認**: ①性能目標(§12.6 / P-39)の数値で良いか。実機で測って乖離すれば見直す ②`Config`/`Items`/`Sites` のキャッシュTTLは60秒のまま(依頼にあった「5分まで」は採らず、直接編集の反映遅れを最大60秒に留めた)。延ばしたい場合は §2.15-10 のとおり本書を先に直す ③`photoChunkChars` を 700000 にする案は、分割モードのCache 100KB制限のため採用しなかった(§2.14)。
+13. **版1.9の確認**(ユーザー未確認の設計判断): ①出来形検査の流れ(REQUIREMENTS §14 の「Claudeの解釈」)を本書で確定した: 時間ルール(締切)は出来形に適用しない・エスカレーション30/60分は適用する・メール件名の末尾に「出来形」を付ける。②出来形の `approved`(出来形確認済)を取り消す操作が無い(`stopPour` が出来形で使えないため)。誤承認は再検査(`reinspectOf`)で対応する。取消が要るか。③出来形の作成条件に「同じスロットの打設前が `approved`」を入れていない(順序を縛らない)。入れるか。④打設前の追加12項目の `tol`/`measure`: i59(鉄筋かぶり「設計かぶり厚以上」)は下限だけの基準で `tol(±)` に表せないため `tol` なし・`measure=none`。i63「直下段差5mm以内」は `tol=5`(±扱い)。片側基準(以上/以下)を表す列が要るか(Items の列追加=SPEC変更要望)。⑤有効な既存項目と意味が重なる組: i58↔i2(墨)、i62↔i6(開口。許容が ±5mm と ±2mm で違う)、i67↔i14(打込み金物)、i68↔i16(型枠内の清掃)。ユーザー指示どおり別項目で追加したが、現場で重複して聞かれる。統合する(既存を無効化して新IDに寄せる)か。⑥出来形 i50〜i57 の `textJa` は「項目名(確認内容)/基準:…」と基準を文中に入れた。元請PDFの項目列は約62mmで切れるため、基準がPDFの表で見えないのを許容するか(基準を別列にする案は Items の列追加=SPEC変更要望)。⑦PDFファイル名に段階名を入れたことで、打設前の新規PDFの名前も変わる(出来形だけに限ることもできる)。⑧i50〜i57 の `note` に「管理項目表⑰〜㉓」と書いたが、i50〜i55 と⑰〜㉒ の1対1の対応は、ユーザー指定の並びからの推定(個別の番号は書かず範囲で書いた)。⑨インドネシア語は全て暫定訳(P-22)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
@@ -2021,3 +2153,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-12 | 1.8.0 | ユーザー要望: 職長が端末登録のときに会社名も入力できるようにし、検査記録に反映する。①`registerDevice` に任意 `company`(≤40文字)を追加。`purpose=first` では会社名を必須(名簿に会社名があれば省略可)。入力値は `Users.company` に保存。②`Me.company` を追加。③Records に **`ownerCompany`**(作成時の会社名の写し。末尾列)を追加し、`RecordSummary/Detail.ownerCompany` に出す。PDFの職長の会社名・職長サイン欄は `ownerCompany`(空なら現在の `company`)。④S01 の確認画面に会社名欄。action数は43のまま。 |
 | 2026-10-12 | 1.8.1 | ユーザー要望(反応が遅い): 遅さの原因を数字で見るための計測を追加。①§1.5/§1.9: 全応答の `meta.timing`(処理時間の内訳)②`js/perf.js` と画面 S21 通信診断(設定から開く)③契約テスト C-ENV-02 に `meta.timing` の検査を追加、E-21 を追加。API・シート・既存の画面の動作は変更なし(action数43のまま)。 |
 | 2026-10-12 | 1.8.2 | 責任者のスマホにテスト現場の記録が残った不具合の修正。§8.9: 全件取得の結果に無い記録を端末から消す(未送信・下書きのある記録は残す)。API・シート・エラーコードは変更なし。 |
+| 2026-10-14 | 1.9.0 | ユーザー決定(2026-10-14): 出来形検査(`stage=post_demold`)を打設前検査と並べて使う。既存の列名・action名・エラーコード・action数(43)は変更なし(追加のみ)。①§0.2・§2.7・§2.14・§6.8新設・§14 P-10/P-41: 使う段階は `pre_pour` と `post_demold`(`Config.enabledStages` 既定 `pre_pour,post_demold`)。`during_pour`(⑯)は保留。同じ現場・階・工区・ロットでも段階ごとに別の記録(一意制約は元から段階を含む)。出来形は打設前と同じ流れ・状態遷移・PIN・差し戻し・コメント分離・元請サインを再利用し、違いは ⓐ`approved` の表示名=「出来形確認済」(§9.4 の `@post_demold` 上書きキー) ⓑ`stopPour`・打設に関する語を出さない(`stopPour` は `pre_pour` のみ。出来形は `STATE_CONFLICT`、`actions` に出ない)。時間ルール(§6.5)は出来形に適用しない(既存の「他段階は null」のまま)、エスカレーション(§6.4)は適用(変更なし)。`pourPlannedAt` は出来形で使わない(指定されても保存しない)。②§2.6.1・§2.6.1a・§2.6.1b・§11.5・§14 P-26/P-42: Items を i1〜i69 の69行に(出来形 i50〜i57 と打設前 i58〜i69 の20項目を `active=TRUE`・`key=FALSE` で追加。有効36項目=打設前28+出来形8。i1〜i49 は変更なし)。新グループ `demold_check`・`ctl_*`、`seq` の方針(itemId番号・末尾追加・同じ `groupKey` を連続)。`setupSheets()` は既存シートへ追加しないため、GASエディタ専用の `addMissingSeedItems()` を新設(actionではない)。③§5.4.3 `createRecord`: `stage` は `enabledStages` に無い値・有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は打設前のみ保存。④§9.2・§9.4: S03/S04/S05/S09 に段階の表示と段階の選択、S10/S11 に段階名、`stage.post_demold`=出来形。⑤§10・§7.4: PDFファイル名に段階名(`{subject}_{段階名}_v...`。打設前の新規PDFの名前も変わる)、出来形は打設予定日時の行なし・ステータス「出来形確認済」。⑥§6.6: 出来形のメール件名の末尾に ` 出来形`。⑦§12: C-STAGE-01〜06・C-ITEM-02,03・E-15 を追加、C-ITEM-01/C-STATE-07,08/U-SEED-01/U-I18N-01/U-VALID-01/E-02/E-11 を更新。⑧§14.2 の13(版1.9の確認事項)。 |

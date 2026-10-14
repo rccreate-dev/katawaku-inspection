@@ -145,6 +145,34 @@ function setupSheets() {
 }
 
 /**
+ * 既存のスプレッドシートに、SEED_ITEMS のうち Items シートに itemId が無い行だけを末尾に追記する(SPEC §2.6.1b。版1.9)。
+ * GASエディタ専用。Webアプリの action ではない(ACTIONS に登録しない。action数は43のまま)。
+ *   - 既存の行は変更・削除しない(値が SEED_ITEMS と違っていても触らない)。Config も触らない。
+ *   - 何度実行しても結果は同じ(2回目以降は0件追加)。追加した itemId の一覧を Logger に出す。
+ *   - スクリプトロック内で行い、書込み後に参照キャッシュ(Items)を破棄する(Repo の書込み関数が自動で行う)。
+ * 使い方: GASエディタで addMissingSeedItems を選んで「実行」(docs/OPERATIONS.md の展開手順)。
+ */
+function addMissingSeedItems() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    Repo.resetCache();
+    var have = {};
+    Repo.fresh('Items').forEach(function (r) { have[r.itemId] = true; });
+    var missing = SEED_ITEMS.filter(function (it) { return !have[it.itemId]; });
+    if (missing.length) {
+      Repo.appendMany('Items', missing.map(function (it) { return Object.assign({}, it); }));
+    }
+    Repo.resetCache();
+    var ids = missing.map(function (it) { return it.itemId; });
+    Logger.log(ids.length ? ('追加した項目(' + ids.length + '件): ' + ids.join(', ')) : '追加する項目はありません(0件)');
+    return { added: ids };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
  * 最初の責任者を作り、初回登録用の招待コードを実行ログ(Logger)に表示する(SPEC §3.6.1)。
  * GASエディタ専用。Webアプリの action ではない(ACTIONS に登録しない)。
  * エディタの「実行」は引数を渡せないため、docs/DEPLOY.md の手順で

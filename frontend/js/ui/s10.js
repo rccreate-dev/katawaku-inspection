@@ -254,7 +254,7 @@
               return handleFail(res, key).then(drawVerdict);
             });
           }
-          return KW.modal.confirm({ title: t('verdict.' + v), body: t(v === 'major' ? 'scr.S10.confirm_major' : 'scr.S10.confirm_minor'), okLabel: t('verdict.' + v), danger: v === 'major' }).then(function (ok) {
+          return KW.modal.confirm({ title: t('verdict.' + v), body: v === 'major' ? KW.ts('scr.S10.confirm_major', detail.stage) : t('scr.S10.confirm_minor'), okLabel: t('verdict.' + v), danger: v === 'major' }).then(function (ok) {
             if (!ok) { busyVerdict = false; drawVerdict(); return null; }
             return KW.api.call('submitVerdict', base, { clientId: opId(key) }).then(function (res) {
               busyVerdict = false;
@@ -307,8 +307,8 @@
         KW.clear(el); itemNodes = {};
         var d = detail;
         if (d.status !== 'submitted') { KW.app.go('#/record/' + id, true); return; }
-        ctx.chrome({ back: '#/', site: C.siteName(d.siteId), bar: d.floor + (d.zone ? '・' + d.zone : '') + ' / ' + d.lot });
-        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S10.title')), C.statusChip(d.status, true)));
+        ctx.chrome({ back: '#/', site: C.siteName(d.siteId), bar: [d.floor + (d.zone ? '・' + d.zone : ''), d.lot, t('stage.' + C.stageOf(d))].join(' / ') });
+        el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S10.title')), C.statusChip(d.status, true, d.stage)));
         el.appendChild(C.recHeadCard(d, h('div', { class: 'meta' }, t('lbl.submitted_by', { name: C.ownerLabel(d) }) + ' / ' + C.ago(d.submittedAt))));
         if (d.escLevel) el.appendChild(C.banner('warn', h('b', null, t('esc.' + d.escLevel))));
         el.appendChild(claimSection());

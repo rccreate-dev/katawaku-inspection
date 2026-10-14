@@ -1,8 +1,8 @@
-// 手書きの最小PDF(ASCIIのみ)。`MOCK REPORT {recordId} v{n} {status}` の行を含む。
+// 手書きの最小PDF(ASCIIのみ)。`MOCK REPORT {recordId} v{n} {status} stage={stage}` の行を含む。
 'use strict';
 
-function buildPdf(recordId, version, status) {
-  const text = `MOCK REPORT ${recordId} v${version} ${status}`;
+function buildPdf(recordId, version, status, stage) {
+  const text = `MOCK REPORT ${recordId} v${version} ${status} stage=${stage}`;
   const stream = `BT /F1 12 Tf 50 780 Td (${text}) Tj ET`;
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',

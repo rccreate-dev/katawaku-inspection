@@ -46,7 +46,7 @@ async function newReadyRecord(s, lot, { submit = false } = {}) {
   await page.getByRole('button', { name: s.t('scr.S05.go') }).click();
   await page.locator('#plan-row').waitFor();
   if (!submit) return;
-  for (let n = 1; n <= 16; n++) await page.locator(`#it-i${n}`).locator('.v-ok').click();
+  await E.answerAllOk(s);
   await page.locator('#plan-row input').fill(tomorrow0900());
   await page.locator('#plan-row input').blur();
   for (const id of KEY_ITEMS) await E.shoot(s, page.locator(`#it-${id} .cam`));
@@ -73,7 +73,7 @@ describe('E-14 図面の書き込み', () => {
     await pickDrawing(s, { name: 'zumen.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(page) });
     await page.locator('.dedit').waitFor();
     assert.equal(await numBtn(s, 4).count(), 1, '項目番号④のボタンがある');
-    assert.equal(await page.locator('.dedit .dnum').count(), 16, '職長の項目(全16)の番号ボタン');
+    assert.equal(await page.locator('.dedit .dnum').count(), 28, '職長の項目(新規の打設前記録は全28)の番号ボタン');
     assert.equal(await page.locator('.dedit [data-zoom]').count(), 3, '倍率 ×1/×2/×3');
     for (const b of await page.locator('.dedit .dnum, .dedit .dtool').all()) {
       const bb = await b.boundingBox();

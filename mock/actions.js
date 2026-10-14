@@ -200,8 +200,10 @@ module.exports = function install(C) {
     const site = siteRow(p.siteId);
     if (!site) fail('NOT_FOUND', '現場が見つかりません');
     if (site.status === 'closed') fail('SITE_CLOSED', '閉鎖された現場です');
-    if (!STAGES.includes(p.stage)) fieldInvalid('stage');
-    if (!splitCsv(cfg('enabledStages')).includes(p.stage)) fail('STAGE_NOT_ENABLED', 'この段階は有効ではありません');
+    // 版1.9(§5.3): enabledStages に無い値・列挙外の値(例 foo)・その段階の有効項目が0件はいずれも STAGE_NOT_ENABLED
+    if (!STAGES.includes(p.stage) || !splitCsv(cfg('enabledStages')).includes(p.stage)) fail('STAGE_NOT_ENABLED', 'この段階は有効ではありません');
+    // 版1.9(§5.4.3): その段階の有効項目が0件なら作らせない(項目0件の記録を作らない)
+    if (!C.enabledItems().some((i) => i.stage === p.stage)) fail('STAGE_NOT_ENABLED', 'この段階には有効な項目がありません');
     const viol = [];
     if (!/^r_[a-z0-9]{16}$/.test(p.recordId)) viol.push({ rule: 'FIELD_INVALID', path: 'recordId' });
     if (!splitCsv(site.floors).includes(p.floor)) viol.push({ rule: 'FIELD_INVALID', path: 'floor' });
@@ -225,12 +227,13 @@ module.exports = function install(C) {
       if (!orig) fail('NOT_FOUND', '元の記録が見つかりません');
       if (orig.siteId !== p.siteId || orig.floor !== p.floor || (orig.zone || '') !== zone || orig.lot !== p.lot || orig.stage !== p.stage) fieldInvalid('reinspectOf');
       if (!C.canViewDetail(actor, orig)) fail('FORBIDDEN_TEAM', '他班の記録です');
-      if (orig.status !== 'approved') fail('STATE_CONFLICT', '再検査できるのは打設可の記録だけです', { status: orig.status, round: orig.round });
+      if (orig.status !== 'approved') fail('STATE_CONFLICT', '再検査できるのは承認済み(approved)の記録だけです', { status: orig.status, round: orig.round });
     }
     const n = nowDt();
     const rec = insert('Records', {
       recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone, lot: p.lot, stage: p.stage, status: 'draft', round: 1, reinspectOf: p.reinspectOf || null,
-      ownerUserId: actor.userId, team: C.teamOf(actor.userId, p.siteId), pourPlannedAt: p.pourPlannedAt ? U.normDt(p.pourPlannedAt) : null,
+      ownerUserId: actor.userId, team: C.teamOf(actor.userId, p.siteId), pourPlannedAt: (p.stage === 'pre_pour' && p.pourPlannedAt) ? U.normDt(p.pourPlannedAt) : null, // 出来形では指定されても保存しない(§5.4.3・§6.8)
+     
       major: false, stopped: false, escNotified: 0, createdAt: n, updatedAt: n, version: 1, ownerCompany: actor.company || '',
     });
     for (const it of C.enabledItems().filter((i) => i.stage === p.stage)) {
@@ -259,7 +262,8 @@ module.exports = function install(C) {
       if (dup && !rec.reinspectOf) fail('ALREADY_EXISTS', '同じ階・工区・ロットの記録が既にあります', { recordId: dup.recordId, mine: C.canViewDetail(rc.actor, dup) });
       rec.lot = lot; rec.zone = zone;
     }
-    if ('pourPlannedAt' in h) rec.pourPlannedAt = h.pourPlannedAt ? U.normDt(h.pourPlannedAt) : null;
+    // 出来形では header.pourPlannedAt を指定されてもエラーにせず保存しない(§5.4.3・§6.8)
+    if ('pourPlannedAt' in h && rec.stage === 'pre_pour') rec.pourPlannedAt = h.pourPlannedAt ? U.normDt(h.pourPlannedAt) : null;
     if (p.items != null) applyPatches(rec, p.items, 'self');
     C.touch(rec);
     return { record: summary(rc.actor, rec) };
@@ -575,8 +579,10 @@ module.exports = function install(C) {
     const site = siteRow(rec.siteId);
     // 件名: 現場名 階 [工区] 打設箇所(SPEC §10.2a)
     const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
-    const name = `${String(subject).replace(/[\\\/:*?"<>|]/g, '_').trim().slice(0, 60)}_v${version}_${stamp}.pdf`;
-    const buf = buildPdf(rec.recordId, version, rec.status);
+    // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。subject 部分だけ sanitize
+    const stageName = { pre_pour: '打設前', post_demold: '出来形' }[rec.stage] || rec.stage;
+    const name = `${String(subject).replace(/[\\\/:*?"<>|]/g, '_').trim().slice(0, 60)}_${stageName}_v${version}_${stamp}.pdf`;
+    const buf = buildPdf(rec.recordId, version, rec.status, rec.stage);
     C.S().reports.set(name, buf);
     const driveFileId = C.driveSave(`reports/${rec.siteId}_${site.name}/${name}`, buf);
     const row = insert('Reports', { reportId: U.newId('f'), recordId: rec.recordId, version, recordStatus: rec.status, driveFileId, url: `${rc.baseUrl || 'http://127.0.0.1:8787'}/files/reports/${encodeURIComponent(name)}`, sha256: U.sha256(buf), generatedBy: actor.userId, generatedAt: nowDt() });

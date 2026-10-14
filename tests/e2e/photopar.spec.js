@@ -27,7 +27,7 @@ async function startRecord(s, floor, lot) {
 }
 async function answerAll(s) {
   const { page } = s;
-  for (let n = 1; n <= 16; n++) await page.locator(`#it-i${n}`).locator('.v-ok').click();
+  await E.answerAllOk(s);
   await page.locator('#plan-row input').fill(tomorrow0900());
   await page.locator('#plan-row input').blur();
 }

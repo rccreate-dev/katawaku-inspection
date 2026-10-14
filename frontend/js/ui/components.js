@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
   var KW = root.KW;
-  var h = KW.h, t = KW.t;
+  var h = KW.h, t = KW.t, ts = KW.ts;
   var C = KW.ui = KW.ui || {};
 
   /* Blob URL 管理(画面遷移時に解放) */
@@ -10,7 +10,8 @@
   C.blobUrl = function (blob) { var u = URL.createObjectURL(blob); urls.push(u); return u; };
   C.releaseUrls = function () { urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) { /* 無視 */ } }); urls = []; };
 
-  C.statusChip = function (st, big) { return h('span', { class: 'chip st-' + st + (big ? ' lg' : '') }, t('st.' + st)); };
+  /* stage を渡すと approved の表示名が段階で変わる(打設前=打設可 / 出来形=出来形確認済。SPEC §6.8・§9.4) */
+  C.statusChip = function (st, big, stage) { return h('span', { class: 'chip st-' + st + (big ? ' lg' : '') }, ts('st.' + st, stage)); };
   C.resultChip = function (r) { return r ? h('span', { class: 'chip ' + r }, t('result.' + r)) : h('span', { class: 'chip na' }, t('result.none')); };
   C.chip = function (kind, text) { return h('span', { class: 'chip ' + (kind || '') }, text); };
 
@@ -110,7 +111,7 @@
     var line = [C.siteName(r.siteId), r.floor, r.zone || null, t('lbl.lot') + ' ' + (r.lot || ''), r.team || null].filter(Boolean).join(' / ');
     return h('div', { class: 'tap masked' },
       h('span', null, h('b', null, t('badge.masked')), h('small', null, line)),
-      h('span', { class: 'chips' }, C.statusChip(r.status), stopBtn));
+      h('span', { class: 'chips' }, C.statusChip(r.status, false, r.stage), stopBtn));
   };
 
   /* 送信状況が変わったとき、画面を作り直さずに削除ボタンの有効/無効だけ更新する */

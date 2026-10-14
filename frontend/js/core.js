@@ -51,6 +51,19 @@
   };
   root.t = KW.t;
 
+  /* 段階別の上書きキー(SPEC §9.4 版1.9)。stage が空でなく `<key>@<stage>` が辞書にあればそれ、無ければ t(key, params)。
+   * ステータス・ボタン・トースト・履歴ラベル・確認文で approved や元請サインの語を出すときは、その記録の stage を渡す */
+  KW.ts = function (key, stage, params) {
+    if (stage) {
+      var dict = root.I18N || {};
+      var k = key + '@' + stage;
+      var cur = dict[KW.state.lang];
+      if ((cur && cur[k] != null) || (dict.ja && dict.ja[k] != null)) return KW.t(k, params);
+    }
+    return KW.t(key, params);
+  };
+  root.ts = KW.ts;
+
   KW.pickLang = function (lang) { return lang === 'id' ? 'id' : 'ja'; };
 
   /* ---- DOM ヘルパ(textContent のみ。生文字をinnerHTMLに入れない) ---- */
