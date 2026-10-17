@@ -373,12 +373,14 @@ function runAction_(req, def) {
           var rp = globalThis['rp_' + action];
           return { data: rp(ctx), replayed: true };
         }
-        return { data: JSON.parse(hit.responseJson), replayed: true };
+        // 版1.10(§5.1a の4): 保存済みの応答の record を、再生時点の最新の RecordDetail に差し替える
+        return { data: RecordResp.onReplay(ctx, JSON.parse(hit.responseJson)), replayed: true };
       }
     }
     validateParams_(def, req.params);
     var data = handler(ctx);
-    if (def.idem) Idem.save(ctx, def.replay ? '' : JSON.stringify(data));
+    // ctx.idemData: record を Detail に広げた action が「従来の形」を置く(RecordResp.attach。Idem は45,000文字以内)
+    if (def.idem) Idem.save(ctx, def.replay ? '' : JSON.stringify(ctx.idemData || data));
     return { data: data, replayed: false };
   });
 }

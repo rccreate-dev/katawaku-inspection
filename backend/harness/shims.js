@@ -29,6 +29,8 @@ function createShims(state) {
   state.userLockHeld = false;    // ユーザーロックの保持状態
   state.lockOrderViolation = 0;  // ユーザーロックを持ったままスクリプトロックを取った回数(0であるべき)
   state.lockWaits = 0;
+  state.lockCalls = 0;           // getScriptLock / getUserLock を呼んだ回数(keepWarm がロックを取らない確認用。C-KEEP-02)
+  state.sheetReads = [];         // シートの読み取り記録(シート名)。C-KEEP-02 が keepWarm の読む範囲を確認する
   state.beforeScriptLock = null; // スクリプトロック取得の直前に呼ぶフック(interleave 用)
   state.driveLog = [];           // 仮想Driveの書込履歴 {op, path, fileId, lockHeld, at}
   state.driveFail = null;        // テスト用: { createFile: n } で n 回目の createFile を例外にする
@@ -94,6 +96,7 @@ function createShims(state) {
     }
     getValues() {
       this._check();
+      state.sheetReads.push(this.sh.name);
       const out = [];
       for (let i = 0; i < this.nr; i++) {
         const row = this.sh.rows[this.r - 1 + i] || [];
@@ -253,6 +256,7 @@ function createShims(state) {
   /* ---------- Lock / Cache / Properties ---------- */
   const LockService = {
     getScriptLock() {
+      state.lockCalls++;
       return {
         waitLock() {
           // interleave: ロック外処理の完了後・ロック取得の直前に別リクエストの割り込みを再現する
@@ -268,6 +272,7 @@ function createShims(state) {
       };
     },
     getUserLock() {
+      state.lockCalls++;
       return {
         waitLock() { if (state.userLockHeld) throw new Error('Lock timeout: ユーザーロックを取得できませんでした'); state.userLockHeld = true; },
         tryLock() { if (state.userLockHeld) return false; state.userLockHeld = true; return true; },
@@ -353,11 +358,24 @@ function createShims(state) {
   const ScriptApp = {
     getProjectTriggers: () => state.triggers.slice(),
     deleteTrigger(t) { state.triggers = state.triggers.filter((x) => x !== t); },
+    // 時間主導トリガーの代役。everyMinutes は実GASと同じ許可値(1/5/10/15/30)以外を例外にする。
+    // テストは t.spec({ fn, kind, everyMinutes, atHour, everyDays, tz }) で設定内容を確認する
     newTrigger(fn) {
-      const b = { _fn: fn };
-      const chain = () => b;
-      b.timeBased = chain; b.everyMinutes = chain; b.atHour = chain; b.everyDays = chain; b.inTimezone = chain; b.nearMinute = chain;
-      b.create = () => { const t = { getHandlerFunction: () => fn }; state.triggers.push(t); return t; };
+      const spec = { fn, kind: null, everyMinutes: null, atHour: null, everyDays: null, tz: null };
+      const b = {};
+      b.timeBased = () => { spec.kind = 'timeBased'; return b; };
+      b.everyMinutes = (n) => {
+        if ([1, 5, 10, 15, 30].indexOf(n) < 0) throw new Error('everyMinutes は 1/5/10/15/30 のみ: ' + n);
+        spec.everyMinutes = n; return b;
+      };
+      b.atHour = (h) => { spec.atHour = h; return b; };
+      b.everyDays = (d) => { spec.everyDays = d; return b; };
+      b.inTimezone = (tz) => { spec.tz = tz; return b; };
+      b.nearMinute = () => b;
+      b.create = () => {
+        const t = { getHandlerFunction: () => fn, spec: Object.assign({}, spec) };
+        state.triggers.push(t); return t;
+      };
       return b;
     },
   };

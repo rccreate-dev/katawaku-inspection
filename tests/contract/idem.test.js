@@ -5,6 +5,14 @@ const assert = require('node:assert/strict');
 const h = require('../helpers/client');
 
 const countKind = (rec, kind) => rec.events.filter((e) => e.kind === kind).length;
+// 版1.10 の読み替え(C-IDEM-01): 再生の data は `record` を除いて初回と同一。record は最新の RecordDetail(version は初回以上)。
+const sameExceptRecord = (replay, first, label) => {
+  const { record: rr, ...restR } = replay.data; const { record: rf, ...restF } = first.data;
+  assert.deepEqual(restR, restF, `${label}: record を除く data は同一`);
+  assert.ok(rr && rf, `${label}: record がある`);
+  assert.ok(Array.isArray(rr.items), `${label}: 再生の record は RecordDetail`);
+  assert.ok(rr.version >= rf.version, `${label}: record.version は初回以上`);
+};
 
 describe('C-IDEM 冪等キー', () => {
   beforeEach(() => h.reset());
@@ -18,7 +26,7 @@ describe('C-IDEM 冪等キー', () => {
     const b = await t.call('submitRecord', { recordId, round: 1 }, { pin: t.pin, clientId: cid1 });
     assert.equal(a.ok, true); assert.equal(b.ok, true);
     assert.equal(a.meta.replayed, false); assert.equal(b.meta.replayed, true);
-    assert.deepEqual(b.data, a.data);
+    sameExceptRecord(b, a, 'submitRecord');
     let rec = await h.getRecord(qa, recordId);
     assert.equal(countKind(rec, 'submitted'), 1); assert.equal(rec.round, 1); assert.equal(rec.status, 'submitted');
 
@@ -27,11 +35,11 @@ describe('C-IDEM 冪等キー', () => {
     const cid2 = h.newClientId();
     const v1 = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin, clientId: cid2 });
     const v2 = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin, clientId: cid2 });
-    assert.equal(v1.ok, true); assert.equal(v2.meta.replayed, true); assert.deepEqual(v2.data, v1.data);
+    assert.equal(v1.ok, true); assert.equal(v2.meta.replayed, true); sameExceptRecord(v2, v1, 'submitVerdict');
     const cid3 = h.newClientId();
     const p1 = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin, clientId: cid3 });
     const p2 = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin, clientId: cid3 });
-    assert.equal(p1.ok, true); assert.equal(p2.meta.replayed, true); assert.deepEqual(p2.data, p1.data);
+    assert.equal(p1.ok, true); assert.equal(p2.meta.replayed, true); sameExceptRecord(p2, p1, 'recordPrimeSign');
     rec = await h.getRecord(qa, recordId);
     assert.equal(countKind(rec, 'verdict_ok'), 1); assert.equal(countKind(rec, 'prime_signed'), 1);
     assert.equal(rec.round, 1); assert.equal(rec.status, 'approved');

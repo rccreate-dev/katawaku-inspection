@@ -657,6 +657,24 @@ function doAuthorize(actor, action, params, rc) {
   return ctx;
 }
 
+// ---------------------------------------------------------------------------
+// 書き込み応答の `record`(SPEC §5.1a)。getRecord と同じ関数(detailView)で作る。サムネ・写真本体は含まれない。
+// ---------------------------------------------------------------------------
+const RECORD_DETAIL_ACTIONS = new Set(['submitRecord', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'uploadPhotoChunk']);
+/** data に更新後の記録を載せる(作れなければ従来の形のまま。書き込みの成否は変えない)。 */
+function withRecord(actor, action, params, data) {
+  if (!RECORD_DETAIL_ACTIONS.has(action) || !data || typeof data !== 'object') return data;
+  if (action === 'uploadPhotoChunk' && data.complete !== true) return data; // 途中チャンクには付けない
+  try {
+    const rec = recordRow(params.recordId);
+    if (!rec) return data;
+    if (canViewDetail(actor, rec)) return Object.assign({}, data, { record: detailView(actor, rec) });
+    // 他班の職長の stopPour だけは masked 形(summaryView が masked を返す)。それ以外は保存済み/省略のまま。
+    if (action === 'stopPour' && actor.role === 'foreman') return Object.assign({}, data, { record: summaryView(actor, rec) });
+  } catch (e) { /* record を作れなかった: 従来の形で返す */ }
+  return data;
+}
+
 function replayRebuild(row, actor, action, params) {
   if (row.responseJson) return JSON.parse(row.responseJson);
   const rec = recordRow(params.recordId);
@@ -741,7 +759,7 @@ function dispatch(raw, rc) {
     paramsHash = U.sha256(U.canonicalJSON({ action, params }));
     const row = find('Idem', req.clientId);
     if (row) {
-      if (row.userId === actor.userId && row.action === action && row.paramsHash === paramsHash) return okRes(replayRebuild(row, actor, action, params), true);
+      if (row.userId === actor.userId && row.action === action && row.paramsHash === paramsHash) return okRes(withRecord(actor, action, params, replayRebuild(row, actor, action, params)), true);
       fail('IDEMPOTENCY_CONFLICT', '同じclientIdで内容が異なります');
     }
   }
@@ -749,9 +767,10 @@ function dispatch(raw, rc) {
   const data = handlers[action](rcx);
   if (def.star) {
     const rebuilt = action === 'createRecord' || action === 'claimReview' || action === 'takeoverReview';
+    // Idem には record(RecordDetail)を保存しない(§5.1a の4)。data は従来の形(RecordSummary / masked 形 / {note})のまま保存する。
     insert('Idem', { clientId: req.clientId, userId: actor.userId, action, paramsHash, responseJson: rebuilt ? '' : JSON.stringify(data), createdAt: nowDt() });
   }
-  return okRes(data);
+  return okRes(withRecord(actor, action, params, data));
 }
 
 // ---------------------------------------------------------------------------
@@ -805,7 +824,7 @@ async function handleUpload(raw, rc) {
   }
   // ロック取得の前でイベントループに制御を返す(別リクエストが割り込める)
   await tick();
-  let out; let keep = false;
+  let out; let keep = false; let uploadActor = null;
   try {
     applyInterleave('uploadPhotoChunk');
     out = await withLock(() => {
@@ -816,8 +835,11 @@ async function handleUpload(raw, rc) {
       rcx.ctx = doAuthorize(actor, prep.action, prep.params, rc);
       const r = handlers.uploadPhotoChunk$commit(rcx, prep);
       keep = r.created;
+      uploadActor = actor;
       return okRes(r.data);
     });
+    // §5.1a: record はロック解放後に読み取りだけで作る(その間に他の書き込みがあればより新しい版が入ってよい)
+    if (out.ok) out.data = withRecord(uploadActor, 'uploadPhotoChunk', prep.params, out.data);
   } catch (e) {
     out = toErrRes(e);
   }

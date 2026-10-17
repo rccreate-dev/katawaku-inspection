@@ -43,15 +43,24 @@ async function mock(p, body = {}) {
 const stateRows = async (sheet) => (await mock('state', { sheet })).rows;
 const reset = (o) => mock('reset', o || {});
 // 契約外の直接API(PIN付きの管理操作など。テストの準備・検証用)
+// 端末は (API URL, userId) ごとに1台を使い回す(毎回発行すると maxDevicesPerUser=3 を超え、画面側の端末が失効するため)。
+// reset 等で無効になったら(UNAUTHENTICATED / DEVICE_REVOKED)発行し直して1回だけやり直す。
+const apiDevices = new Map();
 async function api(action, params, { userId, pin, clientId, env } = {}) {
   const ctl = env && env.mock ? env.mock : mock;
   const url = env && env.apiUrl ? env.apiUrl : API_URL;
-  const { deviceToken } = await ctl('issueDevice', { userId });
-  const body = { v: 1, action, appVersion: '1.0.0', deviceToken, params: params || {} };
-  if (pin) body.pin = pin;
-  body.clientId = clientId || ('c_' + require('node:crypto').randomBytes(12).toString('hex'));
-  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
-  return r.json();
+  const key = url + '|' + userId;
+  const cid = clientId || ('c_' + require('node:crypto').randomBytes(12).toString('hex'));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!apiDevices.has(key)) apiDevices.set(key, (await ctl('issueDevice', { userId })).deviceToken);
+    const body = { v: 1, action, appVersion: '1.0.0', deviceToken: apiDevices.get(key), params: params || {} };
+    if (pin) body.pin = pin;
+    body.clientId = cid;
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok && attempt === 0 && ['UNAUTHENTICATED', 'DEVICE_REVOKED'].includes(j.error.code)) { apiDevices.delete(key); continue; }
+    return j;
+  }
 }
 
 async function ensureMock() {
@@ -217,4 +226,123 @@ async function settle(s, ms = 600) {
 /** 横スクロールが無いこと */
 const noHScroll = (s) => s.page.evaluate(() => document.scrollingElement.scrollWidth <= document.scrollingElement.clientWidth);
 
-module.exports = { setup, setupWithLatency, newSession, login, issueCode, enterCode, tab, goHash, shoot, enterPin, itemIdsOnScreen, answerAllOk, recordIdOnScreen, recordItems, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };
+
+// ===========================================================================
+// 版1.10(E-23〜E-28)用の補助
+// ===========================================================================
+const crypto = require('node:crypto');
+const SAMPLE_JPEG = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'sample.jpg'));
+const USER_PIN = { u_tanaka: '1111', u_sugiant: '2222', u_sato: '3333', u_suzuki: '4444', u_lead: '9999' };
+const rnd = (n) => Array.from(crypto.randomBytes(n), (b) => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 辞書の文言を、プレースホルダを数字(または指定値)に置き換えた正規表現にする(例: rx('save.sending') -> /送信中… \d+件/) */
+function rx(key, params, lang = 'ja') {
+  const raw = (I18N[lang] && I18N[lang][key]) ?? I18N.ja[key] ?? key;
+  const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(raw.split(/(\{\w+\})/).map((part) => { const m = /^\{(\w+)\}$/.exec(part); return m ? (params && params[m[1]] != null ? esc(params[m[1]]) : '\\d+') : esc(part); }).join(''));
+}
+
+/** ページから出る API リクエスト(POST)を action 単位で記録する。count(action, since) は since(ms)以降の件数 */
+function watchApi(s, apiUrl) {
+  const w = { reqs: [] };
+  s.page.on('request', (r) => {
+    if (r.method() !== 'POST' || !r.url().startsWith(apiUrl)) return;
+    try { const b = JSON.parse(r.postData() || '{}'); w.reqs.push({ action: b.action, params: b.params || {}, at: Date.now() }); } catch { /* 無視 */ }
+  });
+  w.count = (action, since = 0) => w.reqs.filter((x) => x.action === action && x.at >= since).length;
+  w.of = (action, since = 0) => w.reqs.filter((x) => x.action === action && x.at >= since);
+  return w;
+}
+
+/** API 経由の準備(UI を介さず、PIN付きの操作もテスト側で済ませる。env は setupWithLatency の戻り値) */
+const jstIsoFromNow = (addMs) => `${new Date(Date.now() + addMs + 9 * 3600000).toISOString().slice(0, 19)}+09:00`;
+async function apiOk(env, action, params, userId, withPin = false) {
+  const r = await api(action, params, { userId, env, pin: withPin ? USER_PIN[userId] : undefined });
+  if (!r.ok) throw new Error(`${action} 失敗: ${JSON.stringify(r.error)}`);
+  return r.data;
+}
+async function apiPhoto(env, userId, recordId, itemId, side = 'self') {
+  const photoId = 'p_' + rnd(16);
+  await apiOk(env, 'uploadPhotoChunk', {
+    photoId, recordId, itemId, side, index: 0, total: 1, mime: 'image/jpeg', data: SAMPLE_JPEG.toString('base64'), thumb: SAMPLE_JPEG.toString('base64'),
+    takenAt: new Date().toISOString(), width: 64, height: 48, bytes: SAMPLE_JPEG.length, sha256: crypto.createHash('sha256').update(SAMPLE_JPEG).digest('hex'),
+    stampText: 'A現場(仮) 1F ・ テスト ・ 2026-10-07 09:58',
+  }, userId);
+  return photoId;
+}
+/** 全項目 ok・重点項目に写真まで済ませた下書き(提出可能)を API で作る。返り値 { recordId, items } */
+async function apiReady(env, { siteId = 's_a', floor = '1F', lot = 'L' + rnd(5), owner = 'u_tanaka', stage = 'pre_pour', withKeyPhotos = true } = {}) {
+  const recordId = 'r_' + rnd(16);
+  const params = { recordId, siteId, floor, zone: '', lot, stage };
+  if (stage === 'pre_pour') params.pourPlannedAt = jstIsoFromNow(86400000);
+  const c = await apiOk(env, 'createRecord', params, owner);
+  const items = c.record.items.filter((i) => i.def.audience !== 'qa');
+  await apiOk(env, 'saveDraft', { recordId, items: items.map((i) => ({ itemId: i.itemId, result: 'ok' })) }, owner);
+  if (withKeyPhotos) for (const i of items.filter((x) => x.def.key)) await apiPhoto(env, owner, recordId, i.itemId, 'self');
+  return { recordId, items: c.record.items };
+}
+async function apiSubmitted(env, o = {}) {
+  const r = await apiReady(env, o);
+  await apiOk(env, 'submitRecord', { recordId: r.recordId, round: 1 }, o.owner || 'u_tanaka', true);
+  return r;
+}
+/** 提出済みの記録を、QA が確認中にして全項目 ok(または ng 指定)で保存した状態にする(判定は呼ばない) */
+async function apiClaimAndFillQa(env, recordId, qaUserId = 'u_sato', { ng = {}, comment } = {}) {
+  const c = await apiOk(env, 'claimReview', { recordId, round: 1 }, qaUserId);
+  const items = c.record.items.filter((i) => i.def.audience !== 'foreman').map((i) => ({ itemId: i.itemId, result: ng[i.itemId] ? 'ng' : 'ok', ...(ng[i.itemId] ? { severity: ng[i.itemId].severity, note: ng[i.itemId].note } : {}) }));
+  await apiOk(env, 'saveQaDraft', { recordId, items, ...(comment !== undefined ? { comment } : {}) }, qaUserId);
+}
+/** 提出済み→QA合格(qa_ok)まで API で進める */
+async function apiQaOk(env, o = {}) {
+  const r = await apiSubmitted(env, o);
+  const qa = o.qa || 'u_sato';
+  await apiClaimAndFillQa(env, r.recordId, qa);
+  await apiOk(env, 'submitVerdict', { recordId: r.recordId, round: 1, verdict: 'ok' }, qa, true);
+  return r;
+}
+const getRecordVia = async (env, recordId, userId) => (await apiOk(env, 'getRecord', { recordId }, userId)).record;
+
+/** PIN モーダル(M1)の部品 */
+const pinSheet = (s) => s.page.locator('.sheet:has(input[name=pin])').last();
+/** PIN を入れて『OK』を押す(応答は待たない)。戻り値 = 押した時刻(ms) */
+async function pinSubmitNoWait(s, pin) {
+  const sh = pinSheet(s);
+  await sh.locator('input[name=pin]').waitFor();
+  await sh.locator('input[name=pin]').fill(pin);
+  const at = Date.now();
+  await sh.locator('.btns .btn:not(.ghost)').click();
+  return at;
+}
+/** 画面全体のテキストに、辞書の文言(rx)が出ているか */
+const bodyHas = (s, re) => s.page.evaluate(([src, flags]) => new RegExp(src, flags).test(document.body.innerText), [re.source, re.flags]);
+/** 指定の時間(ms)内に文言が出るまで待つ。出なければ例外 */
+const waitText = (s, re, timeout = 5000) => s.page.waitForFunction(([src, flags]) => new RegExp(src, flags).test(document.body.innerText), [re.source, re.flags], { timeout, polling: 'raf' });
+
+/**
+ * 高遅延のAPIサーバー(--latency 2000 等)用の高速ログイン。UIの登録フローは往復が多く数十秒かかるため、
+ * 制御API(issueDevice。遅延なし)で端末を発行し、アプリの IndexedDB(kv)に deviceToken/me を直接入れてから起動し直す。
+ * 登録フロー自体の検査は E-01 が行う。
+ */
+async function loginFast(s, name) {
+  const { page, env } = s;
+  const rows = env.stateRows ? await env.stateRows('Users') : await stateRows('Users');
+  const u = rows.find((x) => x.name === name);
+  const ctl = env.mock || mock;
+  const dev = await ctl('issueDevice', { userId: u.userId });
+  const r = await api('me', {}, { userId: u.userId, env });
+  if (!r.ok) throw new Error('me 失敗: ' + JSON.stringify(r.error));
+  const me = { ...r.data.user, lang: s.lang };
+  await page.goto(s.base + '/#/register');
+  await page.waitForFunction(() => window.KW && window.KW.db && window.KW.db.kvSet);
+  await page.evaluate(async ([tok, id, m, lang]) => {
+    await KW.db.kvSet('deviceToken', tok); await KW.db.kvSet('deviceId', id);
+    await KW.db.kvSet('me', m); await KW.db.kvSet('lastUserId', m.userId); await KW.db.kvSet('lang', lang);
+  }, [dev.deviceToken, dev.deviceId, me, s.lang]);
+  await page.goto(s.base + '/#/');
+  await page.reload();
+  await page.locator('#tabbar button').first().waitFor({ timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('#view h2'));
+}
+
+module.exports = { loginFast, rx, watchApi, apiOk, apiPhoto, apiReady, apiSubmitted, apiClaimAndFillQa, apiQaOk, getRecordVia, pinSheet, pinSubmitNoWait, bodyHas, waitText, sleep, USER_PIN, SAMPLE_JPEG, setup, setupWithLatency, newSession, login, issueCode, enterCode, tab, goHash, shoot, enterPin, itemIdsOnScreen, answerAllOk, recordIdOnScreen, recordItems, outboxCount, settle, noHScroll, mock, stateRows, reset, api, T, PINS, API_URL, MOCK_BASE };

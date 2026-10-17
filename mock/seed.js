@@ -1293,6 +1293,7 @@ const CONFIG_ROWS = [
   ['photoChunkChars', '90000', 'int', ''], ['photoMaxBytes', '600000', 'int', ''], ['photoSingleMaxChars', '1200000', 'int', ''], ['photoParallel', '3', 'int', ''], ['photoThumbMaxChars', '100000', 'int', ''], ['enabledStages', 'pre_pour,post_demold', 'str', ''],
   ['pollIntervalSec', '60', 'int', ''], ['driveRootFolderId', 'mock_drive_root', 'str', ''], ['pdfShareMode', 'anyone_with_link', 'str', ''],
   ['mailEnabled', 'TRUE', 'bool', ''], ['appBaseUrl', 'http://localhost:8080', 'str', ''], ['retentionYears', '10', 'int', ''],
+  ['keepWarmMinutes', '5', 'int', ''], // 版1.10(§2.14)。サーバー専用: PUBLIC_CONFIG_KEYS に入れない
 ].map(([key, value, type, description]) => ({ key, value, type, description }));
 
 const PUBLIC_CONFIG_KEYS = ['escalationMin1', 'escalationMin2', 'claimTakeoverMin', 'selfDeadlineHour', 'qaOpenHour', 'qaLeadMinutes', 'photoMaxEdge', 'photoJpegQuality', 'photoThumbEdge', 'photoMaxPerItem', 'photoChunkChars', 'photoSingleMaxChars', 'photoParallel', 'photoMaxBytes', 'enabledStages', 'pollIntervalSec', 'pinMaxFail', 'minClientVersion'];

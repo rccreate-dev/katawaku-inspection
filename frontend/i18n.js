@@ -525,7 +525,39 @@
     ['scr.M9.role', '役', 'Peran'],
     ['scr.M9.team', '班名', 'Nama regu'],
     ['scr.M9.team_required', '班名を入力してください', 'Isi nama regu'],
-    ['scr.M9.title', '参加を承認', 'Setujui bergabung']
+    ['scr.M9.title', '参加を承認', 'Setujui bergabung'],
+
+    /* 版1.10: 先出しと送信状態の可視化(SPEC §8.11・§9.4。インドネシア語は暫定訳 P-22) */
+    ['act.sending', '送信中…', 'Mengirim…'],
+    ['msg.slow_wait', '通信に時間がかかっています。そのままお待ちください', 'Koneksi lambat. Mohon tunggu'],
+    ['msg.wait_photos', '写真の送信が終わるまでお待ちください', 'Tunggu sampai pengiriman foto selesai'],
+    ['msg.delete_failed', '削除できませんでした', 'Gagal menghapus'],
+    ['msg.checking_latest', '最新を確認中…', 'Memeriksa data terbaru…'],
+    ['scr.S07.photo_progress', '写真 {done}/{total} 送信済み', 'Foto terkirim {done}/{total}'],
+    ['scr.S07.photo_failed', '写真の送信に失敗が{n}件あります', '{n} foto gagal terkirim'],
+    ['photo.processing', '処理中…', 'Memproses…'],
+    ['photo.save_failed', '保存できません。撮り直してください', 'Gagal menyimpan. Ambil ulang'],
+    ['photo.st.queued', '送信待ち', 'Menunggu'],
+    ['photo.st.retry', '送信待ち(再試行{n}回目)', 'Menunggu (percobaan ke-{n})'],
+    ['photo.st.sending', '送信中', 'Mengirim'],
+    ['photo.st.failed', '失敗', 'Gagal'],
+    ['photo.st.saved', '保存済み', 'Tersimpan'],
+    ['photo.st.offline', '圏外のため送信待ち', 'Menunggu (tidak ada sinyal)'],
+    ['save.synced', '送信済み', 'Terkirim'],
+    ['save.sending', '送信中… {n}件', 'Mengirim… {n}'],
+    ['save.queued', '送信待ち {n}件', 'Menunggu {n}'],
+    ['save.offline', '圏外のため端末に保存中({n}件)。電波が戻ると自動で送ります', 'Tidak ada sinyal: tersimpan di perangkat ({n}). Dikirim otomatis saat sinyal kembali'],
+    ['save.failed', '送信できていない操作が{m}件あります', '{m} operasi belum terkirim'],
+    ['save.check', '確認する', 'Periksa'],
+    ['outbox.badge_bad', '未送信 {n} ・要対応 {m}', 'Tertunda {n} · perlu tindakan {m}'],
+    ['outbox.problem_banner', '送信できていない操作があります', 'Ada operasi yang belum terkirim'],
+    ['outbox.problem_input', '送信できなかった入力があります', 'Ada input yang gagal terkirim'],
+    ['outbox.locked_hint', '他の人が先に状態を変えました。入力は端末に残っています', 'Orang lain sudah mengubah status. Input tetap tersimpan di perangkat'],
+    ['outbox.need_action', '要対応 {m}件', 'Perlu tindakan {m}'],
+    ['note.pending_title', '送信待ちのコメント', 'Komentar menunggu kirim'],
+    ['note.failed', '送信できませんでした', 'Gagal dikirim'],
+    ['note.discard_restore', '破棄(本文を入力欄に戻す)', 'Buang (kembalikan teks ke kolom)'],
+    ['badge.unsent', '未送信', 'Belum terkirim']
   ];
 
   var ja = {}, id = {};

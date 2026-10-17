@@ -19,6 +19,10 @@
       var pending = {}, commentDirty = false;
       var drawBox = null;
       var itemNodes = {}, verdictBox = null, serverViol = null, busyVerdict = false;
+      var sendingVerdict = null, slowVerdict = false, slowTimer = null; // 判定の応答待ち(『送信中…』と8秒後の案内。SPEC §8.11.8)
+      var mem = C.memPhotos();   // 撮影直後のメモリ上のサムネ(SPEC §8.11.5)
+      var saveOff = false;       // 入力を破棄した後は作業コピーを書き戻さない
+      var rstatus = C.recordStatus(ctx, id, { beforeDiscard: function () { saveOff = true; pending = {}; commentDirty = false; } });
       var save = KW.debounce(doSave, 500);
 
       function editable() { return has(detail, 'saveQaDraft'); }
@@ -28,7 +32,7 @@
         save(); drawVerdict();
       }
       function doSave() {
-        if (!detail || !editable()) return Promise.resolve();
+        if (saveOff || !detail || !editable()) return Promise.resolve();
         var items = Object.keys(pending).map(function (k) {
           var x = work.qaItems[k];
           return { itemId: k, result: x.result || null, severity: x.result === 'ng' ? (x.severity || null) : null, values: (x.values || []).slice(), note: x.note || '' };
@@ -112,7 +116,7 @@
             box.appendChild(ta);
           }
           if (x.result && x.result !== 'na') {
-            var photos = C.photosFor(detail, work, blobs, it.itemId, 'qa');
+            var photos = C.photosFor(detail, work, blobs, it.itemId, 'qa').concat(mem.forItem(it.itemId, 'qa', blobs));
             var max = (KW.state.bootstrap && KW.state.bootstrap.config && KW.state.bootstrap.config.photoMaxPerItem) || 5;
             var strip = C.photoStrip(photos, { onDelete: ed ? function (p) { deletePhoto(it, p); } : null });
             if (ed && has(detail, 'uploadPhotoChunk')) {
@@ -137,15 +141,24 @@
         KW.modal.camera({ siteName: C.siteName(detail.siteId), floor: detail.floor, zone: detail.zone, count: count, max: max }).then(function (p) {
           if (!p) return;
           var photoId = KW.newPhotoId();
+          // 『使う』を押した時点で、端末への保存を待たずにサムネを出す(SPEC §8.11.5)
+          mem.add({ photoId: photoId, itemId: it.itemId, side: 'qa', thumb: p.thumb });
+          redraw(it.itemId);
           return KW.data.putPhotoBlob({
             photoId: photoId, recordId: id, itemId: it.itemId, side: 'qa', full: p.full, thumb: p.thumb,
             meta: { takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, sha256: p.sha256, stampText: p.stampText }, uploadState: 'pending'
           }).then(function () {
-            return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'qa' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } });
-          }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redraw(it.itemId); drawVerdict(); });
+            return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'qa' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
+              .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); });
+          }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
+            blobs = b; mem.drop(photoId); redraw(it.itemId); drawVerdict();
+          }, function (e) {
+            KW.reportError(e); mem.fail(photoId); redraw(it.itemId); // 保存できません。撮り直してください
+          });
         });
       }
       function deletePhoto(it, p) {
+        if (p.mem) { if (p.mem === 'failed') { mem.drop(p.photoId); redraw(it.itemId); } return; }
         if (p.local) {
           KW.outbox.forRecord(id).then(function (rs) {
             var row = rs.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
@@ -155,8 +168,10 @@
           }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redraw(it.itemId); drawVerdict(); });
           return;
         }
+        // 送信済みの写真: 押した瞬間に隠し、deletePhoto は裏で送る。失敗したら元に戻す(§8.11.4)
         work.deletedPhotos[p.photoId] = true;
-        KW.data.putDraft(work).then(function () { return KW.outbox.enqueue('deletePhoto', { photoId: p.photoId }, { recordId: id }); }).then(function () { redraw(it.itemId); drawVerdict(); });
+        KW.data.putDraft(work).then(function () { return KW.outbox.enqueue('deletePhoto', { photoId: p.photoId }, { recordId: id }); }).then(function () { drawVerdict(); });
+        redraw(it.itemId); drawVerdict();
       }
 
       /* ---- 判定 ---- */
@@ -197,6 +212,7 @@
           var viol = KW.validate.validateVerdict(rec, v, work.qaComment);
           var okState = !viol.length && online && left === 0 && !busyVerdict;
           var b = h('button', { type: 'button', class: 'btn big' + (v === 'major' ? ' bad' : (v === 'minor' ? '' : '')) + (v === 'minor' ? ' ghost' : ''), disabled: !okState }, t('verdict.' + v));
+          if (sendingVerdict === v) C.setBusy(b, true); // 応答待ち: 『送信中…』+スピナー
           b.addEventListener('click', function () { doVerdict(v); });
           verdictBox.appendChild(h('div', { class: 'card' }, b, (function () {
             var f = document.createDocumentFragment();
@@ -205,27 +221,37 @@
             return f;
           })()));
         });
+        if (slowVerdict) verdictBox.appendChild(C.msg('warn', t('msg.slow_wait')));
         if (has(detail, 'releaseClaim')) {
           var rel = h('button', { type: 'button', class: 'btn ghost' }, t('scr.S10.release'));
           rel.addEventListener('click', C.guard(rel, function () {
             return KW.modal.confirm({ title: t('scr.S10.release'), body: t('scr.S10.release_body'), okLabel: t('scr.S10.release') }).then(function (ok) {
               if (!ok) return null;
               return flushSave().then(function () {
-                return KW.api.call('releaseClaim', { recordId: id }, { clientId: opId('release:' + id) }).then(function (res) {
-                  if (res.ok) { delete opIds['release:' + id]; return KW.data.mergeSummary(res.data.record).then(function () { KW.app.go('#/', true); }); }
+                return C.busyWhile(rel, KW.api.call('releaseClaim', { recordId: id }, { clientId: opId('release:' + id) })).then(function (res) {
+                  if (res.ok) { delete opIds['release:' + id]; return KW.data.applyRecord(res.data.record, id).then(function () { KW.app.go('#/', true); }); }
                   C.toast(res.network ? t('err.network') : KW.errText(res.error), 'bad'); return null;
                 });
               });
             });
-          }));
+          }, { quiet: true }));
           verdictBox.appendChild(rel);
         }
       }
 
       function afterVerdict(res, v) {
         KW.flash.record[id] = res.data.warnings || [];
-        return KW.data.mergeSummary(res.data.record).then(function () { return KW.data.delDraft(id); }).then(function () { KW.app.go('#/record/' + id, true); });
+        // 応答の record(RecordDetail)で S08 を描く。getRecord は呼ばない(旧サーバーで要約だけのときは S08 が取り直す)
+        return KW.data.applyRecord(res.data.record, id).then(function () { return KW.data.delDraft(id); }).then(function () { KW.app.go('#/record/' + id, true); });
       }
+      /* 判定の応答待ちの表示(『送信中…』と、8秒を超えたときの案内) */
+      function setSending(v) {
+        sendingVerdict = v; slowVerdict = false;
+        if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; }
+        if (v) slowTimer = setTimeout(function () { slowTimer = null; slowVerdict = true; drawVerdict(); }, C.SLOW_MS);
+        drawVerdict();
+      }
+      ctx.cleanup(function () { if (slowTimer) clearTimeout(slowTimer); });
       function handleFail(res, key) {
         if (res.network) { C.toast(t('err.network'), 'bad'); return Promise.resolve(); }
         delete opIds[key];
@@ -247,7 +273,7 @@
           rows = rs;
           if (rs.length) { busyVerdict = false; drawVerdict(); return null; }
           if (v === 'ok') {
-            return KW.modal.pinFlow({ title: t('scr.S10.pin_title'), action: 'submitVerdict', params: base, clientId: opId(key) }).then(function (res) {
+            return KW.modal.pinFlow({ title: t('scr.S10.pin_title'), action: 'submitVerdict', params: base, clientId: opId(key), onBusy: function (on) { setSending(on ? 'ok' : null); } }).then(function (res) {
               busyVerdict = false;
               if (res === null) { drawVerdict(); return null; }
               if (res.ok) { delete opIds[key]; return afterVerdict(res, v); }
@@ -256,7 +282,9 @@
           }
           return KW.modal.confirm({ title: t('verdict.' + v), body: v === 'major' ? KW.ts('scr.S10.confirm_major', detail.stage) : t('scr.S10.confirm_minor'), okLabel: t('verdict.' + v), danger: v === 'major' }).then(function (ok) {
             if (!ok) { busyVerdict = false; drawVerdict(); return null; }
+            setSending(v);
             return KW.api.call('submitVerdict', base, { clientId: opId(key) }).then(function (res) {
+              setSending(null);
               busyVerdict = false;
               if (res.ok) { delete opIds[key]; return afterVerdict(res, v); }
               return handleFail(res, key).then(drawVerdict);
@@ -273,7 +301,8 @@
           var go = h('button', { type: 'button', class: 'btn big' }, t('scr.S10.claim'));
           go.addEventListener('click', C.guard(go, function () {
             return KW.api.call('claimReview', { recordId: id, round: d.round }, { clientId: opId('claim:' + id + ':' + d.round) }).then(function (res) {
-              if (res.ok) { delete opIds['claim:' + id + ':' + d.round]; return KW.data.putDetail(res.data.record).then(function () { return reload(); }); }
+              // 応答が既に RecordDetail。反映して同じ画面を描き直す(getRecord は呼ばない。§8.11.8-3)
+              if (res.ok) { delete opIds['claim:' + id + ':' + d.round]; return KW.data.applyRecord(res.data.record, id).then(function () { return reload({ maxAgeMs: 15000 }); }); }
               if (res.network) { C.toast(t('err.network'), 'bad'); return null; }
               delete opIds['claim:' + id + ':' + d.round];
               C.toast(KW.errText(res.error), 'bad');
@@ -289,7 +318,7 @@
             var tk = h('button', { type: 'button', class: 'btn' }, t('act.takeover'));
             tk.addEventListener('click', C.guard(tk, function () {
               return KW.api.call('takeoverReview', { recordId: id, round: d.round }, { clientId: opId('take:' + id + ':' + d.round) }).then(function (res) {
-                if (res.ok) { delete opIds['take:' + id + ':' + d.round]; return KW.data.putDetail(res.data.record).then(function () { return reload(); }); }
+                if (res.ok) { delete opIds['take:' + id + ':' + d.round]; return KW.data.applyRecord(res.data.record, id).then(function () { return reload({ maxAgeMs: 15000 }); }); }
                 if (res.network) { C.toast(t('err.network'), 'bad'); return null; }
                 delete opIds['take:' + id + ':' + d.round];
                 C.toast(KW.errText(res.error), 'bad'); return reload();
@@ -308,6 +337,7 @@
         var d = detail;
         if (d.status !== 'submitted') { KW.app.go('#/record/' + id, true); return; }
         ctx.chrome({ back: '#/', site: C.siteName(d.siteId), bar: [d.floor + (d.zone ? '・' + d.zone : ''), d.lot, t('stage.' + C.stageOf(d))].join(' / ') });
+        el.appendChild(rstatus);
         el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S10.title')), C.statusChip(d.status, true, d.stage)));
         el.appendChild(C.recHeadCard(d, h('div', { class: 'meta' }, t('lbl.submitted_by', { name: C.ownerLabel(d) }) + ' / ' + C.ago(d.submittedAt))));
         if (d.escLevel) el.appendChild(C.banner('warn', h('b', null, t('esc.' + d.escLevel))));
@@ -341,8 +371,8 @@
         drawVerdict();
       }
 
-      function reload() {
-        return C.loadWork(id).then(function (r) {
+      function reload(opts) {
+        return C.loadWork(id, opts).then(function (r) {
           if (!ctx.alive()) return;
           if (!r.detail) {
             KW.clear(el);
@@ -354,8 +384,15 @@
           drawAll();
         });
       }
-      reload();
+      reload({ maxAgeMs: 15000 });
 
+      // 先出しした写真の削除が失敗: 隠していた写真を元に戻す(§8.11.4)
+      ctx.on('photo:delete_failed', function (rid, pid) {
+        if (rid !== id || !work) return;
+        if (work.deletedPhotos) delete work.deletedPhotos[pid];
+        KW.data.putDraft(work);
+        Object.keys(itemNodes).forEach(redraw); if (drawBox) drawBox.redraw();
+      });
       ctx.on('outbox:counts', function () {
         C.syncDeleteButtons(el);
         if (!detail) return;

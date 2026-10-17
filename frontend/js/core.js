@@ -116,7 +116,9 @@
       camera: ['M4 8h3l2-3h6l2 3h3v11H4z', { c: [12, 13, 3.5] }],
       close: ['M6 6l12 12M18 6L6 18'],
       back: ['M15 5l-7 7 7 7'],
-      refresh: ['M20 11a8 8 0 10-2.3 5.7', 'M20 4v7h-7']
+      refresh: ['M20 11a8 8 0 10-2.3 5.7', 'M20 4v7h-7'],
+      check: ['M5 13l4 4L19 7'],
+      warn: ['M12 3L2 20h20z', 'M12 10v4', 'M12 17h.01']
     };
     return KW.svg(map[name] || [], 'ico');
   };

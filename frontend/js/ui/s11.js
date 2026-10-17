@@ -210,6 +210,16 @@
     });
   }
 
+  C.discardRow = discardRow; // 画面側の『破棄』(失敗バナー・失敗した写真)からも使う(SPEC §8.11.4)
+
+  /* 行の状態の文言。写真の行は §8.11.5 の語(送信待ち/送信中/失敗)に揃える */
+  function stateText(r) {
+    if (r.action !== 'uploadPhotoChunk') return t('outbox.st.' + r.status);
+    var st = KW.outbox.photoState(r);
+    if (st === 'queued' && (r.tries || 0) >= 1) return t('photo.st.retry', { n: r.tries });
+    return t('photo.st.' + st);
+  }
+
   KW.screens.S20 = {
     mount: function (ctx) {
       ctx.chrome({ back: '#/settings' });
@@ -221,6 +231,9 @@
           v[1].forEach(function (r) { recs[r.recordId] = r; });
           KW.clear(el);
           el.appendChild(h('h2', null, t('outbox.title')));
+          // 要対応(failed / blocked)のサマリ(SPEC §8.11.7・§9.2a)
+          var needN = rows.filter(function (r) { return r.status === 'failed' || r.status === 'blocked'; }).length;
+          if (needN) el.appendChild(C.banner('bad', h('b', null, t('outbox.need_action', { m: needN }))));
           var now = h('button', { type: 'button', class: 'btn', disabled: !KW.isOnline() || !rows.length }, t('outbox.send_now'));
           now.addEventListener('click', C.guard(now, function () { return KW.sync.flush().then(draw); }));
           el.appendChild(now);
@@ -229,7 +242,7 @@
           rows.forEach(function (r) {
             var rec = r.recordId ? recs[r.recordId] : null;
             var card = h('div', { class: 'card' },
-              h('div', { class: 'row wrap' }, h('b', null, t('outbox.act.' + r.action)), C.chip(r.status === 'failed' ? 'bad' : (r.status === 'blocked' ? 'warn' : 'na'), t('outbox.st.' + r.status))),
+              h('div', { class: 'row wrap' }, h('b', null, t('outbox.act.' + r.action)), C.chip(r.status === 'failed' ? 'bad' : (r.status === 'blocked' ? 'warn' : 'na'), stateText(r))),
               rec ? h('div', { class: 'sub' }, C.placeLine(rec)) : null);
             if (r.photo) card.appendChild(h('div', { class: 'sub' }, t('photo.uploading') + ' ' + (r.photo.nextIndex || 0 ? '(' + r.photo.nextIndex + ')' : '')));
             // 30日超(EXPIRED)は再送も createdAt の書き換えもしない。できるのは「破棄」のみ(SPEC §8.5)
@@ -243,14 +256,14 @@
                 return KW.outbox.update(r.seq, function (x) { x.status = 'pending'; x.tries = 0; x.nextTryAt = 0; x.lastError = null; x.blockReason = null; })
                   .then(function () { return r.recordId ? KW.outbox.unblockRecord(r.recordId) : null; })
                   .then(function () { return KW.sync.flush(); }).then(draw);
-              }));
+              }, { quiet: true }));
               var ds = h('button', { type: 'button', class: 'btn small badghost' }, t('act.discard'));
               ds.addEventListener('click', C.guard(ds, function () {
                 return KW.modal.confirm({ title: t('act.discard'), body: t('outbox.discard_body'), okLabel: t('act.discard'), danger: true }).then(function (ok) {
                   if (!ok) return null;
                   return discardRow(r).then(function () { return KW.sync.refreshCounts(); }).then(draw);
                 });
-              }));
+              }, { quiet: true }));
               if (!expired) btns.appendChild(rt);
               btns.appendChild(ds);
             }

@@ -9,6 +9,12 @@
   /* ---- 共通: 作業コピーの読み込み・統合(SPEC §8.7/§8.8) ---- */
   function mergeDraft(detail, draft, rows) {
     var fresh = KW.data.draftFromDetail(detail);
+    // 先出しした写真の削除が確定失敗していたら、隠さずに元へ戻す(SPEC §8.11.4)
+    if (draft && draft.deletedPhotos) {
+      (rows || []).forEach(function (r) {
+        if (r.action === 'deletePhoto' && (r.status === 'failed' || r.status === 'blocked') && r.params) delete draft.deletedPhotos[r.params.photoId];
+      });
+    }
     if (!draft || draft.baseRound !== detail.round) return fresh;
     if (!rows.length && !draft.dirty) return fresh;
     // 未送信あり: dirty な項目は端末側を優先、それ以外はサーバー値
@@ -23,8 +29,9 @@
     return draft;
   }
 
-  C.loadWork = function (id) {
-    return KW.data.loadDetail(id).then(function (res) {
+  /* opts.maxAgeMs: 書き込み応答の record を反映した直後は getRecord を呼ばずキャッシュで開く(SPEC §8.11.8-3) */
+  C.loadWork = function (id, opts) {
+    return KW.data.loadDetail(id, opts).then(function (res) {
       if (!res.detail) return { res: res };
       return Promise.all([KW.data.getDraft(id), KW.outbox.forRecord(id), KW.data.photoBlobsFor(id)]).then(function (v) {
         var work = mergeDraft(res.detail, v[0], v[1]);
@@ -87,6 +94,10 @@
       C.siteNameOfRecord(id).then(function (n) { if (ctx.alive() && !detail) ctx.chrome({ back: '#/', site: n }); });
       var itemNodes = {}, pending = {}, headerPatch = null;
       var progress = null, progressText = null, problemsBox = null, drawBox = null;
+      var mem = C.memPhotos(); // 撮影直後のメモリ上のサムネ(端末への保存を待たない。SPEC §8.11.5)
+      var saveOff = false;     // 入力を破棄した後は作業コピーを書き戻さない
+      // 保存状態の1行と、送信できなかった入力のバナー(§8.11.4・§8.11.6)。画面を描き直しても作り直さない
+      var rstatus = C.recordStatus(ctx, id, { beforeDiscard: function () { saveOff = true; pending = {}; headerPatch = null; } });
 
       var save = KW.debounce(doSave, 500);
       function touch(itemId) {
@@ -96,6 +107,7 @@
         save();
       }
       function doSave() {
+        if (saveOff) return Promise.resolve();
         var items = Object.keys(pending).map(function (k) {
           var x = work.items[k];
           return { itemId: k, result: x.result || null, values: (x.values || []).slice(), note: x.note || '' };
@@ -123,7 +135,7 @@
         if (progressText) KW.clear(progressText).appendChild(document.createTextNode(t('scr.S06.progress', { done: c.filled, total: c.total })));
       }
 
-      function itemPhotos(itemId) { return photosFor(detail, work, blobs, itemId, 'self'); }
+      function itemPhotos(itemId) { return photosFor(detail, work, blobs, itemId, 'self').concat(mem.forItem(itemId, 'self', blobs)); }
 
       function buildItem(it, idx) {
         var def = it.def, x = work.items[it.itemId] || { result: null, values: [], note: '' };
@@ -213,17 +225,25 @@
         KW.modal.camera({ siteName: C.siteName(detail.siteId), floor: detail.floor, zone: detail.zone, count: count, max: max }).then(function (p) {
           if (!p) return;
           var photoId = KW.newPhotoId();
+          // 『使う』を押した時点で、端末への保存を待たずにサムネを出す(SPEC §8.11.5)
+          mem.add({ photoId: photoId, itemId: it.itemId, side: 'self', thumb: p.thumb });
+          delete errMap[it.itemId]; redrawItem(it.itemId);
           return KW.data.putPhotoBlob({
             photoId: photoId, recordId: id, itemId: it.itemId, side: 'self', full: p.full, thumb: p.thumb,
             meta: { takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, sha256: p.sha256, stampText: p.stampText }, uploadState: 'pending'
           }).then(function () {
-            return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'self' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } });
-          }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
-            blobs = b; delete errMap[it.itemId]; redrawItem(it.itemId);
+            return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'self' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
+              .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); }); // 積めなければ本体も消す
+          }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
+            blobs = b; mem.drop(photoId); redrawItem(it.itemId);
+          }, function (e) {
+            // 保存に失敗: 赤の『保存できません。撮り直してください』。送信行は積まない
+            KW.reportError(e); mem.fail(photoId); redrawItem(it.itemId);
           });
         });
       }
       function deletePhoto(it, p) {
+        if (p.mem) { if (p.mem === 'failed') { mem.drop(p.photoId); redrawItem(it.itemId); } return; }
         if (p.local) {
           KW.outbox.forRecord(id).then(function (rows) {
             var row = rows.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
@@ -234,8 +254,10 @@
           }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redrawItem(it.itemId); });
           return;
         }
+        // 送信済みの写真: 押した瞬間に隠し、deletePhoto は裏で送る。失敗したら元に戻す(§8.11.4)
         work.deletedPhotos[p.photoId] = true;
         KW.data.putDraft(work).then(function () { return KW.outbox.enqueue('deletePhoto', { photoId: p.photoId }, { recordId: id }); }).then(function () { redrawItem(it.itemId); });
+        redrawItem(it.itemId);
       }
 
       function validateNow() {
@@ -267,6 +289,7 @@
         KW.clear(el); itemNodes = {};
         editable = (detail.actions || []).indexOf('saveDraft') >= 0;
         ctx.chrome({ back: '#/site/' + detail.siteId, site: C.siteName(detail.siteId), bar: [detail.floor + (detail.zone ? '・' + detail.zone : ''), detail.lot, t('stage.' + detail.stage)].join(' / ') });
+        el.appendChild(rstatus);
         el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S06.title')), C.statusChip(detail.status, true, detail.stage)));
         el.appendChild(C.recHeadCard(detail));
         if (changedBanner) {
@@ -344,7 +367,7 @@
               if (v.length) { showViolations(v); return; }
               KW.app.go('#/record/' + id + '/confirm');
             });
-          }));
+          }, { quiet: true }));
           el.appendChild(go);
         }
         if (ctx.query.v === '1' || (KW.flash.violations[id] || null)) {
@@ -354,7 +377,7 @@
         }
       }
 
-      C.loadWork(id).then(function (r) {
+      C.loadWork(id, { maxAgeMs: 15000 }).then(function (r) {
         if (!ctx.alive()) return;
         KW.clear(el);
         if (!r.detail) {
@@ -399,6 +422,14 @@
           if (drawBox) drawBox.redraw();
         });
       });
+      // 先出しした写真の削除が失敗: 隠していた写真を元に戻す(§8.11.4)
+      ctx.on('photo:delete_failed', function (rid, pid) {
+        if (rid !== id || !work) return;
+        if (work.deletedPhotos) delete work.deletedPhotos[pid];
+        KW.data.putDraft(work);
+        Object.keys(itemNodes).forEach(redrawItem);
+        if (drawBox) drawBox.redraw();
+      });
       ctx.on('outbox:counts', function () {
         C.syncDeleteButtons(el);
         if (!work) return;
@@ -417,6 +448,7 @@
       ctx.chrome({ back: '#/record/' + id + '/edit', site: t('app.site_unknown') });
       el.appendChild(C.skeleton(3));
       var detail, work, blobs = [];
+      var photoTotal = 0; // この画面を開いてから見た、送信待ちの写真の最大数(進み具合『写真 done/total』用)
       C.siteNameOfRecord(id).then(function (n) { if (ctx.alive() && !detail) ctx.chrome({ back: '#/record/' + id + '/edit', site: n }); });
 
       function pendingRows() { return KW.outbox.forRecord(id); }
@@ -447,24 +479,39 @@
         var left = rows.length;
         var bad = rows.filter(function (r) { return r.status === 'failed' || r.status === 'blocked'; }).length;
         var go = h('button', { type: 'button', class: 'btn big', disabled: !online || left > 0 }, left > 0 ? t('scr.S07.sending', { n: left }) : t('act.submit'));
+        // 写真の送信状況(SPEC §8.11.5): 完了まで提出できない。失敗が残る間も提出できない(再送または破棄で解消する)
+        var photoRows = rows.filter(function (r) { return r.action === 'uploadPhotoChunk'; });
+        var photoBad = photoRows.filter(function (r) { return r.status === 'failed' || r.status === 'blocked'; }).length;
+        photoTotal = Math.max(photoTotal, photoRows.length);
         if (!online) el.appendChild(C.msg('warn', t('msg.offline_required')));
-        if (bad) el.appendChild(C.banner('bad', h('div', { class: 'row' }, h('span', null, t('msg.outbox_problem')), h('button', { type: 'button', class: 'btn small', on: { click: function () { KW.app.go('#/outbox'); } } }, t('outbox.title')))));
-        go.addEventListener('click', C.guard(go, submit));
+        if (photoBad) {
+          el.appendChild(C.banner('bad', h('div', { class: 'row' }, h('span', null, t('scr.S07.photo_failed', { n: photoBad })), h('button', { type: 'button', class: 'btn small', on: { click: function () { KW.app.go('#/outbox'); } } }, t('save.check')))));
+        } else if (bad) {
+          el.appendChild(C.banner('bad', h('div', { class: 'row' }, h('span', null, t('msg.outbox_problem')), h('button', { type: 'button', class: 'btn small', on: { click: function () { KW.app.go('#/outbox'); } } }, t('outbox.title')))));
+        }
+        go.addEventListener('click', C.guard(go, function () { return submit(go); }, { quiet: true }));
         el.appendChild(go);
+        if (photoRows.length) {
+          el.appendChild(h('div', { class: 'ps-wait' },
+            h('div', { class: 'sub' }, t('msg.wait_photos')),
+            h('div', { class: 'sub' }, t('scr.S07.photo_progress', { done: photoTotal - photoRows.length, total: photoTotal }))));
+        }
         el.appendChild(h('p', { class: 'note' }, t('scr.S07.pin_note')));
       }
       function visibleItems() { return (detail.items || []).filter(function (i) { return i.def.audience !== 'qa'; }).sort(function (a, b) { return a.def.seq - b.def.seq; }); }
 
-      function submit() {
+      function submit(btn) {
         var key = id + ':' + detail.round;
         if (!submitIds[key]) submitIds[key] = KW.newClientId();
-        return KW.modal.pinFlow({ title: t('scr.S07.pin_title'), action: 'submitRecord', params: { recordId: id, round: detail.round }, clientId: submitIds[key] }).then(function (res) {
+        // PINを送っている間は、提出ボタンも『送信中…』にする(待つ操作。SPEC §8.11.8)
+        return KW.modal.pinFlow({ title: t('scr.S07.pin_title'), action: 'submitRecord', params: { recordId: id, round: detail.round }, clientId: submitIds[key], onBusy: function (on) { C.setBusy(btn, on); } }).then(function (res) {
           if (res === null) return null;
           if (res.network) { C.toast(t('err.network'), 'bad'); return null; }
           delete submitIds[key];
           if (res.ok) {
             KW.flash.record[id] = res.data.warnings || [];
-            return KW.data.mergeSummary(res.data.record).then(function () { return KW.data.delDraft(id); }).then(function () { KW.app.go('#/record/' + id, true); });
+            // 応答の record(RecordDetail)で S08 を描く。getRecord は呼ばない(旧サーバーで要約だけのときは S08 が取り直す。§8.11.8)
+            return KW.data.applyRecord(res.data.record, id).then(function () { return KW.data.delDraft(id); }).then(function () { KW.app.go('#/record/' + id, true); });
           }
           var code = res.error && res.error.code;
           if (code === 'VALIDATION_FAILED') {
@@ -473,12 +520,13 @@
             return null;
           }
           C.toast(KW.errText(res.error), 'bad');
-          if (code === 'STATE_CONFLICT' || code === 'RECORD_LOCKED') KW.app.go('#/record/' + id, true);
+          // 拒否: キャッシュを使い回さず getRecord で取り直して表示する(§8.11.8-4)
+          if (code === 'STATE_CONFLICT' || code === 'RECORD_LOCKED') return KW.data.invalidateFresh(id).then(function () { KW.app.go('#/record/' + id, true); return null; });
           return null;
         });
       }
 
-      C.loadWork(id).then(function (r) {
+      C.loadWork(id, { maxAgeMs: 15000 }).then(function (r) {
         if (!ctx.alive()) return;
         if (!r.detail) { KW.clear(el); el.appendChild(C.banner('warn', t('err.network'))); return; }
         detail = r.detail; work = r.work; blobs = r.blobs;

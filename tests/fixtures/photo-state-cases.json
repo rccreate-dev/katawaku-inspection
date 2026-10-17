@@ -1,0 +1,12 @@
+{
+ "_comment": "U-OUTBOX-05 (SPEC §12.4 / §8.11.5)。KW.outbox.photoState(row) のデータ駆動ケース。row は写真の outbox 行(null = 行なし)。expect は 'queued'|'sending'|'failed'|'saved'。",
+ "cases": [
+  { "id": "5a", "title": "行なし(null)→ saved", "row": null, "expect": "saved" },
+  { "id": "5b", "title": "pending(tries=0)→ queued", "row": { "seq": 1, "action": "uploadPhotoChunk", "status": "pending", "tries": 0 }, "expect": "queued" },
+  { "id": "5c", "title": "pending(tries=2。再試行)→ queued", "row": { "seq": 2, "action": "uploadPhotoChunk", "status": "pending", "tries": 2 }, "expect": "queued" },
+  { "id": "5d", "title": "sending → sending", "row": { "seq": 3, "action": "uploadPhotoChunk", "status": "sending", "tries": 0 }, "expect": "sending" },
+  { "id": "5e", "title": "failed → failed", "row": { "seq": 4, "action": "uploadPhotoChunk", "status": "failed", "tries": 1, "lastError": { "code": "PHOTO_INVALID" } }, "expect": "failed" },
+  { "id": "5f", "title": "failed(lastError.code=EXPIRED)→ failed", "row": { "seq": 5, "action": "uploadPhotoChunk", "status": "failed", "tries": 0, "lastError": { "code": "EXPIRED" } }, "expect": "failed" },
+  { "id": "5g", "title": "blocked(blockReason=record)→ failed", "row": { "seq": 6, "action": "uploadPhotoChunk", "status": "blocked", "tries": 0, "blockReason": "record" }, "expect": "failed" }
+ ]
+}

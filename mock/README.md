@@ -84,3 +84,8 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 - `Config.enabledStages` の既定は `pre_pour,post_demold`。有効項目が0件の段階は `STAGE_NOT_ENABLED`。
 - 出来形は `pourPlannedAt` を保存せず、時間ルール(SELF_LATE / QA_BEFORE_OPEN / QA_LATE)なし(エスカレーションは有効)。`stopPour` は打設前のみ(他は `STATE_CONFLICT`)で、allowedActions と他班マスク行の actions からも外れる。
 - 通知メールの件名は出来形のとき末尾に ` 出来形` が付く。
+
+## 版1.10(書き込み応答の `record`)の対応
+- 書き込み応答に `record`(SPEC §5.1a・§8.11.2)を付ける。対象は `submitRecord` / `submitVerdict` / `recordPrimeSign` / `stopPour` / `addNote`(`note` と併記)/ `uploadPhotoChunk`(`complete:true` のときのみ。ロック解放後に構築)。形は `getRecord` と同じ RecordDetail で、写真本体・サムネは含めない。他班の職長が `stopPour` した場合は一覧と同じマスク形(RecordSummary)。`saveDraft` / `saveQaDraft` / `releaseClaim` は従来どおり RecordSummary のまま。
+- Idem には `record` を保存しない。再送(replay)時は保存済み `data` に、その時点の最新 Detail を `record` として差し替えて返す(`version` は初回応答以上)。
+- Config に `keepWarmMinutes`(既定 `5`、int)を追加。`bootstrap.config` には出さない(PUBLIC_CONFIG_KEYS に含めない)。`keepWarm` / `installKeepWarmTrigger` / `removeKeepWarmTrigger` は action ではない(GASエディタ専用。送ると `BAD_REQUEST`)。

@@ -18,7 +18,12 @@
     return KW.outbox.all().then(function (rows) {
       KW.state.outboxCount = rows.length;
       KW.state.sendingPhotos = {};
-      rows.forEach(function (r) { if (r.action === 'uploadPhotoChunk' && r.status === 'sending' && r.photo) KW.state.sendingPhotos[r.photo.photoId] = 1; });
+      KW.state.photoRows = {}; // 写真ごとの送信状態の表示用(photoId -> outbox行。SPEC §8.11.5)
+      rows.forEach(function (r) {
+        if (r.action !== 'uploadPhotoChunk' || !r.photo) return;
+        KW.state.photoRows[r.photo.photoId] = r;
+        if (r.status === 'sending') KW.state.sendingPhotos[r.photo.photoId] = 1;
+      });
       KW.state.outboxBad = rows.filter(function (r) { return r.status === 'failed' || r.status === 'blocked'; }).length;
       // 打設停止が未送信のまま残っているか(消えない警告バナー用。確定失敗の行は除く)
       KW.state.stopQueued = rows.filter(function (r) { return r.action === 'stopPour' && r.status !== 'failed'; }).length;
@@ -70,29 +75,40 @@
     });
   }
 
+  /* 成功した応答を端末へ反映する。応答の record は §5.1a の版規則で反映(古ければ捨てる。操作は成功のまま)。
+   * 戻り値 { detail }: 応答に RecordDetail が載っていたか(false=旧サーバー等。このときだけ従来どおり getRecord で取り直す。§8.4-2) */
   function afterSuccess(row, res) {
     var d = res.data || {};
-    var chain = Promise.resolve();
-    if (row.action === 'createRecord' && d.record) chain = KW.data.putDetail(d.record);
-    else if (d.record && d.record.recordId) chain = KW.data.mergeSummary(d.record);
-    else if (row.action === 'addNote' && d.note) {
-      chain = KW.data.getRow(row.recordId).then(function (r) {
-        if (r && r.detail) { r.detail.notes = (r.detail.notes || []).concat([d.note]); return KW.db.put('records', r); }
-        return null;
+    if (d.record && d.record.recordId) {
+      return KW.data.applyRecord(d.record).then(function (r) {
+        return Promise.resolve(r.detail ? null : KW.data.invalidateFresh(row.recordId)).then(function () { return { detail: r.detail }; });
       });
     }
-    return chain;
+    if (row.action === 'addNote' && d.note) {
+      // 旧サーバー(record 無し): 本文を端末の詳細に足し、裏で取り直す
+      return KW.data.getRow(row.recordId).then(function (r) {
+        if (r && r.detail) { r.detail.notes = (r.detail.notes || []).concat([d.note]); return KW.db.put('records', r); }
+        return null;
+      }).then(function () {
+        if (KW.isOnline()) KW.data.loadDetail(row.recordId).catch(function (e) { KW.reportError(e); });
+        return { detail: false };
+      });
+    }
+    // record が無い応答(deletePhoto・旧サーバー等): 端末の詳細は古くなったので、すぐ開くときは getRecord で取り直す
+    return KW.data.invalidateFresh(row.recordId).then(function () { return { detail: false }; });
   }
 
   /* 写真の送信完了(FE-03)。順序: 詳細を再取得 → 行を削除 → 端末の写真本体を削除 → photo:done。
    * 本体の削除を詳細(サーバーの写真一覧)の更新より後にするので、画面側の検証で「写真0枚」に見える隙間ができない。
    * (検証側は 写真本体 → 詳細キャッシュ の順に読むこと。本体が無ければ、詳細は更新済み)
    * 詳細を取れなかったときは本体を uploadState='uploaded' で残し、詳細に載った時点で data.putDetail が片付ける */
-  function finishPhoto(row, pid) {
+  function finishPhoto(row, pid, hasDetail) {
     var rid = row.recordId;
     var fresh = false;
+    // 応答の record で詳細を更新済み(hasDetail)なら getRecord を呼ばない(送信スロットを占有しない。§8.4-2)。
+    // 旧サーバーで record が無いときだけ従来どおり取り直す。
     // 保存された詳細(キャッシュ)に当該 photoId が載っているときだけ「反映済み」とみなす
-    return KW.data.loadDetail(rid).then(function () { return KW.data.getRow(rid); }, function () { return null; })
+    return (hasDetail ? Promise.resolve() : KW.data.loadDetail(rid)).then(function () { return KW.data.getRow(rid); }, function () { return null; })
       .then(function (r) { fresh = !!(r && r.detail && KW.data.detailHasPhoto(r.detail, pid)); }, function () { fresh = false; })
       .then(function () { return KW.outbox.remove(row.seq); })
       .then(function () { return KW.db.get('photoBlobs', pid); })
@@ -104,6 +120,20 @@
         return KW.data.delPhotoBlob(pid).then(done);
       })
       .then(function () { KW.bus.emit('photo:done', rid, pid); });
+  }
+
+  /* 先出しした写真の削除が確定失敗したとき: 隠していた写真を元に戻し、トーストで知らせる(SPEC §8.11.4)。
+   * 端末の下書き(deletedPhotos)の印を外してから 'photo:delete_failed' を出す(開いている画面はメモリ上の印も外して描き直す) */
+  function rollbackDelete(row) {
+    var pid = row.params && row.params.photoId;
+    if (!pid || !row.recordId) return Promise.resolve();
+    return KW.data.getDraft(row.recordId).then(function (d) {
+      if (d && d.deletedPhotos && d.deletedPhotos[pid]) { delete d.deletedPhotos[pid]; return KW.data.putDraft(d); }
+      return null;
+    }).catch(function (e) { KW.reportError(e); }).then(function () {
+      if (KW.ui && KW.ui.toast) KW.ui.toast(KW.t('msg.delete_failed'), 'bad');
+      KW.bus.emit('photo:delete_failed', row.recordId, pid);
+    });
   }
 
   /* 30日超の行を期限切れ(failed)にする。変更があれば全行を読み直して返す */
@@ -161,8 +191,8 @@
         return KW.outbox.update(row.seq, function (x) { backToPending(x); x.photo.nextIndex = (x.photo.nextIndex || 0) + 1; x.tries = 0; }).then(function () { return true; });
       }
       var pid = isPhoto ? row.photo.photoId : null;
-      return afterSuccess(row, res).then(function () {
-        return pid ? finishPhoto(row, pid) : KW.outbox.remove(row.seq);
+      return afterSuccess(row, res).then(function (r) {
+        return pid ? finishPhoto(row, pid, r.detail) : KW.outbox.remove(row.seq);
       }).then(function () { setOnline(true); return true; });
     }
     // 失敗
@@ -196,7 +226,8 @@
     }).then(function () {
       return row.recordId ? KW.outbox.blockRecord(row.recordId, row.seq, isPhoto) : null;
     }).then(function () {
-      KW.bus.emit('outbox:failed', row.recordId, code);
+      KW.bus.emit('outbox:failed', row.recordId, code, row);
+      if (row.action === 'deletePhoto') rollbackDelete(row);
       return true;
     });
   }

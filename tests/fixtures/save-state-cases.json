@@ -1,0 +1,15 @@
+{
+ "_comment": "U-OUTBOX-06 (SPEC §12.4 / §8.11.6)。KW.outbox.saveStateOf(rows, online) のデータ駆動ケース。status の並びだけで行を作る。expect は { kind, n, m }。優先順: failed > sending > offline(圏外で pending)> queued > synced。",
+ "cases": [
+  { "id": "6a", "title": "0件 → synced", "statuses": [], "online": true, "expect": { "kind": "synced", "n": 0, "m": 0 } },
+  { "id": "6b", "title": "0件(圏外)→ synced", "statuses": [], "online": false, "expect": { "kind": "synced", "n": 0, "m": 0 } },
+  { "id": "6c", "title": "sending あり → sending", "statuses": ["sending", "pending"], "online": true, "expect": { "kind": "sending", "n": 2, "m": 0 } },
+  { "id": "6d", "title": "sending のみ(圏外フラグでも sending)", "statuses": ["sending"], "online": false, "expect": { "kind": "sending", "n": 1, "m": 0 } },
+  { "id": "6e", "title": "pending のみ + オンライン → queued", "statuses": ["pending", "pending", "pending"], "online": true, "expect": { "kind": "queued", "n": 3, "m": 0 } },
+  { "id": "6f", "title": "pending のみ + 圏外 → offline", "statuses": ["pending", "pending"], "online": false, "expect": { "kind": "offline", "n": 2, "m": 0 } },
+  { "id": "6g", "title": "failed あり → failed(m=1)", "statuses": ["pending", "failed"], "online": true, "expect": { "kind": "failed", "n": 2, "m": 1 } },
+  { "id": "6h", "title": "blocked あり → failed(m=1)", "statuses": ["pending", "blocked"], "online": true, "expect": { "kind": "failed", "n": 2, "m": 1 } },
+  { "id": "6i", "title": "sending と failed が混在 → failed", "statuses": ["sending", "failed", "blocked", "pending"], "online": true, "expect": { "kind": "failed", "n": 4, "m": 2 } },
+  { "id": "6j", "title": "failed(圏外)→ failed", "statuses": ["failed"], "online": false, "expect": { "kind": "failed", "n": 1, "m": 1 } }
+ ]
+}

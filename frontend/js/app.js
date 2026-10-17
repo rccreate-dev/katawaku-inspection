@@ -65,9 +65,11 @@
   function renderHeader() {
     var top = KW.clear($('top'));
     var net = h('span', { class: 'net' + (KW.isOnline() ? '' : ' off'), role: 'status' }, h('i'), KW.isOnline() ? t('app.online') : t('app.offline'));
-    var cnt = S.outboxCount;
-    var obx = h('button', { type: 'button', class: 'obx' + (S.outboxBad ? ' bad' : ''), 'aria-label': t('outbox.title'), on: { click: function () { app.go('#/outbox'); } } },
-      t('outbox.badge', { n: cnt }));
+    // 未送信バッジ(SPEC §8.11.7): 0件は控えめ / 1件以上は黄色の塗り / 失敗・保留があれば赤の塗りで『要対応 m』
+    var cnt = S.outboxCount, badN = S.outboxBad || 0;
+    var obxText = badN ? t('outbox.badge_bad', { n: cnt, m: badN }) : t('outbox.badge', { n: cnt });
+    var obxLabel = t('outbox.title') + ': ' + obxText + (cnt >= 1 && !KW.isOnline() ? ' / ' + t('photo.st.offline') : '');
+    var obx = h('button', { type: 'button', class: 'obx' + (badN ? ' bad' : (cnt >= 1 ? ' pend' : '')), 'aria-label': obxLabel, on: { click: function () { app.go('#/outbox'); } } }, obxText);
     if (!S.token) obx.hidden = true;
     var lang = h('button', { type: 'button', class: 'lang', 'aria-label': t('lang.label'), on: { click: function () { app.setLang(S.lang === 'ja' ? 'id' : 'ja'); } } }, t('lang.switch'));
     top.appendChild(h('div', { class: 'bar1' },
@@ -116,6 +118,11 @@
     if (S.outdated) {
       var upd = h('button', { type: 'button', class: 'btn small', on: { click: applyUpdate } }, t('act.update'));
       box.appendChild(C.banner('bad', h('div', { class: 'row' }, h('b', null, t('err.CLIENT_OUTDATED')), upd)));
+    }
+    // 送信できていない操作(failed / blocked)がある間は、画面を問わず出る閉じられないバナー(SPEC §8.11.7)
+    if (S.token && S.outboxBad > 0) {
+      box.appendChild(C.banner('bad', h('div', { class: 'row' }, h('b', null, t('outbox.problem_banner')),
+        h('button', { type: 'button', class: 'btn small', on: { click: function () { app.go('#/outbox'); } } }, t('save.check')))));
     }
     // 打設停止が送信待ちのまま(圏外など): 送信されるまで消さない強調バナー(SPEC §8.1)
     if (S.stopQueued > 0) box.appendChild(C.banner('bad', h('b', { class: 'urgent' }, t('msg.stop_queued_call'))));

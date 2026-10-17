@@ -16,7 +16,7 @@
     return db().tx(['records'], 'readwrite', function (st) {
       return db().reqP(st.records.get(s.recordId)).then(function (old) {
         if (old && typeof s.version === 'number' && verOf(old) > s.version) return null; // 古い応答は捨てる
-        var row = { recordId: s.recordId, siteId: s.siteId, summary: s, detail: old ? old.detail : null, fetchedAt: Date.now() };
+        var row = { recordId: s.recordId, siteId: s.siteId, summary: s, detail: old ? old.detail : null, fetchedAt: Date.now(), freshAt: old ? old.freshAt || 0 : 0 };
         // マスクされた要約で既存の詳細を上書きしない。版が進んだ詳細は古い扱いにする
         if (old && old.detail && old.summary && s.version != null && old.detail.version != null && s.version !== old.detail.version) row.detail = old.detail;
         return db().reqP(st.records.put(row));
@@ -27,8 +27,14 @@
     return list.reduce(function (p, s) { return p.then(function () { return putSummary(s); }); }, Promise.resolve())
       .then(function () { KW.bus.emit('records:changed', list.map(function (s) { return s.recordId; })); });
   }
-  /* 戻り値: 実際に残った詳細(古い応答だったときは既存の新しい詳細) */
+  /* 戻り値: 実際に残った詳細(古い応答だったときは既存の新しい詳細)。
+   * 詳細を反映した時刻を freshAt に残す。loadDetail の maxAgeMs はこの時刻を見る(SPEC §8.11.8-3)。
+   * masked 形・items の無い形(RecordSummary)は詳細として扱わず、要約だけ反映して既存の詳細を上書きしない */
   function putDetail(d) {
+    if (!d) return Promise.resolve(null);
+    if (d.masked || !Array.isArray(d.items)) {
+      return mergeSummary(d).then(function () { return getRow(d.recordId); }).then(function (r) { return (r && r.detail) || null; });
+    }
     var kept = d;
     return db().tx(['records'], 'readwrite', function (st) {
       return db().reqP(st.records.get(d.recordId)).then(function (old) {
@@ -36,7 +42,7 @@
           if (old.detail) { kept = old.detail; return null; } // 古い応答は捨てる(既存の新しい詳細を残す)
           return null;
         }
-        var row = { recordId: d.recordId, siteId: d.siteId, summary: stripDetail(d), detail: d, fetchedAt: Date.now() };
+        var row = { recordId: d.recordId, siteId: d.siteId, summary: stripDetail(d), detail: d, fetchedAt: Date.now(), freshAt: Date.now() };
         return db().reqP(st.records.put(row));
       });
     }).then(function () { return reapUploaded(kept); }).then(function () { KW.bus.emit('records:changed', [d.recordId]); return kept; });
@@ -74,20 +80,61 @@
         if (old && typeof s.version === 'number' && verOf(old) > s.version) return null; // 古い応答は捨てる(§8.3-6)
         var row = old || { recordId: s.recordId, siteId: s.siteId, detail: null };
         row.summary = s; row.siteId = s.siteId; row.fetchedAt = Date.now();
-        if (row.detail && !s.masked) row.detail = Object.assign({}, row.detail, s);
+        if (row.detail && !s.masked) {
+          // 要約だけで版が進んだら、詳細(項目・写真)は古い。maxAgeMs で使い回さない
+          if (row.detail.version !== s.version) row.freshAt = 0;
+          row.detail = Object.assign({}, row.detail, s);
+        }
         return db().reqP(st.records.put(row));
       });
     }).then(function () { KW.bus.emit('records:changed', [s.recordId]); });
   }
   function getRow(recordId) { return db().get('records', recordId); }
+  /* 応答に RecordDetail が無かった書き込み(deletePhoto・旧サーバー等)のあと、キャッシュの詳細を maxAgeMs で使い回さないようにする */
+  function invalidateFresh(recordId) {
+    if (!recordId) return Promise.resolve();
+    return db().tx(['records'], 'readwrite', function (st) {
+      return db().reqP(st.records.get(recordId)).then(function (old) {
+        if (!old || !old.freshAt) return null;
+        old.freshAt = 0;
+        return db().reqP(st.records.put(old));
+      });
+    });
+  }
   function allSummaries() {
     return db().all('records').then(function (rows) { return rows.map(function (r) { return r.summary; }).filter(Boolean); });
   }
   function removeRecord(recordId) { return db().del('records', recordId); }
 
-  /* 詳細を取得(オンラインなら最新。圏外/失敗ならキャッシュ)。{detail, cached, error} */
-  function loadDetail(recordId) {
+  /*
+   * 書き込み応答の record を反映する(SPEC §5.1a)。版が古い応答は putDetail / mergeSummary が捨てる(操作自体は成功のまま)。
+   *  ・RecordDetail(items あり・masked でない)→ 詳細として反映(putDetail。版が古ければ捨てる)
+   *  ・RecordSummary / masked 形(旧サーバー・省略)→ 要約だけ反映(既存の詳細は上書きしない)
+   * 戻り値: { applied, detail }  detail=true なら getRecord を呼ばなくてよい
+   */
+  function applyRecord(rec, recordId) {
+    var rid = (rec && rec.recordId) || recordId;
+    if (!rec || !rec.recordId) return invalidateFresh(rid).then(function () { return { applied: false, detail: false }; });
+    var isDetail = !rec.masked && Array.isArray(rec.items);
+    // 詳細が無い応答(旧サーバー・省略)のあとは、すぐ開いても getRecord で取り直す(§5.1a-5)
+    return putDetail(rec).then(function () { return isDetail ? null : invalidateFresh(rid); }).then(function () { return { applied: true, detail: isDetail }; });
+  }
+
+  /*
+   * 詳細を取得(オンラインなら最新。圏外/失敗ならキャッシュ)。{detail, cached, error}
+   * opts.maxAgeMs: 書き込み応答の record を反映してから maxAgeMs 以内で、要約より古くなければ getRecord を呼ばずキャッシュで返す
+   */
+  function loadDetail(recordId, opts) {
     var cachedP = getRow(recordId);
+    var maxAge = opts && opts.maxAgeMs > 0 ? opts.maxAgeMs : 0;
+    if (maxAge && KW.isOnline()) {
+      return cachedP.then(function (r) {
+        var ok = r && r.detail && r.freshAt && (Date.now() - r.freshAt) <= maxAge &&
+          !(r.summary && typeof r.summary.version === 'number' && typeof r.detail.version === 'number' && r.detail.version < r.summary.version);
+        if (ok) return { detail: r.detail, cached: false, fromCache: true };
+        return loadDetail(recordId);
+      });
+    }
     if (!KW.isOnline()) {
       return cachedP.then(function (r) { return { detail: r && r.detail, cached: true, error: r && r.detail ? null : { code: 'NETWORK' } }; });
     }
@@ -245,8 +292,8 @@
   }
 
   KW.data = {
-    putSummary: putSummary, putSummaries: putSummaries, putDetail: putDetail, mergeSummary: mergeSummary, stripDetail: stripDetail,
-    getRow: getRow, detailHasPhoto: detailHasPhoto, allSummaries: allSummaries, removeRecord: removeRecord, loadDetail: loadDetail,
+    putSummary: putSummary, putSummaries: putSummaries, putDetail: putDetail, mergeSummary: mergeSummary, applyRecord: applyRecord, stripDetail: stripDetail,
+    getRow: getRow, invalidateFresh: invalidateFresh, detailHasPhoto: detailHasPhoto, allSummaries: allSummaries, removeRecord: removeRecord, loadDetail: loadDetail,
     fetchAllRecords: fetchAllRecords, syncRecords: syncRecords,
     getDraft: getDraft, putDraft: putDraft, delDraft: delDraft, allDrafts: allDrafts, draftFromDetail: draftFromDetail,
     allPhotoBlobs: allPhotoBlobs, photoBlobsFor: photoBlobsFor, putPhotoBlob: putPhotoBlob, delPhotoBlob: delPhotoBlob,
