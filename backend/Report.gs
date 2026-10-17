@@ -1,6 +1,7 @@
 /**
  * Report.gs — 元請向けPDF生成(SPEC §10)。
- * HtmlService でHTML→PDF変換。日本語描画に問題がある場合は Google ドキュメントのテンプレート書き出しへ切替(P-17)。
+ * 既定は HtmlService でHTML→PDF変換(ただし用紙はレターになる)。Config reportEngine=doc のときは
+ * ReportDoc.gs の Google ドキュメント方式(A4)で作り、失敗したら html に自動で切り替える(SPEC §10.5。P-17/P-48)。
  */
 
 function esc_(s) {
@@ -264,6 +265,11 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   return h.join('\n');
 }
 
+/** 元請PDFの生成方式(SPEC §10.5.1)。'doc' 以外(空・欠落・不正値・html)は全て 'html' */
+function reportEngine_() {
+  return String(Cfg.get('reportEngine') || '').trim().toLowerCase() === 'doc' ? 'doc' : 'html';
+}
+
 function act_generateReport(ctx) {
   var actor = ctx.actor;
   var rec = loadRecord_(ctx.params.recordId);
@@ -280,15 +286,36 @@ function act_generateReport(ctx) {
   // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。段階名=打設前/出来形(subject の次)
   var name = Util.sanitizeName(reportSubject_(rec, site)) + '_' + (STAGE_LABEL_[rec.stage] || rec.stage) + '_v' + version + '_' + stamp + '.pdf';
   var file, bytes;
+  // 生成方式(SPEC §10.5.1): Config reportEngine を trim・小文字化して 'doc' のときだけ doc 方式。それ以外は html
+  var engine = reportEngine_(), used = 'html', fallbackReason = '';
   try {
-    var html = buildReportHtml_(rec, site, rows, photos, notes, events, version, nowIso);
-    var blob = HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name);
+    var blob = null;
+    if (engine === 'doc') {
+      try {
+        blob = buildReportPdfBlobDoc_(rec, site, rows, photos, notes, events, version, nowIso, stamp);
+        used = 'doc';
+      } catch (e) {
+        if (e instanceof ApiError) throw e;   // 権限・状態のエラーはフォールバックしない(SPEC §10.5.8)
+        fallbackReason = String((e && e.message) || e || 'unknown error').slice(0, 200) || 'unknown error';
+        Logger.log('generateReport: reportEngine=doc に失敗したため html で生成します: ' + fallbackReason);
+        blob = null;
+      }
+    }
+    if (!blob) {
+      var html = buildReportHtml_(rec, site, rows, photos, notes, events, version, nowIso);
+      blob = HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf');
+    }
+    blob.setName(name);
     bytes = blob.getBytes();
     var folder = subFolder_(subFolder_(driveRoot_(), 'reports'), Util.sanitizeName(site.siteId + '_' + site.name));
     file = folder.createFile(blob);
     if (Cfg.get('pdfShareMode') === 'anyone_with_link') {
       try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* 組織ポリシーで不可なら非共有のまま(P-32) */ }
     }
+    // Drive の「詳細」で方式を確認できるよう説明に残す(失敗しても生成は成功させる。SPEC §10.5.8)
+    try {
+      file.setDescription(fallbackReason ? 'engine=html (fallback from doc: ' + fallbackReason.slice(0, 100) + ')' : 'engine=' + used);
+    } catch (e) { Logger.log('generateReport: ファイルの説明を設定できませんでした: ' + (e && e.message)); }
   } catch (e) {
     if (e instanceof ApiError) throw e;
     throw new ApiError('DRIVE_ERROR', 'PDFの生成・保存に失敗しました');
@@ -297,7 +324,9 @@ function act_generateReport(ctx) {
     reportId: Util.newId('f'), recordId: rec.recordId, version: version, recordStatus: rec.status, driveFileId: file.getId(),
     url: file.getUrl(), sha256: Util.sha256Hex(bytes), generatedBy: actor.userId, generatedAt: nowIso
   });
-  Ev.add(ctx, 'report_generated', { siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: { reportId: r.reportId, version: version } });
+  var detail = { reportId: r.reportId, version: version, engine: used };
+  if (fallbackReason) { detail.fallbackFrom = 'doc'; detail.fallbackReason = fallbackReason; }
+  Ev.add(ctx, 'report_generated', { siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: detail });
   return { report: reportView_(r) };
 }
 
