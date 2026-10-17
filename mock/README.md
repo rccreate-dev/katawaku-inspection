@@ -89,3 +89,8 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 - 書き込み応答に `record`(SPEC §5.1a・§8.11.2)を付ける。対象は `submitRecord` / `submitVerdict` / `recordPrimeSign` / `stopPour` / `addNote`(`note` と併記)/ `uploadPhotoChunk`(`complete:true` のときのみ。ロック解放後に構築)。形は `getRecord` と同じ RecordDetail で、写真本体・サムネは含めない。他班の職長が `stopPour` した場合は一覧と同じマスク形(RecordSummary)。`saveDraft` / `saveQaDraft` / `releaseClaim` は従来どおり RecordSummary のまま。
 - Idem には `record` を保存しない。再送(replay)時は保存済み `data` に、その時点の最新 Detail を `record` として差し替えて返す(`version` は初回応答以上)。
 - Config に `keepWarmMinutes`(既定 `5`、int)を追加。`bootstrap.config` には出さない(PUBLIC_CONFIG_KEYS に含めない)。`keepWarm` / `installKeepWarmTrigger` / `removeKeepWarmTrigger` は action ではない(GASエディタ専用。送ると `BAD_REQUEST`)。
+
+## 版1.10.1(元請PDFの生成方式 `reportEngine`)の対応
+- Config の初期値に `reportEngine=html`(str)を追加(SPEC §2.14・§11.3)。spec-sync の `configKeys` と一致させるための行で、**mock はこの値を読まない**。`generateReport` は値に関わらず従来どおり最小PDF(`MOCK REPORT ...`)を返す。用紙(A4)・レイアウトは検証対象外(SPEC §12.7。実GASで手動確認)。
+- `bootstrap.config` には出さない(PUBLIC_CONFIG_KEYS に含めない。`keepWarmMinutes` と同じサーバー専用)。`/__mock/patch` で `Config.reportEngine` を書ける(`{sheet:'Config',key:'reportEngine',set:{value:'doc'}}`)。
+- `/__mock/docShim` は **harness 専用**。mock は実装せず 404(`{ok:false}`)を返す。C-REP-02〜05 の harness-only 部分は、`/__mock/docShim` が `ok:true` を返すときだけ実行し、mock 相手ではスキップする(SPEC §11.4)。`checkReportEngine` は action ではない(送ると `BAD_REQUEST`)。

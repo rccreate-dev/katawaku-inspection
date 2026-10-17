@@ -1,6 +1,7 @@
 // SPEC同期(SPEC §12.1)の版1.10 の部分: SPEC.md の記述から値を拾い、実装(mock・backend・frontend/i18n.js)と一致することを検査する。
 //   U-CLASS-01 : §8.11.2 の操作の分類が §5.5 の43 action を1回ずつ含み、A(先出し)が6つだけ
 //   §2.14      : Config キー(keepWarmMinutes を含む)が mock と backend の既定値と一致。keepWarmMinutes は公開Configに出ない
+//   §2.14(1.10.1): reportEngine(既定 html・str・サーバー専用)が SPEC / mock / backend で一致。C-REP-06① appsscript.json に documents スコープ
 //   §9.4       : 版1.10 の新 i18n キーが ja/id の両方にあり、プレースホルダが SPEC の表と一致
 // SPEC.md・backend/・frontend/・mock/ は読むだけ(編集しない)。実行: node --test spec-sync.test.js
 'use strict';
@@ -103,6 +104,49 @@ describe('§2.14 Config と keepWarmMinutes', () => {
     assert.deepEqual([...keys].sort(), specKeys.map((x) => x.key).sort());
     const row = ctx.DEFAULT_CONFIG.find((c) => c.key === 'keepWarmMinutes');
     assert.ok(row); assert.equal(String(row.value), '5'); assert.equal(row.type, 'int');
+  });
+});
+
+describe('§2.14 Config reportEngine(版1.10.1。C-REP-06③)', () => {
+  const row = (() => {
+    const l = section(/^### 2\.14 /, /^### 2\.15 /).find((x) => /^\|\s*reportEngine\s*\|/.test(x));
+    return l ? cells(l) : null;
+  })();
+  const mockSeed = require(path.join(ROOT, 'mock', 'seed.js'));
+
+  it('SPEC §2.14 に reportEngine(既定 html・str・サーバー専用)がある', () => {
+    assert.ok(row, 'reportEngine の行');
+    assert.equal(ticks(row[1])[0], 'html');
+    assert.match(row[2], /`str`/);
+    assert.match(row[2], /bootstrap\.config.*含めない/);
+    assert.match(row[2], /`doc`/);
+  });
+  it('mock の Config 初期値が reportEngine=html(str)で、公開Config(bootstrap.config)に含めない', () => {
+    const r = mockSeed.CONFIG_ROWS.find((x) => x.key === 'reportEngine');
+    assert.ok(r, 'mock/seed.js CONFIG_ROWS に reportEngine');
+    assert.equal(r.value, 'html'); assert.equal(r.type, 'str');
+    assert.ok(!mockSeed.PUBLIC_CONFIG_KEYS.includes('reportEngine'));
+  });
+  it('backend の DEFAULT_CONFIG が reportEngine=html(str)(バックエンド未完なら「バックエンド未完のため失敗」)', () => {
+    const ctx = loadBackend();
+    const r = ctx.DEFAULT_CONFIG.find((c) => c.key === 'reportEngine');
+    assert.ok(r, 'バックエンド未完のため失敗: backend の DEFAULT_CONFIG に reportEngine が無い');
+    assert.equal(String(r.value), 'html'); assert.equal(r.type, 'str');
+  });
+  it('backend の公開Config(bootstrap.config)のキーに reportEngine が入らない(ソース検査)', () => {
+    const src = fs.readdirSync(path.join(ROOT, 'backend')).filter((f) => f.endsWith('.gs')).map((f) => fs.readFileSync(path.join(ROOT, 'backend', f), 'utf8')).join('\n');
+    const m = /PUBLIC_CONFIG_KEYS\s*=\s*\[([^\]]*)\]/.exec(src);
+    if (m) assert.ok(!/reportEngine/.test(m[1]), 'PUBLIC_CONFIG_KEYS に reportEngine を入れない');
+  });
+});
+
+describe('C-REP-06① appsscript.json の oauthScopes', () => {
+  it('documents スコープがあり、既存の4つ(spreadsheets / drive / script.scriptapp / script.send_mail)も残っている', () => {
+    const j = JSON.parse(fs.readFileSync(path.join(ROOT, 'backend', 'appsscript.json'), 'utf8'));
+    const sc = j.oauthScopes || [];
+    const has = (x) => sc.includes('https://www.googleapis.com/auth/' + x);
+    assert.ok(has('documents'), 'バックエンド未完のため失敗: documents スコープが無い: ' + sc.join(' '));
+    for (const x of ['spreadsheets', 'drive', 'script.scriptapp', 'script.send_mail']) assert.ok(has(x), x);
   });
 });
 
