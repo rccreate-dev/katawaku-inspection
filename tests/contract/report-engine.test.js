@@ -101,6 +101,7 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
     const { recordId } = await h.makeQaOk(t, qa, { lot: 'RE1' });
     const shapes = [];
     const values = ['html', 'doc', ' Doc ', 'DOC', 'HTML', 'xyz', ''];
+    const harness = await isHarness(); // 本文の文言は対象ごとに違う(mock=§11.3 の最小PDF、harness=§10.5/§11.4 の実生成)
     for (const v of values) {
       await setEngine(v);
       const row = (await h.stateRows('Config')).find((r) => r.key === ENGINE_KEY);
@@ -112,7 +113,7 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
       const buf = Buffer.from(await (await fetch(r.report.url)).arrayBuffer());
       assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
       assert.equal(h.sha256(buf), r.report.sha256);
-      assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v`), 'mock は常に最小PDF');
+      if (!harness) assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v`), 'mock は常に最小PDF(本文の文言は mock 固有=§11.3。harness は方式で本文が違うので見ない)');
       const fname = decodeURIComponent(r.report.url.split('/').pop());
       assert.match(fname, /^A現場\(仮\) 1F RE1_打設前_v\d+_\d{8}-\d{4}\.pdf$/, 'PDF名(§10.2a)は方式で変わらない: ' + fname);
     }
@@ -210,7 +211,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     const dl = await h.driveLog();
     const dls = JSON.stringify(dl);
     assert.ok(/create/.test(dls) && /trash/.test(dls), 'driveLog に create と trash が出る(一時文書)');
-    const ev = (await h.eventsOf(recordId)).filter((e) => e.type === 'report_generated').pop();
+    const ev = (await h.eventsOf(recordId)).filter((e) => e.kind === 'report_generated').pop();
     assert.ok(ev, 'report_generated');
     const detail = typeof ev.detail === 'string' ? JSON.parse(ev.detail) : ev.detail;
     assert.equal(detail.engine, 'doc'); assert.ok(!('fallbackFrom' in detail));
@@ -231,7 +232,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
       assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
       const s = await docShim({});
       assert.equal(s.counts.created, s.counts.trashed, `${failMode}: 作った一時文書は必ずゴミ箱`);
-      const ev = (await h.eventsOf(recordId)).filter((e) => e.type === 'report_generated').pop();
+      const ev = (await h.eventsOf(recordId)).filter((e) => e.kind === 'report_generated').pop();
       const detail = typeof ev.detail === 'string' ? JSON.parse(ev.detail) : ev.detail;
       assert.equal(detail.engine, 'html', failMode); assert.equal(detail.fallbackFrom, 'doc', failMode);
       assert.equal(typeof detail.fallbackReason, 'string'); assert.ok(detail.fallbackReason.length > 0 && detail.fallbackReason.length <= 200, failMode + ' fallbackReason');
