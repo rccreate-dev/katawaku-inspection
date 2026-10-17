@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.10.0 / 作成日: 2026-10-07(最終改訂 2026-10-17) / 作成: 設計担当
+- 版: 1.10.1 / 作成日: 2026-10-07(最終改訂 2026-10-17) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -87,7 +87,7 @@ PIN平文・招待コード平文・deviceToken平文は、**シート・Events.
 timeZone: "Asia/Tokyo"
 runtimeVersion: "V8"
 webapp: { executeAs: "USER_DEPLOYING", access: "ANYONE_ANONYMOUS" }
-oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.external_request(不要なら除外)
+oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, **documents**(版1.10.1。§10.5。`https://www.googleapis.com/auth/documents`。Googleドキュメント方式のPDF生成に必要。追記後はユーザーの再承認が要る=§10.5.9), script.external_request(不要なら除外)
 ```
 - 「自分として実行」「全員(匿名)アクセス可」。**GAS側のGoogleログインには依存しない**。本人確認は `deviceToken` のみ(§3)。
 - `Session.getActiveUser()` は使用しない。
@@ -649,6 +649,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | appBaseUrl | (要設定) | メール内リンク用 |
 | retentionYears | `10` | 保管年数(表示・運用用。自動削除はしない P-18) |
 | keepWarmMinutes | `5` | 版1.10。GAS起動待ち対策のトリガー間隔(分)。`int`。許容値 5/10/15/30(それ以外・1・非数は5として扱う。§6.7a)。**サーバー専用で、`bootstrap.config` には含めない**。`setupSheets()` が不足キーとして追記する(既存の値は変えない) |
+| reportEngine | `html` | 版1.10.1。元請PDFの生成方式。`html`(従来のHTML→PDF。用紙がレターになる=§10.5)または `doc`(Googleドキュメントで用紙A4を明示して組み立てる=§10.5)。`str`。`trim` と小文字化のうえ `doc` のときだけ doc 方式、**それ以外(空・欠落・不正値)は `html`**。doc 方式が失敗したときは自動で `html` に切り替えて PDF を必ず作る(§10.5.8)。**サーバー専用で、`bootstrap.config` には含めない**。`setupSheets()` が不足キーとして追記する(既存の値は変えない)。既定を `doc` に変えるのはユーザーの実機確認後(§10.6。別の版) |
 
 ### 2.15 参照シートの読み取りキャッシュ(版1.4)
 
@@ -1209,7 +1210,7 @@ params:
 
 #### 5.4.5 元請向けPDF(詳細は §10)
 
-**generateReport** ★ `{ "recordId" }` → `{ "report":<Report> }`(最大120秒。status∈{qa_ok,approved}。エラー: `REPORT_NOT_ALLOWED`(`{status}`)/ `DRIVE_ERROR` / `FORBIDDEN_SITE`)。Events `report_generated`。
+**generateReport** ★ `{ "recordId" }` → `{ "report":<Report> }`(最大120秒。status∈{qa_ok,approved}。エラー: `REPORT_NOT_ALLOWED`(`{status}`)/ `DRIVE_ERROR` / `FORBIDDEN_SITE`)。Events `report_generated`(`detail` は `{reportId,version,engine}`。doc 方式から html に切り替えたときは `fallbackFrom`・`fallbackReason` も入る=§10.5.8。**請求・応答の形は変更なし**。生成方式は Config `reportEngine`=§10.5)。
 **listReports** `{ "recordId" }` → `{ "reports":[<Report>] }`(`version` 降順)
 
 #### 5.4.6 参加(QR)
@@ -1856,7 +1857,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 5a. **確認箇所(図面)**(版1.6。§10.2c): 項目表の直後、NG・是正の経過の前。登録された図面を1枚=1ページで載せる(概ね2ページ目)。無ければこの節ごと出さない。
 6. NG・是正の経過: 判定イベント(`verdict_*`)を時系列に(日時・判定者・判定・総合コメント・NG項目)、提出回数、停止の理由・日時。
 7. 写真: **1ページ最大4枚**、1枚=1行ブロック(左に写真、右に情報欄)。レイアウトは §10.2b-B(版1.5.3。従来の「1行4枚のサムネ格子」は廃止)。並びは項目順、最大60枚(超える場合はNG項目の写真を優先し、残りは「他N枚は電子記録で閲覧可」と注記)。
-8. フッタ(全ページ): 記録ID・ページ番号・「電子記録ハッシュ(SHA-256): {64桁}」。ハッシュ = 記録スナップショット(`recordId`,`round`,項目結果一式,署名3者の氏名・日時,判定イベント一覧)の canonicalJSON のSHA-256。
+8. フッタ(全ページ): 記録ID・「電子記録ハッシュ(SHA-256): {64桁}」。**ページ番号は出さない**(版1.10.1: 従来の記載にあった「ページ番号」は HTML方式でも実装されておらず、Googleドキュメント方式でも DocumentApp に挿入手段が無いため、仕様から外した。フッタを全ページに出せるのは doc 方式。HTML方式は末尾に1回=§10.5.6)。ハッシュ = 記録スナップショット(`recordId`,`round`,項目結果一式,署名3者の氏名・日時,判定イベント一覧)の canonicalJSON のSHA-256。
 
 ### 10.2a 件名(subject)とファイル名(版1.5.2。ユーザー決定)
 - `subject = {現場名} {階}` + (`zone` が空でなければ ` {工区}`) + ` {打設箇所(lot)}`。**半角スペース1つ区切り**。各要素は記録の値をそのまま使う(前後空白は除く)。
@@ -1903,7 +1904,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 
 ### 10.3 生成方法(GAS)
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
-2. インラインCSSのみのHTML文字列を組み立てる(**レイアウトは table と固定サイズのみ。§10.2b**。`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。レンダリング不良時は Google ドキュメントのテンプレートから書き出す方式に切替。P-17)。
+2. **生成方式は Config `reportEngine`(§10.5.1)で決まる**。`doc` のときは §10.5 の方法で PDF を作り、例外ならこの手順2〜4(HTML方式)に切り替える(§10.5.8)。以下 2〜4 は HTML方式。インラインCSSのみのHTML文字列を組み立てる(**レイアウトは table と固定サイズのみ。§10.2b**。`<title>` に `subject`(HTMLエスケープ)。外部リソース不可。日本語フォントはPDF変換側の既定を使用。**HTML方式は `@page{size:A4}` を無視してレターサイズになる(版1.10.1 の実機確認)ため、用紙を指定できる Google ドキュメント方式を §10.5 に追加した**。P-17)。
 3. 写真サムネは Drive の `thumbFileId` からバイト列を取得して `data:image/jpeg;base64,…` として埋め込む(`kind=photo` のみ。図面は §10.2c で本体を埋め込む。写真ページの60枚上限・並びに図面を含めない)。
 4. `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf').setName(name)`。ファイル名 `{subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf`(§10.2a)。
 5. `reports/{siteId}_{現場名}/` に保存。`Config.pdfShareMode=anyone_with_link` なら `file.setSharing(ANYONE_WITH_LINK, VIEW)`、`private` なら共有しない(P-32)。`url = file.getUrl()`。
@@ -1912,6 +1913,131 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 
 ### 10.4 フロント側
 M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.share({title,url})` が使えれば共有シート、なければリンクのコピー。URLは外部(Drive)なので新しいタブで開く(`rel="noopener"`)。
+
+### 10.5 Googleドキュメント方式(`reportEngine=doc`)(版1.10.1。ユーザー了承 2026-10-17)
+
+**背景**: 現行の `HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf')`(HTML方式)は、HTMLに書いた `@page{size:A4;margin:12mm}` を**無視**し、実機では**レターサイズ(215.9×279.4mm)**のPDFになることが確認された(§10.2 は「A4縦、余白12mm」)。HTML方式では用紙を指定できないため、**用紙サイズを明示できる方式を追加**する。現行のHTML方式は**残す**(切替とフォールバックの両方で使う)。
+
+#### 10.5.1 切替(Config `reportEngine`)と全体の流れ
+- Config `reportEngine`(str。`html` または `doc`。**既定 `html`**。§2.14)。値は `Cfg.get('reportEngine')` を `String().trim().toLowerCase()` した結果が `doc` のときだけ doc 方式、**それ以外(空・欠落・`html`・不正値・大文字違いを除く綴り違い)は全て `html`**。`generateReport` の呼び出しごとに読む(参照キャッシュの TTL は §2.15 のとおり最大60秒)。**サーバー専用で `bootstrap.config` に含めない**(`keepWarmMinutes` と同じ)。
+- 既定を `doc` に変えるかは**ユーザーが実機で見た目を確認してから**(§10.6)。既定の変更は別の版で行い、本版では `html` のまま。
+- `act_generateReport` の流れ(§10.3 の手順 2〜4 を次に置き換える。他の手順・権限・版・ファイル名・保存先・`Reports` 追記・Events・応答は**現行のまま**):
+  1. エンジンを決める(上の規則)。
+  2. `doc` なら `buildReportPdfBlobDoc_(...)`(§10.5.2〜10.5.6)を `try` で呼ぶ。**例外が出たらフォールバック**(§10.5.8)。`html` なら現行どおり `buildReportHtml_` → `HtmlService...getAs('application/pdf')`。
+  3. どちらの方式でも、得た PDF blob に `setName(name)` する(名前は §10.2a)。以降(`bytes`・フォルダ・`createFile`・共有・`sha256`)は現行と同じ。
+- 実装の分け方(推奨): `Report.gs` の肥大化を避けるため、doc 方式は新ファイル `backend/ReportDoc.gs` に置く(CLAUDE.md §4「1ファイルを肥大化させない」)。`buildReportHtml_` と共有する部品(`reportSubject_`・`STAGE_LABEL_`・`statusLabel_`・`measureText_`・`reportSnapshotHash_`・`dtShort_`・結果ラベルの表記)は `Report.gs` のものを**そのまま呼ぶ**(表記を二重定義しない)。
+
+#### 10.5.2 文書の用紙・余白・フォント(定数。コードの先頭に名前付きで置く)
+| 定数 | 値 | 備考 |
+|---|---|---|
+| `PAGE_W_PT` / `PAGE_H_PT` | **595.28 / 841.89** | A4縦。`body.setPageWidth()` / `setPageHeight()` で設定(幅<高さ=縦) |
+| `MARGIN_PT` | **34.02**(=12mm) | `body.setMarginTop/Bottom/Left/Right(34.02)` |
+| 本文領域の幅 | 527.24pt(=186mm) | 全ての表の列幅の合計はこの値(下の mm→pt は `mm × 72 / 25.4`) |
+| `FONT` | `Noto Sans JP` | 文書全体(本文・表・ヘッダ見出し・フッタ)。最後に `body.editAsText().setFontFamily(FONT)`、フッタにも同様 |
+| 本文 / 表 / 注記 / フッタ / h1 / h2 の文字サイズ | **7.5 / 7.5 / 6 / 6 / 12 / 9 pt** | HTML方式の 10/10/8/8/16/12px に対応(px×0.75) |
+| 文字色 | 本文 `#111111`、補助ラベル(`職長:` 等) `#555555`、NG `#CC0000`(太字)、注記 `#444444` | |
+| 罫線 | 太さ **0.75pt**、色 `#666666`(表ごとに `setBorderWidth` / `setBorderColor`) | 見出し行の背景 `#EEEEEE`、NG行の背景 `#FDE8E8`(行の全セル) |
+| セル余白 | 上下 2pt、左右 3pt(`setPaddingTop/Bottom/Left/Right`) | 写真ブロックだけ上下 3pt |
+- **mm→pt の換算は 1mm = 72/25.4 pt**(186mm=527.24pt、62mm=175.75pt、58mm=164.41pt、80mm=226.77pt)。表の列幅は `table.setColumnWidth(i, pt)`、列幅の合計は 527.24pt(±0.5)。
+- **フォントが使えない場合**: `setFontFamily('Noto Sans JP')` は未知の名前でも例外にならず、Google ドキュメントが代替フォントに置き換える(日本語は表示される想定だが**未確認**)。コードでフォントの有無は判定しない。**文字化け(□や?)が出たら**、`FONT` を `Noto Serif JP` → `M PLUS 1p` → `Sawarabi Gothic` の順に試す(設計担当が §10.6 の結果を受けて決める。バックエンド担当が勝手に変えない)。1か所の定数だけで変えられる作りにする。
+- 一時ドキュメントは `DocumentApp.create(title)`。`title` = `'_tmp_report_' + recordId + '_' + stamp`(`stamp` はファイル名と同じ `YYYYMMDD-HHmm`)。共有しない。マイドライブ直下に作られる(移動しない)。
+
+#### 10.5.3 1ページ目以降(§10.2 の項目 0〜6 に相当)の構造
+上から順に `body.appendParagraph` / `body.appendTable`(最初の空段落は見出しに再利用して空行を残さない)。表は `appendTable(cells)` で作り、`setColumnWidth` / 罫線 / 背景 / 余白を設定する。**セル内の文字は最初の空段落を再利用**し、2行目以降だけ `cell.appendParagraph()`(空段落を余らせない)。
+1. h1: `subject`(§10.2a)。12pt 太字。
+2. 段落: `型枠工事 {段階名}検査記録`。
+3. **基本情報表**(4列。列幅 **30 / 63 / 30 / 63 mm**)。行の構成・出す/出さない条件・文言は `buildReportHtml_` と**同一**(現場名/元請会社名、職長の会社名/職長(会社名が空なら行ごと出さない)、階・工区・打設箇所/段階、打設予定日時/記録ID(**出来形は「打設予定日時」を出さず、`記録ID` の行は 2列目に記録ID、3・4列目は空セル**。HTML方式の colspan=3 の代わり。セルの結合は使わない)、ステータス/提出ラウンド、生成日時/版)。ラベル列(1・3列目)は背景 `#EEEEEE`・太字。
+4. h2「サイン欄(3者)」+ **サイン表**(3列 **62 / 62 / 62 mm**、2行: 見出し行 `職長`/`品質管理者`/`元請`、本文行)。本文行は最低高 **36pt**(`TableRow.setMinimumHeight`)。セルの中身(行ごとに段落): 職長=氏名/会社名/提出日時/`PIN認証による電子サイン`(未提出は `未`)、品質管理者=氏名/会社名/判定日時/`判定: 合格`(合格でなければ `未`)、元請=署名済みは担当者名/方法/`記録者: …`/日時、未署名は `氏名 ______________ 日付 ______________` と `署名・押印` の2段落。HTML方式の `<br>` 区切りと同じ並び。
+5. 打設停止履歴の段落(あるときだけ。HTML方式と同文)。
+6. h2「結果サマリ」+ 表(4列 **30 / 52 / 52 / 52 mm**。`(空) | 合 | NG | 該当なし` / `職長 | n | n | n` / `管理者 | n | n | n`。集計の規則は HTML方式の `cnt` と同じ)。
+7. h2「項目表」+ **項目表**(7列 **8 / 62 / 14 / 18 / 24 / 30 / 30 mm**。見出し `No.|項目|職長結果|管理者結果|実測|職長コメント|管理者コメント`)。各行の最低高 **6mm**(17.0pt)。NG行(`selfResult` または `qaResult` が `ng`)は全セルの背景 `#FDE8E8`。セルの内容(`★`・`合/NG/該当なし`・重大/軽微の括弧・実測の連結 ` | `)は HTML方式と同じ。**職長コメントと管理者コメントは別の列**(§10.2 の5)。
+   - **HTML方式との違い(許容)**: Google ドキュメントの表は「折り返さない・高さ固定・はみ出しを隠す」を指定できないので、**全ての列で折り返しが起きうる**(行の高さは内容に応じて伸びる)。文字を勝手に切り詰めない(情報を落とさない)。そのため項目表が長くなり、1ページ目に収まらず**次のページへ流れてよい**(下の 10.5.7)。
+8. 注記段落(6pt): `管理者コメントの全文は写真ページおよび電子記録で確認できます。`
+9. **確認箇所(図面)**(§10.2c。図面があるときだけ。最大6枚、超過は「他N枚は電子記録で閲覧可」): 図面1枚ごとに `body.appendPageBreak()` → §10.5.4。
+10. h2「NG・是正の経過」と段落群(HTML方式と同文。`判定履歴なし` / 判定ごとの1段落 / `提出回数: n`)。
+11. `body.appendPageBreak()` → h2「写真」→ §10.5.5。
+- 改ページは `appendPageBreak()`(= 直前の段落の後に改ページ文字を入れる)。**HTML方式で `page-break-before:always` が付いていた箇所(図面ごと・「写真」見出しの前)と同じ位置**にだけ入れる。
+
+#### 10.5.4 確認箇所(図面)の1ページ(§10.2c の再現)
+- h2「確認箇所(図面)」、段落 `{職長|管理者}: {氏名} / {登録日時}`。
+- **画像**: 図面**本体**(`Photos.driveFileId`)を `DriveApp.getFileById(id).getBlob()` で取り、1行1列の表(罫線なし `setBorderWidth(0)`、列幅 527.24pt)のセルの最初の段落に `paragraph.appendInlineImage(blob)` で挿入し中央寄せ。**大きさは「枠に収める」**: 枠=幅 **186mm(527.24pt)× 高さ 170mm(481.89pt)**。画像の実寸 `img.getWidth()/getHeight()`(挿入直後の値。比率の取得に使う。`Photos.width/height` が正のときはそちらを優先)から `scale = min(枠幅/幅, 枠高/高)` を求め `setWidth`/`setHeight`(縦横比を保ち、引き伸ばして枠いっぱいになるのは HTML方式と同じ)。
+- 画像が読めない(例外・比率が取れない)ときは、画像の代わりに `画像を読み込めませんでした` の段落(この場合は**フォールバックしない**。ページ全体は出す)。
+- 印が0個なら `印の書き込みなし`、あれば**凡例の表**(5列 **24 / 82 / 24 / 28 / 28 mm**、見出し `番号|項目|実測値|職長|管理者`、各行の最低高 6mm)。行の並び・内容・符号付き実測値の規則は §10.2c と `buildDrawingPageHtml_` に同じ(結果のNGは赤・太字)。
+- 印は画像に焼き込み済み。描き足さない。
+
+#### 10.5.5 写真ページ(§10.2b-B の再現。1ページ最大4枚)
+- 対象・順序・上限は HTML方式と同じ(図面を除く `kind=photo` を、NG項目の写真を先にして、最大60枚。超過は表の後に段落 `他{N}枚は電子記録で閲覧可`)。
+- **1枚=1つの表**(2列×1行)。列幅 **83mm(235.28pt)/ 103mm(291.96pt)**。行の**最低高 62mm(175.75pt)**(`setMinimumHeight`)。罫線は項目表と同じ。セルの垂直位置: 左=中央、右=上。
+- **左セル(写真)**: サムネ(`Photos.thumbFileId`)の blob を `paragraph.appendInlineImage(blob)`、段落は中央寄せ・段落前後の間隔 0・行間 1.0。**大きさは枠に収める**: 枠=**幅 80mm(226.77pt)× 高さ 58mm(164.41pt)**(縦長の高さ上限 58mm を満たす。横長は幅 80mm が先に効く)。比率は図面と同じ求め方。読めないときは何も入れない(空のセル。HTML方式と同じ)。
+- **右セル(情報欄)**: 段落を上から。HTML方式 §10.2b-B の1〜7と同じ内容・同じ順(項目No.と項目文(太字、★付き)/ `職長: {結果} / 管理者: {結果}`(`職長:` `管理者:` のラベルは `#555555`、NGは `#CC0000` 太字+重さ)/ `実測: …`(あるときだけ)/ `職長コメント: {全文}` / `管理者コメント: {全文}`(別段落)/ `撮影: {職長|管理者|元請サイン証跡}` / スタンプ文字(6pt `#444444`))。**項目に紐づかない写真は 撮影者区分とスタンプ文字の2段落のみ**(§10.2b)。情報欄が長くても行は伸びてよい(HTML方式の「切れる」との違い。ただし 62mm を超える長文は4枚が1ページに収まらなくなる恐れがある=§10.5.7)。
+- **ブロックの間隔と改ページ**: 各表の直後に、フォント 3pt・段落前後 0 の空段落を1つ(`appendParagraph('')`。表が連続すると結合されるのを避ける)。**4の倍数枚目(4・8・12…)のブロックの後は、その空段落の代わりに `body.appendPageBreak()`**。ただし**最後の写真のブロックの後には改ページを入れない**。
+- **余白の見積り(根拠)**: 本文領域の高さ = 841.89 − 2×34.02 = 773.85pt。4ブロック 4×175.75=703.0pt + 間隔 3×約5pt + 見出し(1ページ目のみ)約16pt ≒ 734pt で、フッタ(下余白内)を引いても収まる見込み(**実機未確認**)。収まらず写真ページが5ページ目にはみ出す場合に備え、**予備の値**を決めておく: ブロック最低高 **60mm(170.08pt)**、画像の高さ上限 **55mm(155.91pt)**。この予備値への変更は、§10.6 の実機確認の結果を受けて**設計担当が SPEC に反映してから**実装する(バックエンド担当は報告のみ)。
+
+#### 10.5.6 フッタとページ番号
+- `doc.addFooter()` に1段落: `記録ID: {recordId} / 電子記録ハッシュ(SHA-256): {64桁}`(6pt、`#444444`)。ハッシュは `reportSnapshotHash_` で HTML方式と**同じ値**。
+- **ページ番号は出さない**。Apps Script の DocumentApp には「ページ番号」フィールドを挿入する手段が無い(`FooterSection` に自動番号の API が無い)ため。フッタは**全ページに出る**(HTML方式は末尾に1回だけだったので、この点は doc 方式のほうが §10.2 の8に近い)。HTML方式も実際にはページ番号を出していない(§10.2 の8の「ページ番号」は未実装。版1.10.1 で明記)。
+- HTML方式の末尾の `<div class="foot">`(記録ID・ハッシュ)に相当する本文末尾の段落は、doc 方式では**作らない**(フッタと二重になるため)。
+
+#### 10.5.7 HTML方式との出力の差(許容する差)
+| 項目 | HTML方式 | doc 方式 | 判定 |
+|---|---|---|---|
+| 用紙 | レター(215.9×279.4mm)になってしまう | **A4縦 210×297mm・余白12mm** | doc が正。この差が導入の目的 |
+| 項目表の折り返し | 職長コメント列以外は折り返さず切れる。行高固定 | 全列で折り返しうる。行は伸びる | **許容**。1ページ目から溢れても次ページへ流れる(表の見出し行は次ページで繰り返さない。DocumentApp にその指定が無い) |
+| 1ページ目の溢れ | 自然に次ページへ | 同じ | 同じ。写真・図面の見出しは必ず新しいページから始まる |
+| 写真・図面の大きさ | 横長は幅指定、縦長は高さ指定(枠は別) | 全て「枠に収める」(80×58mm、図面は186×170mm) | **許容**(横長4:3の写真は 77×58mm とわずかに小さい) |
+| 情報欄が長い | 62mm枠で切れる | 行が伸びる(5ページ目にはみ出す恐れ) | 許容。極端な長文は §10.6 で確認 |
+| フォント | PDF変換側の既定(環境依存) | `Noto Sans JP`(代替あり) | 許容。文字化けは不可 |
+| フッタ | 末尾に1回 | 全ページ | doc が望ましい |
+| ページ番号 | なし | なし | 同じ(出さない) |
+| 内容・文言・並び・NGの赤・別欄 | — | 同一 | **差を出さない** |
+| PDFの `sha256` | 生成ごとに異なる | 同じ | 変わらない |
+- **変えないもの**: PDFファイル名(§10.2a)、保存先(`reports/{siteId}_{現場名}/`)、共有設定(`pdfShareMode`)、`Reports` の列と追記内容、版、`Report` 応答、メール添付(`Reports.driveFileId` のファイル。現行と同じ)、`report_generated` の発行(`detail` は §10.5.8 のとおり**キーを足すだけ**)。
+
+#### 10.5.8 変換と後始末、失敗時のフォールバック(必須)
+- **変換**: 文書を組み立て終えたら `doc.saveAndClose()` → `DriveApp.getFileById(docId).getAs('application/pdf')`(Document 本体ではなく **Drive のファイル経由**で変換する。用紙設定は文書の設定が使われる)。得た blob に `setName(name)`。
+- **一時文書の削除**: 成功・失敗を問わず `finally` で `DriveApp.getFileById(docId).setTrashed(true)`(ゴミ箱へ。完全削除はしない。ゴミ箱の保持は Google の既定)。削除に失敗しても例外にせず `Logger` に出すだけ。ゴミ箱に入った文書は他の人に共有されない。一時文書の作成・ゴミ箱入れは Drive の書込みなので、`driveLog` には `create` / `trash` として出る(PDF の保存と同じ `lockHeld` の扱いにする。変えない)。
+- **フォールバック**: doc 方式の組み立て・変換のどこかで**例外**が出たとき(承認未了=`Authorization is required`、権限エラー、Drive/Docs のクォータ、変換失敗、表・画像の挿入エラー、§10.5.9 の時間超過など)、**その場で HTML方式に切り替えて PDF を必ず作る**。
+  1. 一時文書があればゴミ箱へ。
+  2. `Logger.log('generateReport: reportEngine=doc に失敗したため html で生成します: ' + 理由)`(理由=例外メッセージ。秘密情報を含めない)。
+  3. HTML方式で生成(以降は現行どおり。**`Reports` 行・名前・保存先・共有・メール添付は通常と同じ**)。HTML方式も失敗したら従来どおり `DRIVE_ERROR`。
+  4. **フォールバックの記録(既存の列を増やさない)**:
+     - Events `report_generated` の `detail`(JSON。§2.11)に**キーを足す**: 常に `engine`(`'doc'` または `'html'` = **実際に使った方式**)。フォールバックしたときは加えて `fallbackFrom:'doc'` と `fallbackReason`(例外メッセージの先頭200文字。PIN・トークン等を含めない)。例: `{reportId, version, engine:'html', fallbackFrom:'doc', fallbackReason:'Authorization is required to perform that action.'}`。通常の html なら `{reportId, version, engine:'html'}`、doc 成功なら `{reportId, version, engine:'doc'}`。
+     - 生成した PDF の Drive ファイルの**説明(`file.setDescription`)**に `engine=doc` / `engine=html` / `engine=html (fallback from doc: {理由の先頭100文字})` を入れる(Drive の「詳細」で見える。失敗しても例外にしない)。
+  - 次は**フォールバックしない**: 権限・状態のエラー(`REPORT_NOT_ALLOWED` ほか `ApiError`)、個々の画像の読み込み失敗(§10.5.4/10.5.5。空欄・代替文で続行)。
+  - フォールバックしたことは**クライアントには返さない**(応答 `Report` は同じ。画面の変更なし)。確認は Events と Drive の説明で行う(§10.6)。
+- **時間の上限**: doc 方式の組み立て開始から **80秒**(`Util.now()` で計る。表・写真1枚ごとの区切りで確認)を超えたら内部の例外(メッセージ `REPORT_DOC_TIMEOUT`。API のエラーコードではない)を投げてフォールバックする。クライアントのタイムアウトは120秒(§1.4)。写真の多い記録の所要時間は**未計測**(§12.7 の REAL-PDF-04 で測る)。
+
+#### 10.5.9 権限(GASのスコープ)と承認
+- `DocumentApp` には `https://www.googleapis.com/auth/documents` が要る。`backend/appsscript.json` は `oauthScopes` を**明示している**ので、**このスコープの追記が必要**(§1.3)。バックエンド担当が `appsscript.json` に追記し、`docs/DEPLOY.md` の3-4(スコープ一覧の説明)にも書き足す。`drive`(既に有り)で一時文書のPDF変換・ゴミ箱入れはできる。
+- 追記したマニフェストを GAS に貼り替えただけでは**承認されない**。承認が済むまで `DocumentApp` の呼び出しは「承認が必要」の例外になる(→ §10.5.8 により**HTML方式で生成される**ので、画面は止まらない)。
+- **ユーザー(スクリプトの所有者)の手順**(`docs/DEPLOY.md` と `docs/OPERATIONS.md` に書く):
+  1. `appsscript.json` を `backend/appsscript.json` の内容に置き換え、`ReportDoc.gs` ほかを貼り替える(DEPLOY.md の手順)。
+  2. GAS エディタで関数 **`checkReportEngine`** を選んで「実行」する。初回は承認画面が出る(「権限を確認」→ アカウント選択 →「詳細」→「(安全ではないページ)に移動」→ ドキュメントの作成・編集の権限を許可)。実行ログに `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` と出れば成功。
+  3. 「デプロイ」→「デプロイを管理」→ 鉛筆 → 新バージョン → デプロイ(Webアプリの実行ユーザーの承認を更新するため)。
+  4. 上記が済んでから Config `reportEngine=doc` を Claude に依頼して設定する(§10.6)。
+- **`checkReportEngine()`**(GASエディタ専用。action ではない。`ACTIONS` に登録しない=action数43のまま。`ReportDoc.gs` に置く): 1ページだけの試験文書(見出し1行・2×2の表・日本語の文)を §10.5.2 の用紙設定で作り、§10.5.8 の変換と後始末まで行って、`'OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)'` を返す。失敗したら例外メッセージをそのまま返す(握りつぶさない)。シート・Config・Events・Reports・Properties には**書かない**(Drive では一時文書の作成とゴミ箱入れだけ)。
+
+### 10.6 実機確認の手順(`docs/OPERATIONS.md` に項目として書く。実装担当が書く。版1.10.1)
+見た目(レイアウトの崩れ)は実GASでしか確認できない(§12.7)。ユーザー(責任者)が1件の記録で次を行う。
+
+1. **前提**: §10.5.9 の手順1〜3が済んでいる(`checkReportEngine` が OK)。
+2. **記録を用意**: 打設前でも出来形でもよい。`qa_ok` または `approved` で、**写真5枚以上(4枚+1枚)、NG項目が1つ以上、図面1枚、職長コメントと管理者コメントが入った記録**。
+3. **doc 方式で生成**: Claude に Config `reportEngine` を `doc` にするよう依頼(約1分で反映)。アプリのその記録の画面(S08)で PDF を生成する。
+4. **用紙を見る**: Drive の `reports/{現場}/` の PDF を開き、**ファイルのプロパティで A4(210×297mm)**になっていること(PDFビューアの「ドキュメントのプロパティ」、またはChromeで開いて印刷画面の用紙サイズ)。レター(8.5×11インチ)なら失敗。
+5. **見た目のチェック表**(全部に○を付ける。×は内容を設計担当へ):
+   - 文字化け(□・?・抜け)がない。日本語、★、`±`、`〜`、丸数字、`≦` などが出ている
+   - 写真ページで**1ページに4枚**入り、5枚目が次のページの先頭になる。5ページ目へはみ出す、**白紙ページ**がない
+   - 写真の縦横比が崩れていない(引き伸ばされていない)。縦長が枠からはみ出さない
+   - 1ページ目: 件名・基本情報・サイン欄(3者)・結果サマリ・項目表が出ている。項目表が長くて次のページへ流れても表が崩れていない
+   - NG行が薄い赤、NGの文字が赤。職長コメントと管理者コメントが別の列・別の行
+   - 図面のページ: 図面が1ページに収まり、凡例の表が下に出ている
+   - フッタに記録IDとハッシュが全ページにある(ページ番号は出ない=仕様)
+   - 生成にかかった時間(押してから完了まで)を書き留める(60秒を超えるときは報告)
+6. **フォールバックしていないことの確認**: Drive でその PDF の「詳細」の説明が `engine=doc` であること(`engine=html (fallback from doc: …)` なら doc が失敗している。理由を設計担当へ)。または Events シートの `report_generated` の `detail` に `"engine":"doc"` があること。
+7. **比較**: `reportEngine` を `html` に戻して同じ記録で生成し、HTML方式(レターサイズ)との違いを見る。
+8. **判断**: 見た目がよければユーザーが「既定を `doc` にする」と指示する(= SPEC の既定の変更。別の版)。よくなければ `reportEngine` を `html` のままにし、× の内容を設計担当へ(レイアウト値の調整は設計担当が SPEC を直してから実装)。
+9. **元に戻す**: いつでも Config `reportEngine` を `html`(または行を空)にすれば現行の方式に戻る(約1分で反映)。ゴミ箱に残る一時文書は Google の既定で自動削除される。
+
 
 ---
 
@@ -1940,6 +2066,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - **エスカレーション**: `escalationTick` を **各リクエスト処理の直前に遅延実行**し、`/__mock/tick` でも実行可。送信メールは送らず記録だけ(`/__mock/mails`)。
 - **写真**: 単発(`total=1`)はキャッシュを使わず、1リクエストで §5.4.4 の検証→「仮想Drive」(メモリのMap。パスは§7.4の構造)に保存→ロック内で Photos 追記。分割は、チャンクをメモリのキャッシュ(仮想時計で6時間TTL。`/__mock/evictChunks` で全消去)に保存し、最終チャンクで検証→仮想Driveに保存。仮想Driveの作成・削除は `lockHeld` 付きで履歴に残す(`/__mock/driveLog`)。`/__mock/drive` は **削除(ゴミ箱)されていない** ファイルの一覧。`getPhotoThumbs`/`getPhoto` は保存したバイト列を `data:` URLで返す。参照シートのキャッシュ(§2.15)はモックでは実装しなくてよい(常に最新を返すのは契約に適合する)。
 - **PDF**: 手書きの最小PDF(ASCIIのみ。`MOCK REPORT {recordId} v{n} {status} stage={stage}` の行を含む(版1.9: 末尾に段階を付ける)、先頭 `%PDF-`)を生成し `/files/reports/{名前}` で配信(`{名前}` は §10.2a のファイル名。日本語を含むので `url` は `encodeURIComponent` した形、配信側は復号して照合)、`Reports` に追記、`url` は `http://{host}/files/reports/{名前}`。`sha256` は実バイト列のハッシュ。
+- **PDFの生成方式(版1.10.1)**: mock は Config `reportEngine` を**読まず、常に今の最小PDFを返す**(用紙・レイアウトは検証対象外=§12.7)。ただし Config の初期値に `reportEngine=html` の行は持つ(spec-sync の `configKeys` と一致させるため。`getBootstrap.config` には含めない)。`/__mock/patch` で `Config.reportEngine` を書けること。
 - **メール**: 送らず `mails` 配列に `{to,subject,body,at}` を追記(§6.6の宛先規則通り)。
 - **Idem/Events/Notes**: 追記専用の挙動(更新・削除しない)を本物と同じに。
 
@@ -1962,6 +2089,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | `/__mock/driveLog` | `{}` | 仮想Driveの書込履歴 `{ "log":[{ "op":"create|trash", "path", "fileId", "lockHeld":bool, "at":"dt" }] }`(reset で空に戻る)。`lockHeld` はその操作の時点で **スクリプトロック(モックは更新系ミューテックス)を保持していたか**。`/__mock/drive` は `create` から `trash` 済みを除いたもの |
 | `/__mock/interleave` | `{ "action":"uploadPhotoChunk", "next":1, "patches":[ <patch本文> ] }` | 次のn件の該当リクエストについて、**ロック外処理(Drive保存)の完了後・ロック取得の直前**に `patches` を順に適用する(別リクエストが間に割り込んだ状態の再現)。`patches` の各要素は `/__mock/patch` と同形式で、加えて `{ "sheet":"Records","key":"r_…","set":{…} }` と `{ "sheet":"Photos","insert":{…SCHEMA準拠の全必須列…} }` も許可する。許可シートは `Records`/`Photos`/`Users`/`Assignments`/`Devices`(`Devices` は `status=revoked` への変更でロック内の再認証 `DEVICE_REVOKED` を再現できる)適用でキャッシュは破棄しない |
 | `/__mock/cacheStats` | `{}` | 参照シートキャッシュ(§2.15)の状態 `{ "enabled":bool, "entries":[{ "key", "expiresAt" }], "hits":int, "misses":int, "skippedTooLarge":int }`。モックは `enabled:false` 固定(他は0/空)。harnessはCacheServiceの1値上限(100KB=102,400バイト)とTTL(仮想時計)をGASと同じに実装する |
+| `/__mock/docShim` | `{ "failMode"?:"none|create|image|convert|slow", "reset"?:true }`(**harness専用**。mock は `{ok:false}` を返してよい) | `DocumentApp` の代役(shim)の制御と観測(版1.10.1。§12.3 C-REP-02〜05)。`failMode`: `none`(既定)/ `create`(`DocumentApp.create` が例外)/ `image`(`appendInlineImage` が例外)/ `convert`(Drive 経由の PDF 変換が例外)/ `slow`(文書の組み立て中に仮想時計を90秒進める=時間上限のフォールバックの再現)。`reset:true` で観測値を空に戻す(`/__mock/reset` でも戻る)。応答 `data`: `{ "counts":{ "created":n, "converted":n, "trashed":n }, "lastDoc":null または { "title", "pageWidth", "pageHeight", "margins":{"top","bottom","left","right"}, "fontFamily", "text":"本文の全文を連結した文字列", "pageBreaks":n, "images":[{ "w", "h", "inTableIndex":n|-1 }], "tables":[{ "rows", "cols", "colWidths":[pt…], "minRowHeights":[pt…], "borderWidth", "cellBackgrounds":[[色または null…]…] }], "footerText", "trashed":bool } }`。`lastDoc` は直近に**変換まで進んだ**文書。HtmlService 側の観測 `state.lastHtml` は reset で `null` に戻す(エンジン切替の検証用) |
 
 ### 11.5 シードデータ(`/__mock/reset` の既定。時刻は reset 時の `now` を基準にした相対値)
 元請アカウントは作らない(元請はPDFのみ)。値は **全てテストが前提にする確定値**。
@@ -2033,6 +2161,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | 職長コメントが管理者操作で消えない | C-PERM-06 |
 | 5回誤りでロック、ロック中は操作不可、責任者のみ解除 | C-AUTH-04, C-PIN-01, C-PIN-04, E-09 |
 | 反応速度の改善(版1.10。先出し・応答の `record`・未送信の見える化・起動待ち対策) | C-RESP-01〜05, C-KEEP-01〜02, U-OUTBOX-05〜06, U-CLASS-01, U-RESP-01, E-23〜E-28(E-29 は P-45 承認後)、PERF-04〜05 |
+| 元請PDFが A4 縦・余白12mm で作れる(Googleドキュメント方式)/ 方式の切替・失敗時に html へ自動で切り替わる(版1.10.1) | C-REP-02〜06、(実機)REAL-PDF-01〜05 |
 | 圏外で入力→復帰で自動送信、二重送信されない | C-IDEM-01〜04, U-OUTBOX-*, E-05 |
 | 2人のQAが同時に確認中→先着のみ | C-CONC-01, E-06 |
 | スマホ幅375pxで崩れない、ja/idで欠けがない | E-07, E-08, U-I18N-01 |
@@ -2153,6 +2282,11 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-DRAW-05(PDF): 図面を2枚(職長1・管理者1)登録した記録の `generateReport` の中身(ハーネスの `lastReportHtml`)に、図面ごとの `page-break-before:always`・見出し「確認箇所(図面)」・凡例の `④-1` 等の `label`・`No.` と項目文・横長画像の `width:186mm` が含まれ、`flex`/`grid`/`calc` を含まない。写真ページの枚数・並びに図面が含まれない。図面0枚のPDFには「確認箇所(図面)」が出ない。図面は項目表の後・「NG・是正の経過」の前。
 - C-DRAW-06(列追加の移行): 旧形式のシート(`Photos` が `kind`,`markers` なし)に対し `setupSheets()` が不足列を末尾に補い、既存行(`kind` 空)は `photo` として扱われる。順序違い・余分な列はエラー(ハーネス単体)。
 - C-REP-01: `qa_ok` で `generateReport`→`url`・`version=1`、再実行で2。`submitted` では `REPORT_NOT_ALLOWED`。(mock-only)取得したPDFが `%PDF-` で始まる。`approved` でも生成可。`listReports` が版降順。**(版1.5.2)PDFファイル名は `{subject}_v{n}_{YYYYMMDD-HHmm}.pdf`**: 工区なし(例 `A現場(仮) 基礎 L2`)・工区あり(例 `B現場(仮) 1F 東工区 L1`)で subject が §10.2a 通り(半角スペース区切り・工区が空なら詰める)、`url`(復号後)の名前に `recordId` が含まれない、禁止文字(例 現場名に `/`)は `_` に置換される。GAS互換ハーネスでは生成HTMLの `<title>` が subject と一致する。 **(版1.5.3)GAS互換ハーネスで生成したHTMLの確認(§10.2b)**: ①写真ブロック(`table`、固定高さ約62mm、`page-break-inside:avoid`)が4枚ごとに `page-break-after`(5枚以上の記録で、4・8枚目に付き、最後のブロックには付かない)、写真が4枚以下なら改ページなし。②項目表に `table-layout:fixed` と `white-space:nowrap` があり、**折り返しが許されるのは「職長コメント」列のみ**(管理者コメント列は nowrap・固定高さ)。③HTMLに `display:flex` / `display:grid` が含まれない。④項目に紐づかない写真(`side=prime`)のブロックは区分とスタンプのみ。⑤NGの結果が赤で出る。
+- C-REP-02(harness-only。方式の切替。§10.5.1。`/__mock/patch` で Config を書く): ①`reportEngine` の行が無い/空/`html`/`HTML`/`xyz`/`docs` のとき**HTML方式**(`state.lastHtml` が更新され、`/__mock/docShim` の `counts.created=0`)。②`doc`・` Doc `・`DOC` のとき**doc方式**(`counts.created=1` かつ `lastHtml` は `null` のまま)。③どちらでも `url`・`version`・PDFが `%PDF-` で始まる・PDF名(§10.2a)・`Reports` の列と値の形・メール添付(`Reports.driveFileId` の同じファイル)が**同じ形**。④`getBootstrap.config` に `reportEngine` が**ない**。⑤C-REP-01(既定=html)は引き続き全項目を満たす。
+- C-REP-03(harness-only。doc方式の中身。§10.5.2〜10.5.6。`reportEngine=doc`、写真(`kind=photo`)6枚(うち1枚は `side=prime` で項目なし)+図面1枚(印2個)+NG項目あり+職長コメントと管理者コメントあり、の `qa_ok` 記録): `/__mock/docShim` の `lastDoc` で次を確認。①**用紙**: `pageWidth=595.28`・`pageHeight=841.89`(±0.01)、四辺の余白 `34.02`(±0.05)。②`fontFamily` が `Noto Sans JP`。③**画像の数**: `images.length` = 写真6 + 図面1 = 7。写真の画像は幅 ≤ 226.77pt かつ 高さ ≤ 164.41pt(±0.5)で縦横比が元画像と±1%以内、図面は幅 ≤ 527.24pt かつ 高さ ≤ 481.89pt。④**改ページ数**: `pageBreaks` = 図面の枚数(1)+「写真」見出しの前(1)+ `floor((写真枚数−1)/4)`(=1)= **3**。写真4枚の記録では 図面の数+1、写真0枚でも 図面の数+1、写真5枚で+1、8枚で+1、9枚で+2。**最後の写真ブロックの後に改ページがない**(写真が4の倍数のときも)。⑤**表**: 写真ブロックの表の数 = 写真の枚数(6)、各表は2列・列幅 235.28 / 291.96pt(±0.5)・最低行高 175.75pt(±0.5)。項目表は7列・列幅 8/62/14/18/24/30/30mm のpt換算(±0.5)・最低行高 17.0pt。基本情報表は4列(30/63/30/63mm)、サイン表は3列、図面の凡例表は5列(24/82/24/28/28mm)。⑥**内容**: `text` に subject・段階名・職長コメント全文・管理者コメント全文・スタンプ文字が含まれ、職長コメントと管理者コメントは別のセル(別の列/別の段落)。項目に紐づかない写真(`side=prime`)のブロックのセルには項目No.・コメントのラベルが出ない。NG行の全セルの背景が `#FDE8E8`(`cellBackgrounds`)。⑦**フッタ**: `footerText` に記録IDと64桁のハッシュ(`reportSnapshotHash_` と同じ値)が含まれ、ページ番号がない。本文末尾に同じハッシュの段落が**ない**。⑧**後始末**: 変換後に一時文書が `trashed=true`、`counts.trashed=counts.created`、`/__mock/drive` に一時文書が残らない(`/__mock/driveLog` に `create` と `trash` が1組出る)。⑨`report_generated` の `detail.engine='doc'`・`fallbackFrom` なし。
+- C-REP-04(harness-only。フォールバック。§10.5.8): `reportEngine=doc` で `failMode` を `create` / `image` / `convert` / `slow` の各場合に設定して `generateReport`: ①いずれも `ok:true` で、PDF(HTML方式)ができ、`Reports` に1行増え、PDF名・保存先・共有・メール添付が通常と同じ。②Events `report_generated` の `detail` が `engine='html'`・`fallbackFrom='doc'`・`fallbackReason`(空でない文字列、200文字以内)を持つ。③PDF の Drive ファイルの説明が `engine=html (fallback from doc: …)` で始まる(成功した doc 方式は `engine=doc`、通常の html は `engine=html`)。④`create` 以外では一時文書が作られていたら必ずゴミ箱に入っている(`counts.created=counts.trashed`)。⑤`Logger` に理由が出る(shim の `Logger` 記録で確認)。⑥`REPORT_NOT_ALLOWED`(`submitted` の記録)はフォールバックせずそのエラーのまま、`counts.created=0`。⑦HTML方式も失敗させた場合(Drive 保存の失敗)は従来どおり `DRIVE_ERROR`。
+- C-REP-05(harness-only。ACTIONS と編集関数): ①`ACTIONS` のキー数は43のままで `checkReportEngine` を含まない。HTTP でこれを `action` に送ると `BAD_REQUEST`。②`checkReportEngine()` を呼ぶと文字列 `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` を返し、`lastDoc` の用紙が A4、一時文書はゴミ箱、全シートの内容・Events・Reports・ScriptProperties は変わらない。`failMode=convert` のときは例外(メッセージを握りつぶさない)。
+- C-REP-06(ユニット/静的検査。`tests/unit`): ①`backend/appsscript.json` の `oauthScopes` に `https://www.googleapis.com/auth/documents` が含まれ、既存の4つ(spreadsheets / drive / script.scriptapp / script.send_mail)も残っている。②`setupSheets()` が `reportEngine` の行が無い既存の Config に**1行だけ**追記し(値 `html`、type `str`)、既存の行・値を変えない。③spec-sync: §2.14 の Config キー(`reportEngine` を含む)と mock の `configKeys` が一致。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
 ### 12.4 ユニットテスト(U-)
@@ -2215,6 +2349,18 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - 目標を満たさないとき: ①ネットワークタブで同一 `photoId` の複数リクエスト(分割になっていないか)・並列数を確認 ②Apps Script の実行ログで `uploadPhotoChunk` の所要時間を確認し、§2.16(重複読込・全件読込)と §1.6 の7(`uploadPhotoChunk` のロック範囲)の実装漏れを探す ③それでも届かなければ実測値を添えて設計担当へ「SPEC変更要望」(目標値や方式の見直し)。**目標未達は不具合ではなく、原因が実装漏れか目標の見直しかを分類する**(CLAUDE.md §5 の5)。
 - 数値は目安(「約」)。10〜20%程度の超過は、再測定のうえ許容するかを責任者が判断する。
 
+### 12.7 実GASでの見た目の確認(版1.10.1。**手動**。自動テストにしない)
+harness の `DocumentApp` の代役(shim)は、**値(用紙・余白・画像の数・改ページ数・列幅)と処理の流れ**しか検証できない。**見た目(文字化け、行の折り返しによる崩れ、4枚が実際に1ページに収まるか、白紙ページ)は実GASでしか確認できない**。手順は §10.6(`docs/OPERATIONS.md` に項目として書く)。ユーザー(責任者)が1件の記録で行う。
+
+| # | 項目 | 合格の基準 | 見方 |
+|---|---|---|---|
+| REAL-PDF-01 | 用紙 | PDF のプロパティが **A4(210×297mm)**。レター(8.5×11インチ)でない。余白が約12mm | PDFビューアのドキュメントのプロパティ、または印刷画面の用紙サイズ |
+| REAL-PDF-02 | 写真ページ | **1ページに4枚**。5枚目は次ページの先頭。5ページ目へのはみ出し・白紙ページなし。縦横比が崩れない | 写真5枚以上の記録で目視 |
+| REAL-PDF-03 | 文字 | 文字化け(□・?)なし(日本語、★、±、丸数字)。NGが赤、職長/管理者コメントが別の列 | 目視。×ならフォント変更を設計担当へ(§10.5.2) |
+| REAL-PDF-04 | 所要時間 | 押してから完了まで **60秒以内**(写真10枚前後の記録。60枚近い記録は参考値) | ストップウォッチ。80秒を超えるとフォールバックする(§10.5.8) |
+| REAL-PDF-05 | 方式の確認 | Drive のファイルの説明が `engine=doc`(`engine=html (fallback…)` でない) | Drive の詳細、または Events の `detail` |
+- 合格しても**既定は変えない**。ユーザーが「既定を `doc` に」と指示したら、設計担当が §2.14 の既定と変更履歴を直す(別の版)。
+
 ---
 
 ## 13. ファイル配置と担当分割
@@ -2239,7 +2385,8 @@ katawaku-inspection/
 │   ├─ Photos.gs      写真アップロード・Drive保存・サムネ(§5.4.4,§7)
 │   ├─ Membership.gs  参加・名簿・不在(§5.4.6,§5.4.7の参照系)
 │   ├─ Admin.gs       admin*・adminValidateRoster
-│   ├─ Report.gs      PDF生成(§10)
+│   ├─ Report.gs      PDF生成(§10。HTML方式・方式の切替とフォールバック)
+│   ├─ ReportDoc.gs   PDF生成のGoogleドキュメント方式と `checkReportEngine`(§10.5。版1.10.1)
 │   ├─ Notify.gs      メール・escalationTick・dailyMaintenance(§6.4,§6.6,§6.7)
 │   └─ harness/       GAS互換ハーネス(Node)
 │       ├─ server.js  vmで *.gs を読み込み、shimを注入して POST/GET /api と /__mock/*(§11.4)を port 8788 で提供
@@ -2290,6 +2437,11 @@ katawaku-inspection/
 - フロント: ①`KW.outbox.photoState` `saveStateOf` ②待つ操作の『送信中…』と8秒の案内 ③`loadDetail(recordId,{maxAgeMs})` と書き込み後の `getRecord` 廃止 ④保存状態行・写真ごとの状態・バッジ・全画面バナー・保留中のコメント欄・失敗時の再試行/破棄 ⑤新しい i18n キー(§9.4)。
 - モック+テスト: ①`record` の返却と `Idem` の再生 ②Config 初期値 `keepWarmMinutes` ③C-RESP / C-KEEP / U-OUTBOX-05,06 / U-CLASS-01 / U-RESP-01 / E-23〜E-28 / PERF-04,05。E-29 は P-45 の承認後。
 
+版1.10.1 の責務(SPEC §10.5・§10.6・§12.3 C-REP-02〜06・§12.7。元請PDFのGoogleドキュメント方式):
+- バックエンド: ①`backend/ReportDoc.gs` 新設(§10.5.2〜10.5.6 の文書組み立て・`buildReportPdfBlobDoc_`・`checkReportEngine`)と `Report.gs` の方式切替・フォールバック・Events `detail` のキー追加・Drive ファイルの説明(§10.5.1・10.5.8。HTML方式のコードは変えない) ②`appsscript.json` に `documents` スコープ(§1.3・10.5.9)と `docs/DEPLOY.md` 3-4 の説明 ③Config `reportEngine`(`setupSheets` の不足キー追記。`bootstrap.config` に出さない) ④harness の `DocumentApp` 代役(shim。`DriveApp.getFileById(id).getAs/setTrashed/setDescription` を含む)と `/__mock/docShim` ⑤`docs/OPERATIONS.md` に §10.6 の手順(承認・切替・見た目の確認・元に戻す)。**実 GAS の `DocumentApp` の挙動で SPEC と食い違う点・未確認の点(§10.5 の「未確認」)は、推測で埋めず報告する**。
+- モック+テスト: ①Config 初期値 `reportEngine=html`(mock は方式を読まない=§11.3) ②C-REP-02〜06(02〜05 は harness-only、06 は unit)。③E2E・フロントは変更なし。
+- フロント: 変更なし(`generateReport` の請求・応答・画面は同じ)。
+
 ### 13.3 契約変更の手順
 1. 実装者が食い違い・不足を見つけたら、**実装を直す前に**設計担当(親エージェント)へ報告する(契約外のフィールド/エンドポイントを勝手に足さない)。
 2. 設計担当が SPEC.md を直し、末尾「変更履歴」に1行追記する。
@@ -2325,7 +2477,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-14 | 班スコープ | 職長は自班(`team` 一致)または自分の記録のみ詳細閲覧可。他班は `masked`(要約のみ)。`team` 空は本人のみ |
 | P-15 | 責任者のQA兼務 | 責任者は `qa_sub` になれ、全現場でQA操作を最終代行できる(PIN必須。Eventsに残る)。職長との兼任は構造上不可 |
 | P-16 | 名簿管理 | A案(スプレッドシート直接編集)。アプリで行うのは招待・ロック解除・端末解除・不在・QR・参加承認のみ。PC管理画面は後日 |
-| P-17 | PDFの日本語描画 | `HtmlService`→PDF変換で試す。不良ならGoogleドキュメントのテンプレート書き出しに切替 |
+| P-17 | PDFの日本語描画と用紙 | `HtmlService`→PDF変換で試した結果、**用紙がレターサイズになる**ことが実機で確認された(版1.10.1)。Googleドキュメント(`DocumentApp`)でA4を明示して作る方式を `reportEngine=doc` として追加(§10.5。P-48)。HTML方式は残す |
 | P-18 | 保管10年 | 自動削除なし。Events等の肥大化対策(年次アーカイブ)はv2 |
 | P-19 | QAの担当過多(1人2〜3現場) | `adminValidateRoster` の警告のみ(`qaMaxSitesPerDay=3`) |
 | P-20 | 写真の圧縮値 | 長辺1280px・JPEG品質0.72・サムネ320px・項目×sideあたり5枚まで・本体≤600KB |
@@ -2356,6 +2508,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-45 | 読み取り側の待ち短縮(版1.10。**ユーザー未確認・実装保留**) | §8.11.9 の3案: ①起動時の `me`/`getBootstrap` を並列に ②キャッシュがあればホームを応答前に描く ③記録の画面をキャッシュで先に描き裏で `getRecord`。承認範囲(方針1〜6)に明記が無く、体感の改善は大きいと見込まれる。確認が取れるまで実装・テストとも対象外 |
 | P-46 | keepWarm の効果と名前(版1.10。方針5) | 既定5分(`Config.keepWarmMinutes`)。**効果は未検証**(トリガーと Webアプリの実行環境が同じ保証がない)。設置前後の `rt` で比べ、効かなければ外す。本体の名前は末尾 `_` なしの `keepWarm`(2026-10-17 決定)。1日の実行時間上限(個人約90分/Workspace約6時間)に注意 |
 | P-47 | `createRecord` は先出しにしない(版1.10。**ユーザー未確認**) | 同じ場所(現場・階・工区・ロット・段階)の記録の先着があり(`ALREADY_EXISTS`)、後続の写真・下書きが `createRecord` の成功に依存する(§8.4 の送信可否規則)ため、オンラインでは応答を待つ(『送信中…』)。圏外は従来どおり端末に仮の記録を作ってキューに積む。先出しにすると入力後に失敗して失われるリスクが出る |
+| P-48 | 元請PDFの生成方式(版1.10.1。ユーザー了承 2026-10-17 の方針。**既定の変更は未決**) | 実機で HTML方式がレターサイズになる(`@page` が無視される)ため、Googleドキュメント方式(`reportEngine=doc`)を追加。**既定は `html` のまま**。ユーザーが §10.6 で見た目を確認して良ければ既定を `doc` に変える(別の版)。doc 方式の失敗時は自動で `html`。フォント `Noto Sans JP`、写真ページ 4枚/ページの収まり、所要時間は**実機未確認**(§10.5 の予備値・§12.7) |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -2380,6 +2533,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
    ⑥**8秒で『通信に時間がかかっています』を出す**閾値(GASの起動待ちは数秒〜10秒超のことがある)。
    ⑦インドネシア語の新しい文言はすべて暫定訳(P-22)。
    ⑧**実測は未取得**(通信診断の結果待ち)。本版の効果の大きさは、S21 の `rt`/`srv` で見て優先順位を見直す。応答に `record` を載せるとサーバー側の読み込みは増えるため、`totalMs` の増分と、省けた往復(1.3〜2.8秒)を比べる(PERF-05)。
+15. **版1.10.1の確認**(元請PDFのGoogleドキュメント方式。方針はユーザー了承済み。以下は設計判断): ①**GASの承認作業**(§10.5.9): `appsscript.json` を貼り替え → エディタで `checkReportEngine` を1回実行して承認 → 新バージョンでデプロイ。Workspace の管理者設定でドキュメントの権限が制限されていると承認できないことがある(その場合は `doc` が使えず HTML方式のまま)。②**実機確認**(§10.6・§12.7): A4・写真4枚/ページ・文字化けなし・所要時間。写真4枚が1ページに収まるかは理論値(§10.5.5)で、**収まらなければ予備の値(ブロック60mm・画像高55mm)に設計担当が直す**。③**ページ番号は出さない**(§10.2 の8から削除。従来の HTML方式も出していなかった)。フッタ(記録ID+ハッシュ)は doc 方式では全ページ。④**HTML方式との違いを許容**: 項目表が折り返す・1ページ目から溢れうる・写真の枠がわずかに違う(§10.5.7)。⑤一時ドキュメントはマイドライブ直下に作り、すぐゴミ箱へ入れる(ゴミ箱の保持は Google の既定)。検査記録の内容を含む文書が短時間だけ所有者のDriveに存在する。⑥フォールバックは画面に出さない。Drive ファイルの説明と Events の `detail` で分かる(§10.5.8)。⑦**既定を `doc` に変える**のはユーザーの指示後(P-48)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
@@ -2455,3 +2609,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-12 | 1.8.2 | 責任者のスマホにテスト現場の記録が残った不具合の修正。§8.9: 全件取得の結果に無い記録を端末から消す(未送信・下書きのある記録は残す)。API・シート・エラーコードは変更なし。 |
 | 2026-10-14 | 1.9.0 | ユーザー決定(2026-10-14): 出来形検査(`stage=post_demold`)を打設前検査と並べて使う。既存の列名・action名・エラーコード・action数(43)は変更なし(追加のみ)。①§0.2・§2.7・§2.14・§6.8新設・§14 P-10/P-41: 使う段階は `pre_pour` と `post_demold`(`Config.enabledStages` 既定 `pre_pour,post_demold`)。`during_pour`(⑯)は保留。同じ現場・階・工区・ロットでも段階ごとに別の記録(一意制約は元から段階を含む)。出来形は打設前と同じ流れ・状態遷移・PIN・差し戻し・コメント分離・元請サインを再利用し、違いは ⓐ`approved` の表示名=「出来形確認済」(§9.4 の `@post_demold` 上書きキー) ⓑ`stopPour`・打設に関する語を出さない(`stopPour` は `pre_pour` のみ。出来形は `STATE_CONFLICT`、`actions` に出ない)。時間ルール(§6.5)は出来形に適用しない(既存の「他段階は null」のまま)、エスカレーション(§6.4)は適用(変更なし)。`pourPlannedAt` は出来形で使わない(指定されても保存しない)。②§2.6.1・§2.6.1a・§2.6.1b・§11.5・§14 P-26/P-42: Items を i1〜i69 の69行に(出来形 i50〜i57 と打設前 i58〜i69 の20項目を `active=TRUE`・`key=FALSE` で追加。有効36項目=打設前28+出来形8。i1〜i49 は変更なし)。新グループ `demold_check`・`ctl_*`、`seq` の方針(itemId番号・末尾追加・同じ `groupKey` を連続)。`setupSheets()` は既存シートへ追加しないため、GASエディタ専用の `addMissingSeedItems()` を新設(actionではない)。③§5.4.3 `createRecord`: `stage` は `enabledStages` に無い値・有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は打設前のみ保存。④§9.2・§9.4: S03/S04/S05/S09 に段階の表示と段階の選択、S10/S11 に段階名、`stage.post_demold`=出来形。⑤§10・§7.4: PDFファイル名に段階名(`{subject}_{段階名}_v...`。打設前の新規PDFの名前も変わる)、出来形は打設予定日時の行なし・ステータス「出来形確認済」。⑥§6.6: 出来形のメール件名の末尾に ` 出来形`。⑦§12: C-STAGE-01〜06・C-ITEM-02,03・E-15 を追加、C-ITEM-01/C-STATE-07,08/U-SEED-01/U-I18N-01/U-VALID-01/E-02/E-11 を更新。⑧§14.2 の13(版1.9の確認事項)。 |
 | 2026-10-17 | 1.10.0 | ユーザー決定(2026-10-17。REQUIREMENTS §15): 「ログイン、写真登録、コメント登録など、操作の後に画面が切り替わるまでの待ち時間をなるべく無くしたい」。原因は操作のたびの スマホ→GAS→スプレッドシート の往復と、応答を待ってから画面を更新していること(実測は未取得=通信診断の結果待ち)。**既存の列名・action名・エラーコード・action数(43)は変更なし(追加のみ)**。①§8.11 新設・§8.1・§9.2a・§9.1・§9.4: **先出し(楽観的UI)の分類**(§8.11.2。全43 actionをA先出し/B待つ/C参照に分類。先出しは `saveDraft` `saveQaDraft` `addNote` `uploadPhotoChunk` `deletePhoto` `setLang` だけ。PIN・先着・状態・参加・端末登録・ログインは待つ)、先出しの失敗時の巻き戻し・再試行・破棄の導線(§8.11.4)、待つ操作の『送信中…』+8秒の『時間がかかっています』(§8.11.8)。②§5.1a 新設・§5.2・§5.4・§1.6: **書き込み応答の `record`**(`submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` を RecordDetail に広げ、`addNote` と `uploadPhotoChunk`(完了時)に `record` を追加。`saveDraft` 系は広げない)で `getRecord` の再取得をなくす。`Records.version` による採否規則、`Idem` は従来の形で保存し再生時に最新のDetailへ差し替え、反映直後15秒は `getRecord` を省く。サムネ・写真本体は含めない。③§8.11.5〜7・§8.4・§9.2a: **写真ごとの状態表示**(送信待ち/送信中/失敗/完了)、記録の保存状態行、ヘッダの未送信バッジの強化(n≥1黄・要対応赤)と全画面の失敗バナー。提出は写真の送信完了まで押せない(§8.6・FE-03 の趣旨を維持)。純関数 `KW.outbox.photoState`・`saveStateOf`。④§6.7a 新設・§2.14・§13.1: **GASの起動待ち対策**=GASエディタ専用の `installKeepWarmTrigger()`/`removeKeepWarmTrigger()`/トリガー本体 `keepWarm()`(末尾 `_` の関数はトリガーの実行先にできない恐れがあるため、名前は `_` なし。エディタの実行候補に出ても、読み取りのみで誰が実行しても無害。actionではない。`ACTIONS` に登録せず43のまま)、Config `keepWarmMinutes`(既定5。5/10/15/30)。書き込みなし。インストール運用は `docs/OPERATIONS.md`。⑤§11.3・§12・§13.2: mock の `record`、C-RESP-01〜05・C-KEEP-01,02・U-OUTBOX-05,06・U-CLASS-01・U-RESP-01・E-23〜E-29・PERF-04,05 を追加、C-IDEM-01 を読み替え。⑥付録A 新設: 操作ごとの待ち時間の現状(frontend のコード調査)。⑦§14 P-43〜P-47(P-45 読み取り側の待ち短縮と P-47 `createRecord` の扱いは**ユーザー未確認**)、§14.2 の14。**対象外**: 認証・認可に関わる参照(Users/Devices/Assignments 等)のサーバー側キャッシュ(§2.15 の決定のまま)、GAS以外のサーバーへの移行。 |
+| 2026-10-17 | 1.10.1 | ユーザー了承(2026-10-17): 元請PDFがレターサイズになる(HTML方式は `@page{size:A4}` を無視)ため、用紙を明示できるGoogleドキュメント方式を追加。既存の列名・action名・エラーコード・action数(43)・API契約は変更なし(Config キー追加のみ)。①§10.5 新設(`reportEngine=doc`: A4縦 595.28×841.89pt・余白34.02pt、`Noto Sans JP`、表の列幅、写真の枠に収めた挿入、4枚/ページの改ページ、全ページのフッタ、ページ番号なし、HTML方式との許容差、失敗時の `html` へのフォールバックと記録(Events `detail` のキー追加・Drive ファイルの説明)、80秒の時間上限、`documents` スコープと承認手順、エディタ専用 `checkReportEngine`)②§10.6 実機確認の手順 ③§10.2 の8: ページ番号を仕様から外す ④§10.3: 方式の選択 ⑤§1.3: oauthScopes に `documents` ⑥§2.14: `reportEngine`(既定 `html`。サーバー専用)⑦§5.4.5・§11.3・§11.4(`/__mock/docShim`)・§12.2・§12.3(C-REP-02〜06)・§12.7(REAL-PDF-01〜05)・§13.1/13.2・§14(P-17更新・P-48・14.2の15)。 |
