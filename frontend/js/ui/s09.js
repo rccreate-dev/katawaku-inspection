@@ -28,23 +28,23 @@
         return KW.modal.approveJoin({ userName: m.userName, siteName: m.siteName }).then(function (v) {
           if (!v) return null;
           var key = 'approve:' + m.membershipId + ':' + v.assignRole + ':' + v.team;
-          return KW.api.call('decideJoin', { membershipId: m.membershipId, decision: 'approve', assignRole: v.assignRole, team: v.team }, { clientId: joinOp(key) }).then(function (res) {
+          return C.busyWhile(ap, KW.api.call('decideJoin', { membershipId: m.membershipId, decision: 'approve', assignRole: v.assignRole, team: v.team }, { clientId: joinOp(key) })).then(function (res) {
             joinResult(key, res);
             if (res.ok) { C.toast(t('msg.approved')); onChanged(); } else KW.clear(msg).appendChild(C.msg('', res.network ? t('err.network') : KW.errText(res.error)));
           });
         });
-      }));
+      }, { quiet: true }));
       var rj = h('button', { type: 'button', class: 'btn small badghost', disabled: !online }, t('act.reject'));
       rj.addEventListener('click', C.guard(rj, function () {
         return KW.modal.confirm({ title: t('act.reject'), body: m.userName + ' / ' + m.siteName, okLabel: t('act.reject'), danger: true }).then(function (ok) {
           if (!ok) return null;
           var key = 'reject:' + m.membershipId;
-          return KW.api.call('decideJoin', { membershipId: m.membershipId, decision: 'reject' }, { clientId: joinOp(key) }).then(function (res) {
+          return C.busyWhile(rj, KW.api.call('decideJoin', { membershipId: m.membershipId, decision: 'reject' }, { clientId: joinOp(key) })).then(function (res) {
             joinResult(key, res);
             if (res.ok) onChanged(); else KW.clear(msg).appendChild(C.msg('', res.network ? t('err.network') : KW.errText(res.error)));
           });
         });
-      }));
+      }, { quiet: true }));
       btns.appendChild(ap); btns.appendChild(rj);
     }
     if (m.status === 'approved' && m.canDecide && opts.revoke) {
@@ -53,12 +53,12 @@
         return KW.modal.reason({ title: t('act.revoke'), body: m.userName + ' / ' + m.siteName, okLabel: t('act.revoke'), danger: true }).then(function (reason) {
           if (!reason) return null;
           var key = 'revoke:' + m.membershipId + ':' + reason;
-          return KW.api.call('revokeMembership', { membershipId: m.membershipId, reason: reason }, { clientId: joinOp(key) }).then(function (res) {
+          return C.busyWhile(rv, KW.api.call('revokeMembership', { membershipId: m.membershipId, reason: reason }, { clientId: joinOp(key) })).then(function (res) {
             joinResult(key, res);
             if (res.ok) onChanged(); else KW.clear(msg).appendChild(C.msg('', res.network ? t('err.network') : KW.errText(res.error)));
           });
         });
-      }));
+      }, { quiet: true }));
       btns.appendChild(rv);
     }
     card.appendChild(btns);

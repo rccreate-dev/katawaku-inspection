@@ -106,6 +106,36 @@
     return out;
   }
 
+  /*
+   * 写真の送信状態(SPEC §8.11.5。U-OUTBOX-05)。引数は写真の outbox 行(無ければ null)。
+   * 'queued'(pending)/ 'sending' / 'failed'(failed・blocked)/ 'saved'(行が無い)
+   */
+  function photoState(row) {
+    if (!row) return 'saved';
+    if (row.status === 'sending') return 'sending';
+    if (row.status === 'failed' || row.status === 'blocked') return 'failed';
+    return 'queued';
+  }
+
+  /*
+   * 記録の保存状態(SPEC §8.11.6。U-OUTBOX-06)。rows はその記録の outbox 行、online は接続状態。
+   * 優先順: failed > sending > offline(圏外で pending) > queued > synced。n=全行数、m=failed+blocked の数
+   */
+  function saveStateOf(rows, online) {
+    rows = rows || [];
+    var n = rows.length, m = 0, sending = 0, pending = 0;
+    rows.forEach(function (r) {
+      if (r.status === 'failed' || r.status === 'blocked') m++;
+      else if (r.status === 'sending') sending++;
+      else pending++;
+    });
+    var kind = 'synced';
+    if (m > 0) kind = 'failed';
+    else if (sending > 0) kind = 'sending';
+    else if (pending > 0) kind = online ? 'queued' : 'offline';
+    return { kind: kind, n: n, m: m };
+  }
+
   function isExpired(row, now) { return now - (row.createdAt || now) > EXPIRE_MS; }
 
   /* ---- 永続化操作(IndexedDB) ---- */
@@ -231,7 +261,7 @@
 
   KW.outbox = {
     BACKOFF_SEC: BACKOFF_SEC, EXPIRE_MS: EXPIRE_MS,
-    backoffSec: backoffSec, classify: classify, mergeParams: mergeParams, pickNext: pickNext, selectSendable: selectSendable, normParallel: normParallel, isExpired: isExpired,
+    backoffSec: backoffSec, classify: classify, mergeParams: mergeParams, pickNext: pickNext, selectSendable: selectSendable, normParallel: normParallel, isExpired: isExpired, photoState: photoState, saveStateOf: saveStateOf,
     enqueue: enqueue, all: all, forRecord: forRecord, update: update, claim: claim, claimSendable: claimSendable, remove: remove,
     blockAll: blockAll, unblock: unblock, blockRecord: blockRecord, unblockRecord: unblockRecord, recoverSending: recoverSending
   };

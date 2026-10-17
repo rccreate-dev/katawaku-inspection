@@ -93,11 +93,12 @@
         site = C.siteOf(siteId);
         KW.clear(el);
         if (!site) { el.appendChild(C.empty('err.FORBIDDEN_SITE')); return; }
-        Promise.all([KW.data.allSummaries(), KW.data.allDrafts()]).then(function (v) {
+        Promise.all([KW.data.allSummaries(), KW.data.allDrafts(), KW.outbox.all()]).then(function (v) {
           if (!ctx.alive()) return;
           var recs = v[0].filter(function (r) { return r.siteId === siteId; });
-          var drafts = {};
+          var drafts = {}, unsent = {};
           v[1].forEach(function (d) { if (d.dirty) drafts[d.recordId] = true; });
+          v[2].forEach(function (r) { if (r.recordId) unsent[r.recordId] = true; }); // 送信待ちの操作がある記録(SPEC §8.11.6)
           KW.clear(el);
           el.appendChild(h('h2', null, site.name));
           if (site.qa) {
@@ -124,6 +125,7 @@
               masked ? null : h('small', null, [t('stage.' + C.stageOf(r)), r.team || null].filter(Boolean).join(' / '))),
             h('span', { class: 'chips' }, C.statusChip(r.status, false, r.stage),
               drafts[r.recordId] ? C.chip('warn', t('badge.draft_local')) : null,
+              unsent[r.recordId] ? C.chip('warn', t('badge.unsent')) : null,
               (!masked && r.stopped) ? C.chip('bad', t('badge.stopped')) : null,
               (!masked && acts.indexOf('claimReview') >= 0) ? C.chip('good', t('act.claim')) : null));
           }

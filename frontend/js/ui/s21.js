@@ -59,9 +59,9 @@
           } catch (e) { /* 下へ */ }
           fallback();
           return Promise.resolve();
-        }));
+        }, { quiet: true }));
         var clr = h('button', { type: 'button', class: 'btn ghost' }, t('scr.S21.clear'));
-        clr.addEventListener('click', C.guard(clr, function () { KW.perf.clear(); draw(); return Promise.resolve(); }));
+        clr.addEventListener('click', C.guard(clr, function () { KW.perf.clear(); draw(); return Promise.resolve(); }, { quiet: true }));
         el.appendChild(h('div', { class: 'gap' }, copy, clr));
         el.appendChild(out);
       }

@@ -57,9 +57,9 @@
           tg.addEventListener('click', C.guard(tg, function () {
             return KW.modal.confirm({ title: dis ? t('scr.S16.enable') : t('scr.S16.disable'), body: u.name, okLabel: dis ? t('scr.S16.enable') : t('scr.S16.disable'), danger: !dis }).then(function (ok) {
               if (!ok) return null;
-              return KW.api.call('adminSetUserStatus', { userId: u.userId, status: dis ? 'active' : 'disabled' }).then(function (res) { if (res.ok) load(); else failMsg(msg, res); });
+              return C.busyWhile(tg, KW.api.call('adminSetUserStatus', { userId: u.userId, status: dis ? 'active' : 'disabled' })).then(function (res) { if (res.ok) load(); else failMsg(msg, res); });
             });
-          }));
+          }, { quiet: true }));
           btns.appendChild(tg);
         }
         card.appendChild(btns);
@@ -75,9 +75,9 @@
               rv.addEventListener('click', C.guard(rv, function () {
                 return KW.modal.confirm({ title: t('scr.S16.revoke_device'), body: (d.label || d.deviceId), okLabel: t('scr.S16.revoke_device'), danger: true }).then(function (ok) {
                   if (!ok) return null;
-                  return KW.api.call('adminRevokeDevice', { deviceId: d.deviceId }).then(function (res) { if (res.ok) load(); else failMsg(msg, res); });
+                  return C.busyWhile(rv, KW.api.call('adminRevokeDevice', { deviceId: d.deviceId })).then(function (res) { if (res.ok) load(); else failMsg(msg, res); });
                 });
-              }));
+              }, { quiet: true }));
               row.appendChild(rv);
             }
             card.appendChild(row);
@@ -132,9 +132,9 @@
             cancel.addEventListener('click', C.guard(cancel, function () {
               return KW.modal.confirm({ title: t('act.cancel_absence'), body: a.userName + ' ' + a.dateFrom + ' - ' + a.dateTo, okLabel: t('act.cancel_absence'), danger: true }).then(function (ok) {
                 if (!ok) return null;
-                return KW.api.call('adminCancelAbsence', { absenceId: a.absenceId }).then(function (res) { if (res.ok) load(); else failMsg(m2, res); });
+                return C.busyWhile(cancel, KW.api.call('adminCancelAbsence', { absenceId: a.absenceId })).then(function (res) { if (res.ok) load(); else failMsg(m2, res); });
               });
-            }));
+            }, { quiet: true }));
             el.appendChild(h('div', { class: 'card' }, h('div', { class: 'row wrap' }, h('b', null, a.userName), cancel),
               h('div', { class: 'sub' }, a.dateFrom + ' - ' + a.dateTo + (a.reason ? ' / ' + a.reason : '')), m2));
           });
@@ -189,11 +189,11 @@
         rot.addEventListener('click', C.guard(rot, function () {
           return KW.modal.confirm({ title: t('scr.S18.rotate'), body: t('scr.S18.rotate_warn'), okLabel: t('scr.S18.rotate'), danger: true }).then(function (ok) {
             if (!ok) return null;
-            return KW.api.call('adminRotateJoinKey', { siteId: s.siteId }, { clientId: opId }).then(function (res) {
+            return C.busyWhile(rot, KW.api.call('adminRotateJoinKey', { siteId: s.siteId }, { clientId: opId })).then(function (res) {
               if (res.ok) { opId = KW.newClientId(); show(res.data); C.toast(t('scr.S18.rotated')); } else { if (!res.network) opId = KW.newClientId(); failMsg(msg, res); }
             });
           });
-        }));
+        }, { quiet: true }));
         card.appendChild(h('div', { class: 'gap noprint' }, pr, rot));
         KW.api.call('adminGetJoinInfo', { siteId: s.siteId }).then(function (res) {
           if (!ctx.alive()) return;

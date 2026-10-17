@@ -107,7 +107,8 @@ var DEFAULT_CONFIG = [
   { key: 'pdfShareMode', value: 'anyone_with_link', type: 'str', description: 'anyone_with_link または private' },
   { key: 'mailEnabled', value: 'TRUE', type: 'bool', description: 'メール通知の有効/無効' },
   { key: 'appBaseUrl', value: '', type: 'str', description: 'PWAの公開URL(メール・QR内リンク用。要設定)' },
-  { key: 'retentionYears', value: '10', type: 'int', description: '保管年数(表示・運用用。自動削除なし)' }
+  { key: 'retentionYears', value: '10', type: 'int', description: '保管年数(表示・運用用。自動削除なし)' },
+  { key: 'keepWarmMinutes', value: '5', type: 'int', description: 'GAS起動待ち対策のトリガー間隔(分)。5/10/15/30。それ以外は5。サーバー専用(アプリには配信しない)。変更後は installKeepWarmTrigger を再実行(版1.10)' }
 ];
 
 /** getBootstrap.config に含める公開設定キー(SPEC §5.4.2) */

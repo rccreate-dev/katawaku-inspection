@@ -56,12 +56,89 @@
       el.appendChild(C.skeleton(4));
       var detail = null, cached = false, loadErr = null;
       C.siteNameOfRecord(id).then(function (n) { if (ctx.alive() && !detail) ctx.chrome({ back: '#/', site: n }); });
-      var noteBox = null;
+      // 保存状態の1行と送信できなかった入力のバナー(§8.11.4・§8.11.6)。画面を描き直しても作り直さない
+      var rstatus = C.recordStatus(ctx, id, {});
+
+      /* ---- コメント追記(先出し。SPEC §8.11.3)----
+       * 入力欄と『送信待ちのコメント』枠は画面を描き直しても作り直さない(入力中の文字を失わない) */
+      var noteTa = null, noteAdd = null, noteMsg = null, noteCard = null;
+      var pendBox = h('div', { class: 'pendbox' });
+      function ensureNoteCard() {
+        if (noteCard) return noteCard;
+        noteTa = h('textarea', { maxlength: '2000', 'aria-label': t('scr.S08.add_note') });
+        noteAdd = h('button', { type: 'button', class: 'btn ghost', disabled: true }, t('scr.S08.add_note'));
+        noteMsg = h('div');
+        noteTa.addEventListener('input', function () { noteAdd.disabled = !noteTa.value.trim(); });
+        noteAdd.addEventListener('click', addNote);
+        noteCard = h('div', { class: 'card' }, h('label', { class: 'lbl' }, t('scr.S08.add_note')), noteTa, noteMsg, h('div', { class: 'stack' }, noteAdd));
+        return noteCard;
+      }
+      function noteTyping() { return !!(noteTa && noteTa.value); }
+      function addNote() {
+        var v = noteTa.value.trim();
+        if (!v) return;
+        KW.clear(noteMsg);
+        // 押した瞬間に入力欄を空にし、本文は outbox(端末)に積む。送信は裏で行い、応答は待たない
+        noteTa.value = ''; noteAdd.disabled = true;
+        KW.outbox.enqueue('addNote', { recordId: id, text: v }, { recordId: id }).then(function () {
+          return KW.sync.refreshCounts();
+        }).then(drawPending, function (e) {
+          // 端末に保存できなかった: 先出しにせず、本文を戻してエラーを出す
+          KW.reportError(e);
+          noteTa.value = v; noteAdd.disabled = false;
+          noteMsg.appendChild(C.msg('', t('err.INTERNAL')));
+        });
+      }
+      /* 送信待ちのコメントのカード(outbox の addNote 行から作る。アプリを閉じても残る) */
+      function drawPending() {
+        return KW.outbox.forRecord(id).then(function (rows) {
+          if (!ctx.alive()) return;
+          var list = rows.filter(function (r) { return r.action === 'addNote'; });
+          KW.clear(pendBox);
+          if (!list.length) return;
+          pendBox.appendChild(h('h3', null, t('note.pending_title')));
+          list.forEach(function (r) {
+            var failed = r.status === 'failed' || r.status === 'blocked';
+            var stText = failed ? t('note.failed') : t(r.status === 'sending' ? 'photo.st.sending' : 'photo.st.queued');
+            var card = h('div', { class: 'pendnote ' + (failed ? 'failed' : (r.status === 'sending' ? 'sending' : 'queued')) },
+              h('div', { class: 'meta' },
+                r.status === 'sending' ? C.spinner() : (failed ? KW.icon('warn') : null),
+                h('span', null, stText), h('span', null, C.fmt(r.createdAt)),
+                (!failed && !KW.isOnline()) ? h('span', null, t('photo.st.offline')) : null),
+              h('div', { class: 'body' }, (r.params && r.params.text) || ''));
+            if (failed) {
+              var expired = C.rowExpired(r);
+              if (r.lastError) card.appendChild(C.msg('', expired ? t('outbox.expired') : KW.errText(r.lastError)));
+              var btns = h('div', { class: 'gap' });
+              if (!expired) {
+                var rs = h('button', { type: 'button', class: 'btn small' }, t('act.resend'));
+                rs.addEventListener('click', C.guard(rs, function () { return C.resendRows([r]); }, { quiet: true }));
+                btns.appendChild(rs);
+              }
+              // 破棄=本文を入力欄に戻す(入力を黙って失わない)
+              var ds = h('button', { type: 'button', class: 'btn small badghost' }, t('note.discard_restore'));
+              ds.addEventListener('click', C.guard(ds, function () {
+                var text = (r.params && r.params.text) || '';
+                return KW.outbox.remove(r.seq).then(function () { return KW.outbox.unblockRecord(id); }).then(function () { return KW.sync.refreshCounts(); }).then(function () {
+                  if (noteTa && text) { noteTa.value = noteTa.value ? noteTa.value + '\n' + text : text; noteAdd.disabled = !noteTa.value.trim(); }
+                  return drawPending();
+                });
+              }, { quiet: true }));
+              btns.appendChild(ds);
+              card.appendChild(btns);
+            }
+            pendBox.appendChild(card);
+          });
+        });
+      }
 
       function draw() {
         var d = detail;
+        // 描き直しても入力中のコメントの文字・フォーカスを失わない
+        var typing = noteTa && document.activeElement === noteTa, selS = typing ? noteTa.selectionStart : 0, selE = typing ? noteTa.selectionEnd : 0;
         KW.clear(el);
         ctx.chrome({ back: '#/site/' + d.siteId, site: C.siteName(d.siteId), bar: [d.floor + (d.zone ? '・' + d.zone : ''), d.lot, t('stage.' + C.stageOf(d))].join(' / ') });
+        el.appendChild(rstatus);
         if (cached) el.appendChild(C.banner('warn', t('msg.cached_view')));
         el.appendChild(h('div', { class: 'row' }, h('h2', null, t('scr.S08.title')), C.statusChip(d.status, true, d.stage)));
         el.appendChild(C.recHeadCard(d, d.pourPlannedAt && C.stageOf(d) === 'pre_pour' ? h('div', { class: 'meta' }, t('lbl.pour_planned') + ': ' + C.fmt(d.pourPlannedAt)) : null));
@@ -98,7 +175,8 @@
         if (has(d, 'recordPrimeSign')) {
           btns.appendChild(h('button', { type: 'button', class: 'btn', disabled: !online, on: { click: function () {
             KW.modal.primeSign(d).then(function (res) {
-              if (res && res.ok) { C.toast(KW.ts('msg.prime_signed', d.stage)); KW.data.mergeSummary(res.data.record).then(reload); }
+              if (res && res.ok) { C.toast(KW.ts('msg.prime_signed', d.stage)); KW.data.applyRecord(res.data.record, id).then(function () { return reload({ maxAgeMs: 15000 }); }); }
+              else if (res && !res.ok) reload(); // 拒否(STATE_CONFLICT 等): 取り直して表示を更新(§8.11.8-4)
             });
           } } }, KW.ts('act.prime_sign', d.stage)));
         }
@@ -106,7 +184,7 @@
         if (has(d, 'stopPour')) {
           btns.appendChild(h('button', { type: 'button', class: 'btn badghost', on: { click: function () {
             // 圏外で送信待ちになったときは、消えないバナー(app.js の banners)が「至急電話で連絡」を出し続ける。トーストにはしない
-            KW.modal.stopPour(d).then(function (r) { if (r && r.ok) { if (!r.queued) C.toast(t('msg.stopped')); reload(); } });
+            KW.modal.stopPour(d).then(function (r) { if (r && r.ok) { if (!r.queued) C.toast(t('msg.stopped')); reload({ maxAgeMs: 15000 }); } });
           } } }, t('act.stop')));
         }
         if (!online && (has(d, 'recordPrimeSign') || has(d, 'generateReport'))) btns.appendChild(C.msg('warn', t('msg.offline_required')));
@@ -128,22 +206,10 @@
           items: function () { return []; },
           refreshBlobs: function () { return Promise.resolve(); }
         }));
-        // コメント追記
-        if (has(d, 'addNote')) {
-          var ta = h('textarea', { maxlength: '2000', 'aria-label': t('scr.S08.add_note') });
-          var add = h('button', { type: 'button', class: 'btn ghost' }, t('scr.S08.add_note'));
-          var m = h('div');
-          add.addEventListener('click', C.guard(add, function () {
-            var v = ta.value.trim();
-            if (!v) return Promise.resolve();
-            return KW.sync.runQueued('addNote', { recordId: id, text: v }, { recordId: id }).then(function (r) {
-              if (r.ok) { ta.value = ''; if (r.queued) C.toast(t('msg.queued')); reload(); }
-              else KW.clear(m).appendChild(C.msg('', KW.errText(r.error)));
-            });
-          }));
-          noteBox = ta;
-          el.appendChild(h('div', { class: 'card' }, h('label', { class: 'lbl' }, t('scr.S08.add_note')), ta, m, h('div', { class: 'stack' }, add)));
-        }
+        // コメント追記(先出し。入力欄は作り直さない)
+        if (has(d, 'addNote')) el.appendChild(ensureNoteCard());
+        el.appendChild(pendBox);
+        if (typing && noteTa.isConnected) { noteTa.focus(); try { noteTa.setSelectionRange(selS, selE); } catch (e) { /* 無視 */ } }
         // Notes
         el.appendChild(h('h3', null, t('scr.S08.notes')));
         if (!(d.notes || []).length) el.appendChild(C.empty('scr.S08.no_notes'));
@@ -158,21 +224,33 @@
         el.appendChild(h('ul', { class: 'log' }, (d.events || []).slice().reverse().map(function (e) { return C.eventLine(e, d.stage); })));
       }
 
-      function reload() {
-        return KW.data.loadDetail(id).then(function (r) {
+      function reload(opts) {
+        return KW.data.loadDetail(id, opts).then(function (r) {
           if (!ctx.alive()) return;
           if (r.detail) { detail = r.detail; cached = r.cached; draw(); }
           else if (!detail) {
             KW.clear(el);
             el.appendChild(C.banner('warn', t(r.error && r.error.code === 'NETWORK' ? 'err.network' : 'err.' + (r.error && r.error.code || 'NOT_FOUND'))));
-            el.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: reload } }, t('act.retry')));
+            el.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { reload(); } } }, t('act.retry')));
           }
         });
       }
-      reload();
-      ctx.on('poll:done', function () { if (!(noteBox && noteBox.value)) reload(); });
+      /* 端末のキャッシュから描き直す(書き込み応答の record を反映した直後。getRecord は呼ばない) */
+      function redrawFromCache() {
+        return KW.data.getRow(id).then(function (row) {
+          if (!ctx.alive() || !row || !row.detail) return;
+          // 一覧のポーリングのたびには描き直さない(版か、コメントの数が変わったときだけ)
+          if (detail && row.detail.version === detail.version && (row.detail.notes || []).length === (detail.notes || []).length) return;
+          detail = row.detail; cached = false; draw();
+        });
+      }
+      reload({ maxAgeMs: 15000 });
+      drawPending();
+      ctx.on('poll:done', function () { if (!noteTyping()) reload(); });
       ctx.on('records:refresh', function (rid) { if (rid === id) reload(); });
-      ctx.on('net:changed', function () { if (KW.isOnline()) reload(); else if (detail && !(noteBox && noteBox.value)) draw(); });
+      ctx.on('records:changed', function (ids) { if (detail && ids.indexOf(id) >= 0) redrawFromCache(); });
+      ctx.on('outbox:counts', function () { drawPending(); });
+      ctx.on('net:changed', function () { if (KW.isOnline()) reload(); else if (detail && !noteTyping()) draw(); });
     }
   };
 })(window);

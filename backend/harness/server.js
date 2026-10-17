@@ -14,7 +14,7 @@ const { createShims } = require('./shims');
 const { seed } = require('./seed');
 
 const BACKEND_DIR = path.join(__dirname, '..');
-const LOAD_ORDER = ['Util', 'Schema', 'Seed', 'RefCache', 'Repo', 'Code', 'Idem', 'Auth', 'Authz', 'Records', 'Photos', 'PhotoUpload', 'Membership', 'Admin', 'Report', 'Notify'];
+const LOAD_ORDER = ['Util', 'Schema', 'Seed', 'RefCache', 'Repo', 'Code', 'Idem', 'Auth', 'Authz', 'RecordResp', 'Records', 'Photos', 'PhotoUpload', 'Membership', 'Admin', 'Report', 'Notify'];
 const ROOT_FOLDER_NAME = 'RCCREATE 型枠検査';
 
 function loadSources() {

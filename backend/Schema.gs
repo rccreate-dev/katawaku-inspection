@@ -302,3 +302,79 @@ function setupTriggers() {
   ScriptApp.newTrigger('dailyMaintenance').timeBased().atHour(3).everyDays(1).inTimezone('Asia/Tokyo').create();
   return 'OK: トリガーを設置しました';
 }
+
+/* ===================== GASの起動待ち対策 keepWarm(SPEC §6.7a。版1.10) ===================== */
+// GASエディタ専用。Webアプリの action ではない(ACTIONS に登録しない。action数は43のまま)。
+
+var KEEPWARM_HANDLER = 'keepWarm';
+/** ScriptApp の everyMinutes が受ける値のうち、このアプリで使うもの(1分ごとは使わない。§6.7a) */
+var KEEPWARM_ALLOWED_MINUTES = [5, 10, 15, 30];
+
+/**
+ * Config.keepWarmMinutes を許可値(5/10/15/30)に丸める。
+ * 値が無い・数でない・2未満(1含む)・30超は 5。それ以外は最も近い許可値(同じ近さなら小さい方)。
+ * 丸めたときは理由を Logger に出す。戻り値は {minutes, rounded}
+ */
+function keepWarmMinutes_() {
+  var raw = null; // 行が無いときは null(既定の5。丸めの通知はしない)
+  try {
+    Repo.resetCache();
+    Repo.fresh('Config'); // トリガーの設置は、キャッシュではなくシートの実際の値で行う
+    var row = Repo.get('Config', 'keepWarmMinutes');
+    if (row) raw = String(row.value === null || row.value === undefined ? '' : row.value).trim();
+  } catch (e) { raw = null; }
+  var n = raw === null ? 5 : (raw === '' ? NaN : Number(raw));
+  var minutes;
+  if (!(n >= 2 && n <= 30)) {
+    minutes = 5;
+  } else {
+    minutes = KEEPWARM_ALLOWED_MINUTES.reduce(function (best, m) { return Math.abs(m - n) < Math.abs(best - n) ? m : best; }, 5);
+  }
+  var rounded = minutes !== n;
+  if (rounded) {
+    Logger.log('keepWarmMinutes=' + (raw === '' ? '(空)' : raw) + ' は許可値(5/10/15/30)ではないため ' + minutes + ' 分にしました');
+  }
+  return { minutes: minutes, rounded: rounded };
+}
+
+/** keepWarm のトリガーだけを全て削除して本数を返す(escalationTick・dailyMaintenance には触れない) */
+function deleteKeepWarmTriggers_() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === KEEPWARM_HANDLER) { ScriptApp.deleteTrigger(t); n++; }
+  });
+  return n;
+}
+
+/**
+ * keepWarm の時間主導トリガーを1本だけ設置する(何度実行しても1本。先に keepWarm のトリガーだけを全て消す)。
+ * 間隔は Config.keepWarmMinutes(丸めは keepWarmMinutes_)。初回は承認画面が出ることがある。
+ */
+function installKeepWarmTrigger() {
+  var m = keepWarmMinutes_().minutes;
+  deleteKeepWarmTriggers_();
+  ScriptApp.newTrigger(KEEPWARM_HANDLER).timeBased().everyMinutes(m).create();
+  return 'OK: keepWarm を' + m + '分ごとに設置しました';
+}
+
+/** keepWarm のトリガーだけを全て削除する(戻り値に削除した本数) */
+function removeKeepWarmTrigger() {
+  var n = deleteKeepWarmTriggers_();
+  return 'OK: keepWarm のトリガーを' + n + '本削除しました';
+}
+
+/**
+ * トリガー本体。軽量・副作用なし: 参照キャッシュ対象シート(Config/Items/Sites。§2.15)を通常の読み取りで1回読むだけ。
+ * シート・Drive・Properties・メールへ書かない。ロックを取らない。Events・Idem を書かない。
+ * Users/Devices/Assignments/Memberships/Absences を読まない。値をログに出さない。例外はすべて握りつぶす。
+ * (末尾 _ の関数はトリガーの実行先にできない恐れがあるため、名前は keepWarm。誰がエディタから実行しても無害)
+ */
+function keepWarm() {
+  try {
+    Repo.resetCache();
+    Repo.ss(); // スクリプトの起動とスプレッドシートへの接続を済ませる
+    RefCache.SHEETS.forEach(function (name) { Repo.all(name); });
+  } catch (e) {
+    /* 失敗通知メールを増やさないため握りつぶす */
+  }
+}

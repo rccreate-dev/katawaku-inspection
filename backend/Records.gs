@@ -546,7 +546,8 @@ function act_submitRecord(ctx) {
     siteId: rec.siteId, recordId: rec.recordId, from: from, to: 'submitted', round: round,
     detail: { items: itemResultsFor_('self', rows), late: timing.selfLate, pourPlannedAt: orNull_(rec.pourPlannedAt), mailed: mailed }
   });
-  return { record: recordSummary_(actor, rec), warnings: timing.selfLate ? ['SELF_LATE'] : [] };
+  // 版1.10(§5.1a): record は RecordDetail。Idem には従来の形(RecordSummary)で保存する
+  return RecordResp.attach(ctx, { record: recordSummary_(actor, rec), warnings: timing.selfLate ? ['SELF_LATE'] : [] }, rec);
 }
 
 /* ===================== QA ===================== */
@@ -653,7 +654,7 @@ function act_submitVerdict(ctx) {
     siteId: rec.siteId, recordId: rec.recordId, from: 'submitted', to: to, round: rec.round,
     detail: { verdict: p.verdict, comment: comment, items: itemResultsFor_('qa', rows), warnings: warnings, mailed: mailed }
   });
-  return { record: recordSummary_(actor, rec), warnings: warnings };
+  return RecordResp.attach(ctx, { record: recordSummary_(actor, rec), warnings: warnings }, rec);
 }
 
 function act_recordPrimeSign(ctx) {
@@ -683,7 +684,7 @@ function act_recordPrimeSign(ctx) {
     siteId: rec.siteId, recordId: rec.recordId, from: 'qa_ok', to: 'approved', round: rec.round,
     detail: { signerName: name, method: p.method, evidencePhotoId: p.evidencePhotoId || null }
   });
-  return { record: recordSummary_(actor, rec) };
+  return RecordResp.attach(ctx, { record: recordSummary_(actor, rec) }, rec);
 }
 
 /* ===================== 打設停止・コメント ===================== */
@@ -706,8 +707,9 @@ function act_stopPour(ctx) {
     siteId: rec.siteId, recordId: rec.recordId, from: prev, to: 'fix', round: rec.round,
     detail: { reason: reason, previousStatus: prev, mailed: mailed }
   });
-  // 他班の職長への応答は masked 形(停止理由・項目・コメントは返さない。SPEC §5.4.3)
-  return { record: recordListView_(actor, rec) };
+  // 他班の職長への応答は masked 形のまま(停止理由・項目・コメントは返さない。SPEC §5.4.3)。
+  // 見てよい呼出者には RecordDetail(版1.10。§5.1a)。Idem には従来の形(Summary / masked 形)で保存する
+  return RecordResp.attach(ctx, { record: recordListView_(actor, rec) }, rec);
 }
 
 function act_addNote(ctx) {
@@ -729,5 +731,5 @@ function act_addNote(ctx) {
   Ev.add(ctx, 'note_added', {
     siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: { noteId: note.noteId, itemId: itemId || null, kind: kind }
   });
-  return { note: noteView_(note) };
+  return RecordResp.attach(ctx, { note: noteView_(note) }, rec);
 }

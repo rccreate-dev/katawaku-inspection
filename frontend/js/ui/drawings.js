@@ -19,6 +19,7 @@
   C.drawingSection = function (o) {
     var box = h('div', { class: 'drawings', id: 'drawings' });
     var notice = null;
+    var mem = C.memPhotos(); // 保存直後のメモリ上のサムネ(端末への保存を待たない。SPEC §8.11.5)
 
     /* 1 side 分の図面(サーバーの一覧+未送信のローカル) */
     function listOf(side) {
@@ -35,12 +36,13 @@
         if (b.kind !== 'drawing' || b.side !== side || have[b.photoId] || deleted[b.photoId]) return;
         list.push({ photoId: b.photoId, local: b.uploadState !== 'uploaded', blob: b.full, thumbBlob: b.thumb, stampText: b.meta && b.meta.stampText, takenAt: b.meta && b.meta.takenAt, side: side, kind: 'drawing', canDelete: true });
       });
-      return list;
+      return list.concat(mem.forItem(null, side, blobs).map(function (x) { x.side = side; x.kind = 'drawing'; x.canDelete = true; return x; }));
     }
 
     function deleteDrawing(p) {
       var st = o.get(), work = st.work;
       var after = function () { return o.refreshBlobs().then(build); };
+      if (p.mem) { if (p.mem === 'failed') { mem.drop(p.photoId); build(); } return Promise.resolve(); }
       if (p.local) {
         return KW.outbox.forRecord(o.recordId).then(function (rows) {
           var row = rows.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
@@ -50,8 +52,10 @@
           return Promise.all(tasks);
         }).then(after);
       }
+      // 送信済みの図面: 押した瞬間に隠し、deletePhoto は裏で送る。失敗したら元に戻す(§8.11.4)
       work.deletedPhotos = work.deletedPhotos || {};
       work.deletedPhotos[p.photoId] = true;
+      build();
       return KW.data.putDraft(work).then(function () {
         return KW.outbox.enqueue('deletePhoto', { photoId: p.photoId }, { recordId: o.recordId });
       }).then(build);
@@ -68,6 +72,9 @@
       }).then(function (p) {
         if (!p) return null;
         var photoId = KW.newPhotoId();
+        // 『保存』を押した時点で、端末への保存を待たずにサムネを出す(SPEC §8.11.5)
+        mem.add({ photoId: photoId, itemId: null, side: o.side, thumb: p.thumb });
+        build();
         // 端末への保存を完了してから outbox に積む。保存に失敗したら outbox には積まない(半端な行を残さない)
         return KW.data.putPhotoBlob({
           photoId: photoId, recordId: o.recordId, itemId: null, side: o.side, kind: 'drawing', full: p.full, thumb: p.thumb,
@@ -76,8 +83,9 @@
         }).then(function () {
           return KW.outbox.enqueue('uploadPhotoChunk', { recordId: o.recordId, side: o.side }, { recordId: o.recordId, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
             .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); }); // 積めなければ本体も消す
-        }).then(function () { return o.refreshBlobs(); }).catch(function (e) {
+        }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return o.refreshBlobs(); }).then(function () { mem.drop(photoId); }).catch(function (e) {
           KW.reportError && KW.reportError(e);
+          mem.fail(photoId); // 保存できません。撮り直してください(赤)
           notice = t('err.INTERNAL'); C.toast(notice, 'bad');
           return null;
         });

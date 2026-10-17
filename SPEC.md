@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.9.0 / 作成日: 2026-10-07(最終改訂 2026-10-14) / 作成: 設計担当
+- 版: 1.10.0 / 作成日: 2026-10-07(最終改訂 2026-10-17) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -155,6 +155,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, script.ext
 5. ユーザー状態: `disabled` → `USER_DISABLED`、`locked` で `me`/`logoutDevice` 以外 → `USER_LOCKED`。
 6. **参照系**: `params` の契約外キー検査(§5.4。表に無いキー → `BAD_REQUEST`)→ `authorize()`(§4.2)→実行→応答(ロックなし)。
 7. **更新系**: `params` の契約外キー検査(`BAD_REQUEST`。ロック取得前)→ スクリプトロック取得 → (a) 冪等キー検索(あれば保存済み応答を `replayed:true` で返す) → (b) `authorize()` 再評価(ロック内で最新状態)+入力検証 → (c) PIN必須なら検証(§3.4。権限・状態・入力検証に通った後) → (d) 本処理 → (e) Events追記 → (f) 冪等キー保存 → ロック解放。
+   - **応答の `record`(版1.10)**: 更新系の応答に最新の記録を載せる action は §5.1a。dispatcher の順は変えない(`record` は本処理のあと、応答の組立時に作る。サムネ・写真本体は載せない)。
    - **例外 `uploadPhotoChunk`(版1.4。冪等キー対象外のため上の(a)(f)は無い。処理全体をロックで覆わない)**: ①契約外キー検査(`BAD_REQUEST`) → ②【ロック外】手順4・5と `authorize()`(一次判定。早期失敗のため。確定判定は⑤) → ③【ロック外】入力検証・(分割モードの中間チャンクはここでCache保存して応答し終了)・組立・デコード・JPEG/SHA-256検査・Drive保存 → ④スクリプトロック取得(取れなければ `LOCK_TIMEOUT`) → ⑤【ロック内】手順4・5 と `authorize()` を **最新のシートで再評価**(失敗ならそのエラー)→ 既存 `Photos` 行の確認 → 項目あたり上限確認 → `Photos` 追記・記録の `touch` → ロック解放 → ⑥③で作ったDriveファイルは、⑤で `Photos` 行にならなかった全経路(エラー・例外・`LOCK_TIMEOUT`・既存行ありの冪等成功)でゴミ箱へ。詳細は §5.4.4。
 8. 例外は `INTERNAL`(再試行可)。スタックトレース・内部パスを応答に含めない。
 
@@ -647,6 +648,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | mailEnabled | `TRUE` | |
 | appBaseUrl | (要設定) | メール内リンク用 |
 | retentionYears | `10` | 保管年数(表示・運用用。自動削除はしない P-18) |
+| keepWarmMinutes | `5` | 版1.10。GAS起動待ち対策のトリガー間隔(分)。`int`。許容値 5/10/15/30(それ以外・1・非数は5として扱う。§6.7a)。**サーバー専用で、`bootstrap.config` には含めない**。`setupSheets()` が不足キーとして追記する(既存の値は変えない) |
 
 ### 2.15 参照シートの読み取りキャッシュ(版1.4)
 
@@ -919,6 +921,40 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **ItemPatch**(`saveDraft`/`saveQaDraft` の `items[]`): `{ "itemId":"i4", "result":"ok|ng|na|null", "severity":"minor|major|null", "values":[2,-1], "note":"…" }`。`itemId` 以外は任意で、**指定したキーだけ更新**(`null` で消去、`values:[]` で消去)。未知のキー・未知の `itemId`・範囲外(`values` は有限数・最大10件、`note` ≤1000文字)は `VALIDATION_FAILED`(`FIELD_INVALID`)。職長は `audience=qa` の項目、QAは `audience=foreman` の項目を書けない。
 
+### 5.1a 書き込み応答の更新後の記録 `data.record` とバージョン規則(版1.10。ユーザー決定 2026-10-17)
+
+目的: 書き込みのあとに画面が `getRecord` を呼び直す往復(1回 1.3〜2.8 秒。休止後の最初はさらに遅い)をなくす。**契約は追加のみ**(既存の列名・action名・エラーコード・action数43・既存キーは変更しない。`record` の中身が RecordSummary から RecordDetail に広がるだけで、RecordDetail は RecordSummary のキーを全て含む(§5.1)ので、古いクライアントは影響を受けない)。
+
+**1. どの応答に何を返すか**(これが正本。表に無い action の応答は変えない)
+
+| action | 応答の `record` | 版1.10 の変更 |
+|---|---|---|
+| `createRecord` `claimReview` `takeoverReview` | RecordDetail | 変更なし(既に Detail) |
+| `submitRecord` `submitVerdict` `recordPrimeSign` | RecordSummary → **RecordDetail** | 型を広げる(`warnings` など他のキーは従来どおり) |
+| `stopPour` | RecordSummary / masked 形 → **RecordDetail**(呼出者が他班の職長のときは従来どおり masked 形) | 型を広げる |
+| `addNote` | (なし。`note` のみ)→ `note` を残し **`record`: RecordDetail を追加** | キー追加 |
+| `uploadPhotoChunk` | (なし)→ **`complete:true` の応答(単発・分割の最終チャンク・既存行の冪等成功)に `record`: RecordDetail を追加**。途中チャンク(`complete:false`)には付けない | キー追加 |
+| `saveDraft` `saveQaDraft` `releaseClaim` | RecordSummary | **変更しない**(理由: 画面は応答を待たない/書き込み後に `getRecord` も呼ばない。Detail にすると保存のたびにサーバーの読み込みが増え、次の送信を遅らせる) |
+| `deletePhoto` `generateReport` ほか全て | — | 変更しない |
+
+**2. `record` の中身と重さ**
+- RecordDetail は `getRecord` と **同じ関数・同じ規則**で作る(可視性・マスク・職長に `qa` を出さない規則など §5.1 と同一。応答用に別の形を作らない)。
+- **サムネ・写真本体は含めない**(`PhotoMeta` のみ。`dataUrl`・`thumb`・base64 を含めない)。`events` は直近100件(従来どおり)。
+- 作る時点: 通常の更新系は、本処理・Events 追記・冪等キー保存のあと、**ロックを持ったまま**最新の状態から作る(§1.6 の7)。`uploadPhotoChunk` だけは、ロックを短くする決まり(§1.4・§1.6 の7の例外)を守るため、**ロックを解放した後**に読み取りだけで作る(その間に他のリクエストが書き込んでいれば、より新しい版が入ってよい)。
+- **`record` を作れなかったとき**(例外・読み込み失敗・呼出者が `canViewDetail` でない場合を含む)は、書き込みの成否を変えない。`submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` は従来の形(RecordSummary / masked 形)で返し、`addNote` `uploadPhotoChunk` は `record` を省く。クライアントは省かれたら従来どおり `getRecord` で取り直す(§8.11.8)。
+
+**3. バージョン規則**
+- サーバー: 記録の内容を変える書き込み(項目・写真・図面・コメント・状態・履歴)は、**必ず `Records.version` を+1する**(`touchRecord_`。現行どおり。`addNote`・`uploadPhotoChunk`・`deletePhoto` も含む)。`record.version` は、その応答が表す状態の版。同じ記録の `version` は単調に増える。
+- クライアント: 応答の `record` は **`record.version >= キャッシュ中の同じ記録の version` のときだけ**キャッシュ(`records`)に反映する。小さいときは捨てる(遅れて届いた古い応答が、新しい状態を巻き戻さない。並行送信・再送・ポーリングとの競合対策。§8.3-6 と同じ規則)。**捨てても、その操作自体は成功として扱う**(outbox行を削除する、など)。`masked` 形は既存の詳細を上書きしない。端末内の未送信の変更(`drafts`・`outbox`・`photoBlobs`)は別のストアなので `record` の反映で消えない(画面は『サーバーの値+端末の未送信』を重ねて描く。§8.8)。編集中の入力欄は作り直さない。
+- `meta.replayed=true`(冪等再生)の応答も同じ規則で扱う。
+
+**4. 冪等キー(`Idem`)との関係**(§5.2 の補足)
+- `Idem.responseJson` は従来どおり45,000文字以内。**`record`(RecordDetail)は保存しない**: `submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` は従来の形(RecordSummary / masked 形)で保存し、`addNote` は `{note}` だけを保存する。
+- 再生(`replayed:true`)のとき、サーバーは保存済みの応答の `record` を、**再生時点の最新の RecordDetail に差し替えて**返す(`addNote` は `record` を足す。呼出者が `canViewDetail` でなければ保存済みのまま)。したがって **再生の `data` は `record` を除いて初回と同一、`record.version` は初回以上**(C-IDEM-01 の読み替え)。
+
+**5. 互換性**
+- 先にサーバー(GAS)を更新しても、先にフロントを更新しても動く(順序の指定なし)。`Config.minClientVersion` は上げない。新しいフロントは、応答に `record` が無い/`items` が無い(古いサーバー・省略)ときだけ従来どおり `getRecord` を呼ぶ。
+
 ### 5.2 冪等キー(clientId)の扱い
 
 - **★** 付きaction(§5.4)は `clientId` 必須(無い→`BAD_REQUEST`)。クライアントは「ユーザーの1操作」につき1つ生成し、**同じ操作の再送は必ず同じ `clientId`**。内容を変えて送り直すときは新しい `clientId`。
@@ -928,6 +964,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
   - `paramsHash = hex(SHA-256(canonicalJSON({action, params})))`。canonicalJSON=キーを再帰的に辞書順に並べた最小JSON。`pin`・`clientId` は含めない。
 - **成功応答のみ保存**。失敗(エラー)は保存しない(修正後に同じ `clientId` で再送できるようにするため。ただし同じ `clientId` を内容違いで使えない=上記)。
 - `RecordDetail` を返す `createRecord` / `claimReview` / `takeoverReview` は `responseJson` を空で保存し、再生時は現在状態から再構築する: `createRecord`=記録が存在し `ownerUserId` が同一なら成功(現在の詳細)/ `claimReview`・`takeoverReview`=現在 `claimedBy` が同一ユーザーかつ `round` 一致なら成功、そうでなければ `ALREADY_CLAIMED` か `STATE_CONFLICT`。
+  **版1.10**: `submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` `addNote` の `record` は、`Idem.responseJson` には従来の形(RecordSummary / `{note}`)で保存し、再生時は `record` だけ最新の RecordDetail に差し替えて返す(§5.1a。保存サイズ上限45,000文字を超えさせないため)。
 - 冪等キー対象外: `registerDevice`・`adminIssueInvite`(応答に秘密が入る)・写真チャンク(下記)・参照系・本質的に冪等な更新(`setLang`,`logoutDevice`,`adminUnlockUser`,`adminSetUserStatus`,`adminRevokeDevice`,`adminCancelAbsence`)。
 - `uploadPhotoChunk` の冪等性は **`photoId` 単位**: ①`Photos` に同じ `photoId` の行が既にあれば(`deleted` の値に関わらず)新しい行・新しいDriveファイルを残さず成功(`complete:true`、既存の `photo`)を返す。同時に届いた同一 `photoId` の再送も、ロック内の再確認で1行だけになる(§5.4.4)。②分割モードの途中チャンクは `(photoId, index)` で上書き。
 - `Idem` は30日で削除。オフラインで30日を超えて滞留した outbox 行は送信も再送もせず、利用者が内容を確認して「破棄」のみできる(§8.5)。
@@ -1084,7 +1121,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
   {"itemId":"i9","result":"ng","note":"控えが1箇所不足"}]}
 ```
 
-**submitRecord** ★ PIN `{ "recordId", "round" }` → `{ "record":<RecordSummary>, "warnings":["SELF_LATE"?] }`
+**submitRecord** ★ PIN `{ "recordId", "round" }` → `{ "record":<RecordDetail>, "warnings":["SELF_LATE"?] }`
 - status∈{draft,fix} かつ `round` 一致 → §5.3.1 の提出検査を **全て満たす**こと。成功: draft→submitted(初回)/ fix→submitted(再提出。`round+1`、`qa*` 列とQA判定列(`qaVerdict,qaVerdictBy,qaVerdictAt,qaComment,major`)・`claim*`・`stopped*`・`prime*` を空にし `escNotified=0`)。`submittedBy/At`=自分/今。初回は `firstSubmittedAt`。
 - 職長の項目コメント(空でないもの)を Notes に `kind=foreman, source=submit` で追記(提出ごと)。Events `submitted`/`resubmitted`(detail に項目結果。`late`)。
 - `warnings`: `SELF_LATE`(§6.5 の職長期限超過。提出は拒否しない。`stage=pre_pour` のみ。出来形では出ない)。
@@ -1100,7 +1137,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **saveQaDraft** ★ Q `{ "recordId", "items"?:[<ItemPatch>], "comment"?:"str" }` → `{ "record":<RecordSummary> }`(status=submitted かつ claim者本人。`qa*` 列と `Records.qaComment` を更新。`qaDraftAt`=今)。エラー: `NOT_CLAIMER` / `NOT_CLAIMED` / `RECORD_LOCKED`(submittedでない)/ `VALIDATION_FAILED`。
 
-**submitVerdict** ★ PIN(`verdict=ok`のみ) `{ "recordId", "round", "verdict":"ok|minor|major", "comment"?:"str" }`(総合コメントの決め方: **`comment` が未指定(キー無し/`null`)なら `saveQaDraft` で保存済みの `Records.qaComment` を使う**。指定されていればその値を使う。採用した値(空白のみは空とみなす)が空で `verdict` が `minor`/`major` なら `COMMENT_REQUIRED`。≤2000文字) → `{ "record":<RecordSummary>, "warnings":["QA_BEFORE_OPEN"?, "QA_LATE"?] }`
+**submitVerdict** ★ PIN(`verdict=ok`のみ) `{ "recordId", "round", "verdict":"ok|minor|major", "comment"?:"str" }`(総合コメントの決め方: **`comment` が未指定(キー無し/`null`)なら `saveQaDraft` で保存済みの `Records.qaComment` を使う**。指定されていればその値を使う。採用した値(空白のみは空とみなす)が空で `verdict` が `minor`/`major` なら `COMMENT_REQUIRED`。≤2000文字) → `{ "record":<RecordDetail>, "warnings":["QA_BEFORE_OPEN"?, "QA_LATE"?] }`
 - claim者本人・status=submitted・`round`一致。§5.3.1 の判定検査を全て満たす。成功:
   - `ok` → status=`qa_ok`、`qaVerdict=ok`、`major=FALSE`。
   - `minor` → status=`fix`、`qaVerdict=minor`、`major=FALSE`。
@@ -1109,18 +1146,18 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - `warnings`: `QA_BEFORE_OPEN`(§6.5の検査開始前)/ `QA_LATE`(§6.5のQA期限超過)。いずれも拒否しない。`stage=pre_pour` のみで、出来形では出ない。
 - エラー: `NOT_CLAIMER`/`NOT_CLAIMED`/`STATE_CONFLICT`/`VALIDATION_FAILED`/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 
-**recordPrimeSign** ★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordSummary> }`
+**recordPrimeSign** ★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordDetail> }`
 - status=`qa_ok` のみ。**3者サイン検査**: 職長提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**。出来形の記録では **出来形確認済**。状態の値はどちらも `approved`。§6.8)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
 - エラー: `STATE_CONFLICT` / `VALIDATION_FAILED` / `PIN_*` / `FORBIDDEN_SITE`。
 
-**stopPour** ★ Q(高優先) `{ "recordId", "reason":"≤200文字" }` → `{ "record":<RecordSummary> }`
+**stopPour** ★ Q(高優先) `{ "recordId", "reason":"≤200文字" }` → `{ "record":<RecordDetail> }`
 - **対象の段階(版1.9)**: `stage=pre_pour` の記録のみ。`post_demold`(出来形)の記録に送ると `STATE_CONFLICT`(`error.data={status,round}`。状態・Events・通知は何も変えない)。出来形は打設の後の検査で、打設を止める意味がないため。
 - **異常時は誰でも止められる**: その現場の有効な担当者(職長は班を問わず)または責任者。status∈{submitted,qa_ok,approved} のとき → status=`fix`、`stopped=TRUE`、`stoppedBy/At/Reason`。**3者サインを無効化**(`prime*`・判定列・`claim*` を空に。履歴は Events/Notes に残る)。`draft`/`fix` の記録には不要(`STATE_CONFLICT`)。
 - **他班(`masked`)の記録でも実行できる**(班スコープを適用しない §4.2)。ただし呼出者が他班の職長のとき、応答の `record` は masked 形(§5.1)で、停止理由・項目・コメント等は返さない。`getRecord` は従来どおり `FORBIDDEN_TEAM`。
 - Events `stopped`(detail `{reason,previousStatus}`)。責任者・担当QAへ通知(§6.6)。再開は職長が是正→再提出→再度QA/元請の手順(§6.2 T8)。
 - エラー: `STATE_CONFLICT` / `VALIDATION_FAILED`(`REASON_REQUIRED`)/ `FORBIDDEN_SITE`。
 
-**addNote** ★ Q `{ "recordId", "itemId"?:"i9", "text":"1〜2000文字" }` → `{ "note":<Note> }`(職長なら `kind=foreman`、QA/責任者なら `kind=manager` をサーバーが役割から決める。**クライアントは kind を送れない**)。Notes に追記(更新・削除不可)、Events `note_added`。職長は status∈{draft,fix} の自班記録のみ(`RECORD_LOCKED`)。エラー: `NOT_FOUND` / `FORBIDDEN_*` / `RECORD_LOCKED` / `VALIDATION_FAILED`。
+**addNote** ★ Q `{ "recordId", "itemId"?:"i9", "text":"1〜2000文字" }` → `{ "note":<Note>, "record":<RecordDetail> }`(職長なら `kind=foreman`、QA/責任者なら `kind=manager` をサーバーが役割から決める。**クライアントは kind を送れない**)。Notes に追記(更新・削除不可)、Events `note_added`。職長は status∈{draft,fix} の自班記録のみ(`RECORD_LOCKED`)。エラー: `NOT_FOUND` / `FORBIDDEN_*` / `RECORD_LOCKED` / `VALIDATION_FAILED`。
 
 #### 5.4.4 写真(詳細は §7)
 
@@ -1141,6 +1178,7 @@ params:
 - クライアントの選び方は §7.3(base64長 ≤ `photoSingleMaxChars` なら必ず単発。超える場合と旧サーバーのときだけ分割)。サーバーはどちらのモードも受理する(クライアントが選ぶ)。
 - メタ(`takenAt`〜`stampText`)は **全リクエスト(全チャンク)に付ける**(サーバーはステートレスに検査できる)。分割モードのチャンクは **index昇順に1つずつ**送る。
 - **応答**: 単発 → `{ "photoId", "received":[0], "complete":true, "photo":<PhotoMeta> }`。分割の途中チャンク → `{ "photoId", "received":[0,1], "complete":false }`(`received` はCacheに存在するindex昇順)。分割の最終チャンク(`index=total-1`)で全チャンクが揃っていれば組み立て → 以降は単発と同じ → `{ "photoId", "received":[0,1,2], "complete":true, "photo":<PhotoMeta> }`。
+  **版1.10**: `complete:true` の応答には §5.1a の `record`(RecordDetail)を加える(`complete:false` の途中チャンクには付けない)。
 - **入力検証と順序**(すべて **ロックの外**。§4.2 の評価順どおり、`authorize` を通ってから行う。最初に失敗したもので返す):
   1. `data` の文字数 > 上限(単発=`photoSingleMaxChars`、分割=`photoChunkChars`)、文字数が4の倍数でない、base64でない文字を含む → `PHOTO_INVALID`。
   2. 申告 `bytes` > `photoMaxBytes` → `PHOTO_TOO_LARGE`(`{max}`。デコード前に判定してよい)。
@@ -1301,6 +1339,21 @@ PDF: `generateReport` `listReports`
 - `escalationTick`: 5分ごと。
 - `dailyMaintenance`: 毎日 03:00 JST。`Idem` の30日超行の削除、期限切れ `Invites` の `expiresAt` 超過行へ `usedAt=expired` を記入。端末の定期整理はしない(登録上限超過時のみ自動整理 §2.5。P-34)。
 
+### 6.7a GASの起動待ち対策(keepWarm。版1.10。ユーザー決定 2026-10-17)
+
+GAS Webアプリは、しばらく使われないと最初の1回が遅い(起動待ち)。**時間主導トリガーで軽い関数を定期的に動かし、起動待ちを減らす**。効果は保証されない(下の「効果の確認」)。
+
+- **GASエディタ専用の関数**(Webアプリの action ではない。**`ACTIONS` に登録しない**。action数は43のまま。契約・mock の変更なし。`backend/Schema.gs` に `setupTriggers` と並べて置く):
+  - `installKeepWarmTrigger()`: 時間主導トリガーを1本設置する。ハンドラは `keepWarm`。**何度実行しても1本だけ**(先に `keepWarm` のトリガーだけを全て削除してから作る。`escalationTick`・`dailyMaintenance` のトリガーには触れない)。間隔は `Config.keepWarmMinutes`(§2.14)。値が無い・不正なら 5。`ScriptApp` の `everyMinutes` は 1/5/10/15/30 しか受けないため、**5/10/15/30 のどれかに丸める**(1・範囲外・数でない値は 5。丸めたときは `Logger` に理由を出す)。戻り値は `'OK: keepWarm を{n}分ごとに設置しました'` の形の文字列。
+  - `removeKeepWarmTrigger()`: `keepWarm` のトリガーだけを全て削除する(戻り値に削除した本数)。
+  - `keepWarm()`: トリガーの本体。**軽量・副作用なし**: 参照キャッシュ対象シート(`Config`/`Items`/`Sites`。§2.15)を通常の読み取り関数で1回読むだけ(スクリプトの起動とスプレッドシートへの接続を済ませる)。**シート・Drive・Properties・メールへ書かない。ロックを取らない。Events・Idem を書かない。`Users`/`Devices`/`Assignments`/`Memberships`/`Absences` を読まない。値をログに出さない**。例外はすべて握りつぶす(失敗通知メールを増やさない)。通常のリクエストの処理・ロックに影響しない。
+- `setupTriggers()` は `escalationTick` と `dailyMaintenance` のトリガーだけを入れ替える(`keepWarm` のトリガーは消えない)。コードの貼り替え(デプロイ)でもトリガーは消えない。トリガーは実行したユーザー(スクリプトの所有者)のもの。
+- **名前について(2026-10-17 決定)**: 末尾 `_` の関数はトリガーの実行先にできない恐れがあるため、本体の名前は `keepWarm`(末尾 `_` なし)とする。`keepWarm` は ACTIONS に登録せず(action数43のまま)、GAS エディタの実行候補にも表示されるが、**誰がエディタから実行しても、参照キャッシュ対象シートを読むだけで何も書かないため無害**である。
+- **制約**: 時間主導トリガーは1分に1回まで。Apps Script には1日あたりのトリガー実行時間の上限がある(個人アカウントは約90分/日、Workspace は約6時間/日が目安。公式の Quotas で確認すること)。既定の5分ごとは 1日288回 × 約1〜2秒 = 約5〜10分/日で、`escalationTick`(5分ごと)と合わせても余裕があるが、間隔を詰める場合は実行時間の合計を確認する。そのため 1分ごとは使わない(§2.14)。
+- **インストール運用**: ユーザー(責任者)が GAS エディタで `installKeepWarmTrigger` を **1回だけ実行**する(初回は承認画面が出ることがある)。実行手順・間隔の変え方(`Config.keepWarmMinutes` を直して再実行)・やめ方(`removeKeepWarmTrigger`)・設置の確認方法(エディタの『トリガー』画面に `keepWarm` が1本)・効果の測り方・上限の注意を `docs/OPERATIONS.md` に書く(バックエンド担当)。
+- **効果の確認(P-46)**: 効くかどうかは環境しだい(トリガーの実行環境と Webアプリの実行環境が同じである保証はない)。**設置の前後で、しばらく使わなかった後の最初の操作の往復時間(S21 通信診断の `rt`)を比べる**。差が出なければ `removeKeepWarmTrigger()` で外す。
+- **範囲外**: 認証・認可に関わるシート(`Users`/`Devices`/`Assignments` 等)のサーバー側キャッシュ(§2.15 の決定のまま。『認可は常に最新のシートで判定する』と衝突するため)。GAS以外のサーバーへの移行。
+
 ### 6.8 段階(stage)による違い(版1.9。ユーザー決定 2026-10-14)
 
 使う段階は `pre_pour`(打設前)と `post_demold`(出来形)の2つ(§0.2)。**出来形検査は打設前検査と同じ仕組みを再利用する**(流れ: 職長の自主検査 → 品質管理者の検査 → 元請に提出)。違いは下の表だけで、**表に無いことは両段階で完全に同じ**: 状態(`none`/`draft`/`submitted`/`fix`/`qa_ok`/`approved`)と遷移 T1〜T9、PIN再入力の3操作、差し戻し(`minor`/`major`)、提出後の職長編集不可、claim・引き継ぎ、職長コメントと管理者コメントの分離、元請サイン記録(3者サイン)、写真・図面、権限、エスカレーション。
@@ -1415,6 +1468,7 @@ PDF: `generateReport` `listReports`
 - キューに入れてよい操作(Q): `createRecord` `saveDraft` `saveQaDraft` `uploadPhotoChunk` `deletePhoto` `addNote` `stopPour`。
 - **オンライン限定**(Qでない): `submitRecord` `submitVerdict` `recordPrimeSign`(PIN平文をキューに残さないため。P-05)、`claimReview` `releaseClaim` `takeoverReview`(先着判定はサーバーでしか決まらない)、`requestJoin` `decideJoin` `revokeMembership`、`generateReport`、`admin*`、`changePin`、参照系全て。圏外では該当ボタンを無効化し、理由(`msg.offline_required`)を表示する。
 - `stopPour` はQだが高優先: outboxの先頭に割り込み、圏外では「送信待ちです。至急電話で連絡してください」(`msg.stop_queued_call`)を強調表示する。
+- **先出し(版1.10。§8.11)**: Q のうち画面を先に更新してよいのは `saveDraft` `saveQaDraft` `addNote` `uploadPhotoChunk` `deletePhoto`(と `setLang`)だけ。`createRecord` と `stopPour` はQだが先出しにせず、オンラインでは応答を待つ(§8.11.2 の B)。
 
 ### 8.2 IndexedDB スキーマ(DB名 `katawaku`、バージョン1)
 
@@ -1448,7 +1502,7 @@ PDF: `generateReport` `listReports`
   3. 成功時に削除するのは **送った行(`seq`)だけ**。送信中に積まれた同じ `recordId` の別行・統合済みの変更を消さない。
   4. 統合(§8.3)は読み取り→マージ→書き込みを1つのトランザクションで行い、2回の変更が互いを上書きしない(後の変更が先の変更を失わせない)。
   5. **送信行の選択は `pending` → `sending` へ更新するのと同じトランザクション**で、その時点の行集合に対して §8.4 の送信可否規則(a)〜(d)を再評価して行う(複数の送信スロットが同じ行・同じ `photoId`・規則違反の行を同時に取らない)。選択後に他の行が追加・統合されても、選んだ行の内容は不変条件1のとおり読み直す。
-  6. 応答でローカル `records` キャッシュを更新するとき、**並行して返った古い応答で新しい応答の内容を巻き戻さない**(同じ記録のキャッシュは `version` が大きい方を残す)。
+  6. 応答でローカル `records` キャッシュを更新するとき、**並行して返った古い応答で新しい応答の内容を巻き戻さない**(同じ記録のキャッシュは `version` が大きい方を残す)。 **応答に `record` がある場合の採否規則は §5.1a、反映直後の `getRecord` の省略は §8.11.8**。
 
 ### 8.4 送信ループ(スケジューラは1本。送信中の要求は複数可)
 起動時・`online`イベント・`visibilitychange`(前景化)・操作追加時・30秒ごと・**送信中の要求が1件終わるたび**に実行する。スケジューラ(行を選ぶ処理)は同時に1本だけ動き、選んだ行の送信要求は下の規則の範囲で **同時に複数** 走ってよい。
@@ -1464,7 +1518,7 @@ PDF: `generateReport` `listReports`
      4. 写真の行どうしに順序は無い(`seq` に関わらず同時に送ってよい)。
    - (d) **同じ `photoId` の行は同時に1件だけ**(その `photoId` の行が `sending` なら選ばない。「再送」操作で同じ `photoId` の行が重複した場合も同じ)。
    - (e) **失敗の影響範囲**: 写真の行が(再試行待ち・確定失敗のいずれでも)止まっても、**他の写真の行は止めない**。止まった写真の行は (c)-2 により同じ記録の **後続の非写真の行** を待たせる(確定失敗のときは下の表のとおりそれらを `blocked`)。非写真の行が確定失敗したときは従来どおり同じ記録の後続の行(写真の行を含む)を `blocked` にする。**ただし `stopPour` の行は、他の行の確定失敗(写真・非写真とも)の波及で `blocked` にしない**(異常時の停止は常に送る)。`stopPour` 自身が確定失敗したときの扱いは従来どおり(その行を `failed` にし、同一 `recordId` の後続行を `blocked`)。他の記録の行は常に続行。
-2. 成功 → その行(送った `seq` だけ)を削除。応答でローカル `records` キャッシュを更新。続けて 1 に戻って空いたスロットを埋める。
+2. 成功 → その行(送った `seq` だけ)を削除。応答でローカル `records` キャッシュを更新(**応答に `record` があれば、行を削除する前にそれを §5.1a の版規則で反映する。`uploadPhotoChunk` の完了後は `getRecord` を呼ばない**。`record` が無い応答(旧サーバー等)のときだけ従来どおり `getRecord`)。続けて 1 に戻って空いたスロットを埋める。
 3. 通信失敗(fetch例外・タイムアウト)・`LOCK_TIMEOUT`・`INTERNAL`・`DRIVE_ERROR` → その行だけ `pending` に戻し `tries+1`、`nextTryAt = now + [2,5,15,30,60,60…]秒`。**連続3回の通信失敗**(並行して送っている全要求を通算して数える。応答が1つでも成功したら0に戻す)でオフライン表示(ヘッダのインジケータ)にして、新しい送信を始めず `online` イベント/30秒まで待つ(送信中の要求は完了またはタイムアウトまで待つ)。
 4. 確定エラー → 下表。
 
@@ -1513,6 +1567,112 @@ PDF: `generateReport` `listReports`
 - `manifest.webmanifest`: `name="型枠検査"`、`short_name="型枠検査"`、`display="standalone"`、`start_url="./"`、`scope="./"`、`theme_color`/`background_color`、192/512pxアイコン(仮アイコン可。P-21)。
 - ホーム画面追加を案内する(iOS Safariは非インストール時にサイトデータが7日で消えることがあるため、トークン消失時は再登録で復帰できる旨も案内。P-34)。
 
+### 8.11 先出し(楽観的UI)と送信状態の可視化(版1.10。ユーザー決定 2026-10-17)
+
+背景: 操作のたびに スマホ→GAS→スプレッドシート の往復(1回 1.3〜2.8 秒。休止後の最初はさらに遅い)があり、応答を待ってから画面を変えていた。待ち時間を **(a) 先出しできる操作は待たない (b) 待つ操作は『待っている』ことを見せ、待ち時間そのものを応答の `record`(§5.1a)で短くする** の2本立てで減らす。現状の調査は付録A。
+
+#### 8.11.1 原則
+1. 先出しにするのは **失敗しても困らない操作だけ**: 冪等で、確定(状態の遷移)を伴わず、先着の取り合いも PIN も無い操作。
+2. 先出しした操作は、**端末に保存してから**(IndexedDB。§8.2)画面を切り替える。保存に失敗したら先出しにせず、エラーを表示する。送信は outbox が裏で行う(§8.4)。
+3. **『表示されている=サーバーに保存済み』と誤解させない**: 未送信のものは見た目で区別し(§8.11.5)、記録の画面に保存状態を常に出す(§8.11.6)。
+4. 待つ操作(PIN・先着・状態の取り合い・参加・端末登録・ログイン)は **先出ししない**。サーバーが拒否したら従来どおりエラーを表示し、画面は進まない。
+5. 認可はサーバーで検査する(先出しでも変わらない)。先出しは見た目だけで、サーバーが拒否すれば §8.11.4 の失敗の扱いになる。
+
+#### 8.11.2 操作の分類(正本。全43 actionを1回ずつ載せる。U-CLASS-01 が検査する)
+
+| 分類 | action | 画面の動き | 理由 |
+|---|---|---|---|
+| A 先出し | `saveDraft` `saveQaDraft` | 入力は即座に端末へ保存して画面に反映(従来どおり。§8.8)。サーバーへは裏で(統合 §8.3) | 冪等・部分更新・後勝ち。状態を確定しない |
+| A 先出し | `addNote` | 押した瞬間に入力欄を空にし、『送信待ちのコメント』として一覧に出す(§8.11.3)。応答を待たない | 追記専用・冪等(`clientId`)。失敗しても本文は outbox に残る |
+| A 先出し | `uploadPhotoChunk`(写真・図面) | 撮影(取り込み)後すぐ端末内のサムネを出し、送信は裏(§8.11.5) | `photoId` で冪等。提出前に全件の完了を確認する(§8.6) |
+| A 先出し | `deletePhoto` | 押した瞬間に写真を消す(送信済みの写真は非表示にし、削除は裏で送る)。失敗したら元に戻す(§8.11.4) | 論理削除で冪等。撮影者本人のみ |
+| A 先出し | `setLang` | 即座に言語を切り替える(従来どおり。失敗は無視) | 本人の表示設定 |
+| B 待つ(PIN) | `submitRecord` `submitVerdict` `recordPrimeSign` `changePin` | PIN入力→『送信中…』を出して応答を待つ。成功したら応答の `record` で次の画面を描く。`submitVerdict` の `minor`/`major` はPINなしで確認ダイアログのあと、同じく待つ | 確定・電子サインの代わり。PIN誤り・ロックはその場で見せる |
+| B 待つ(先着・状態) | `claimReview` `releaseClaim` `takeoverReview` `stopPour` `createRecord` | 『送信中…』を出して応答を待つ。拒否(`ALREADY_CLAIMED` `STATE_CONFLICT` `RECORD_LOCKED` `ALREADY_EXISTS` 等)はそのまま表示 | 先着・状態の取り合い・停止の確定。`createRecord` は同じ場所の記録の先着(P-47)。圏外の `stopPour`・`createRecord` だけは従来どおりキューに積む(§8.1) |
+| B 待つ(参加・端末・ログイン) | `lookupInvite` `registerDevice` `logoutDevice` `requestJoin` `decideJoin` `revokeMembership` | 同上 | 認証・参加の確定 |
+| B 待つ(管理・出力) | `generateReport` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` | 同上(`generateReport` は最大120秒) | 責任者の管理操作・PDF。結果が画面の内容そのもの |
+| C 参照 | `ping` `me` `getBootstrap` `listRecords` `getRecord` `getPhotoThumbs` `getPhoto` `listReports` `listJoinRequests` `listAssignments` `listAbsences` `adminListUsers` | 先出しの対象外(書き込みではない)。キャッシュで先に描く規則は §8.11.9 | — |
+
+- 分類の追加・変更は、本表を先に直す(実装が表と食い違うときは実装の誤り)。A に入れる条件は §8.11.1 の1。
+
+#### 8.11.3 先出しの具体的な動き
+- **回答・実測・項目コメント・QA入力・総合コメント**(`saveDraft`/`saveQaDraft`): 現行どおり。変更のたび端末に保存(デバウンス500ms)→outboxへ。画面は一切待たない。版1.10 で足すのは、失敗時の導線(§8.11.4)と保存状態の表示(§8.11.6)。
+- **コメント追記**(S08。`addNote`):
+  1. 『追加』を押すと、本文を outbox に積み(`recordId` 付き)、入力欄を即座に空にし、『送信待ちのコメント』枠(確定済みのコメント一覧の上)に 本文・状態(送信待ち/送信中/失敗)・時刻(端末時刻)を出す。押した直後から次のコメントを書ける(本文が空のときは押せない)。
+  2. 成功: 応答の `record` を反映(確定済みコメントに本文が現れる)→ outbox行を削除 → 『送信待ち』のカードが消える。**この順序**にして、反映前の一瞬にコメントが消えて見えないようにする。`getRecord` は呼ばない。
+  3. 失敗(確定エラー): 同じカードを赤にして『送信できませんでした』+理由(`err.<CODE>`)+ [再送][破棄]。『破棄』は **本文を入力欄に戻す**(入力を黙って失わない)。
+  4. 送信待ちのコメントには種類(職長/管理者)の表示を付けない(種類はサーバーが役割から決める。§5.4.3)。
+- **写真・図面**: §8.11.5。
+- **写真の削除**(`deletePhoto`): 送信済みの写真を消すと、即座に非表示にし(`deletedPhotos`)、`deletePhoto` を積む。失敗したら元に戻す(§8.11.4)。未送信(`pending`)の写真は従来どおりローカルで即削除、`sending` 中は削除ボタン無効(§8.3)。
+
+#### 8.11.4 先出しが失敗したとき(巻き戻し・再試行・破棄)
+一時的な失敗(通信失敗・`LOCK_TIMEOUT` `INTERNAL` `DRIVE_ERROR`)は従来どおり自動で再試行する(§8.4。バックオフ)。**確定エラー**(§8.4 の表)になった行は `failed`/`blocked` で残り、**黙って捨てない**。操作ごとの画面の動きと導線:
+
+| 操作 | 画面の巻き戻し | 導線 |
+|---|---|---|
+| `saveDraft` `saveQaDraft` | **巻き戻さない**(入力は端末の作業コピーに残す) | 記録の画面(S06/S08/S10)の上部に赤いバナー『送信できなかった入力があります』+[内容を見る(S20)][再送][破棄]。『破棄』は確認ダイアログのあと作業コピーを捨て、サーバーの値で再表示する(従来の S20 の『破棄』と同じ)。`RECORD_LOCKED` `STATE_CONFLICT` のときは『他の人が先に状態を変えました。入力は端末に残っています』(`outbox.locked_hint`)を添える |
+| `addNote` | カードを赤に | [再送][破棄=本文を入力欄へ戻す] |
+| `uploadPhotoChunk` | サムネに『失敗』(赤) | サムネをタップ→[再送][破棄=その写真を消す]。S20 にも出る |
+| `deletePhoto` | **元に戻す**: `deletedPhotos` の印を外して写真を再表示し、トースト『削除できませんでした』(`msg.delete_failed`) | S20 から [再送][破棄](破棄しても写真は表示されたまま) |
+| `setLang` | なし(失敗は無視) | — |
+
+- 再送は同じ `clientId`(内容を変えない限り。§5.2)。S20 の『再送』『破棄』『今すぐ送信』の動作は従来どおり(§8.4・§8.5。期限切れは『破棄』のみ)。
+- 1つの記録に `failed`/`blocked` が残っている間、その記録の画面は上のバナーを出し続ける。後続の行は §8.4 の規則どおり `blocked`。
+- 上のボタンはすべてタップ領域44px以上(§9.1)。
+
+#### 8.11.5 写真ごとの送信状態(検査写真・図面とも)
+- **撮影直後**: 『使う』を押した時点で、IndexedDB への保存完了を待たずに、メモリ上のサムネを画面に出す(目標: 300ms以内)。保存に失敗したときはそのサムネを赤の『保存できません。撮り直してください』(`photo.save_failed`)にし、送信行を積まない。
+- シャッターを押してから『使う』が出るまでの処理(縮小・スタンプ・圧縮・ハッシュ。§7.3)の間は、『処理中…』(`photo.processing`)を出し、シャッターを無効にする。
+- サムネに **状態ラベル** を常に出す(色だけに頼らず文字とアイコンを付ける):
+
+| 状態 | 条件(outbox行) | 表示(ja) | 見た目 |
+|---|---|---|---|
+| `queued` 送信待ち | `pending`(`tries=0`) | 送信待ち | グレー。点線の枠。サムネを少し薄く |
+| `queued` 再試行 | `pending` で `tries>=1` | 送信待ち(再試行{n}回目) | グレー+注意アイコン |
+| `sending` 送信中 | `sending` | 送信中 | 青。スピナー |
+| `failed` 失敗 | `failed` または `blocked` | 失敗 | 赤。実線の枠。タップで [再送][破棄] |
+| `saved` 完了 | 行が無い(サーバーの一覧に載った) | 保存済み ✓ を約2秒出して消す | 緑。**以後は何も付けない**(ラベルの無い写真=サーバーに保存済み) |
+
+- 端末に本体が残っていて送信行が無い写真(`uploadState='uploaded'`)は `saved` として扱う。
+- 圏外のとき `queued` のラベルに『圏外のため送信待ち』(`photo.st.offline`)を添える。
+- 状態を決める **純関数 `KW.outbox.photoState(row)`**(`outbox.js`。テストが直接呼ぶ。U-OUTBOX-05): 引数は写真の outbox 行(無ければ `null`)。`'queued'|'sending'|'failed'|'saved'` を返す(上表の条件どおり。`blocked` は `failed`、`null` は `saved`)。
+- **提出は写真の送信完了まで押せない**(現行の §8.6・FE-03 の修正の趣旨を維持): S07 は、無効のボタンの下に『写真の送信が終わるまでお待ちください』(`msg.wait_photos`)と『写真 {done}/{total} 送信済み』(`scr.S07.photo_progress`)を出す。失敗があれば『写真の送信に失敗が{n}件あります』(`scr.S07.photo_failed`)+S20への導線も出す(失敗が残る限り提出できない。再送または破棄で解消する)。
+
+#### 8.11.6 記録の保存状態の表示(S06/S08/S10 共通)
+記録の画面の上部(ヘッダ直下)に、その `recordId` の outbox 行から作る1行を出す(共通部品 `C.saveState`)。
+
+| 条件 | 表示(ja) | 色 |
+|---|---|---|
+| 行が0件 | 送信済み ✓ | 緑(控えめ) |
+| `sending` あり・`failed`/`blocked` なし | 送信中… {n}件 | 青 |
+| `pending` のみ(オンライン) | 送信待ち {n}件 | グレー |
+| `pending` のみ(圏外) | 圏外のため端末に保存中({n}件)。電波が戻ると自動で送ります | 黄 |
+| `failed`/`blocked` あり | 送信できていない操作が{m}件あります [確認する] | 赤 |
+
+- 件数と種別を決める **純関数 `KW.outbox.saveStateOf(rows, online)`**(`outbox.js`。テストが直接呼ぶ。U-OUTBOX-06): `rows` はその記録の outbox 行。`{ kind:'synced'|'sending'|'queued'|'offline'|'failed', n:全行数, m:failed+blocked の数 }` を返す(上表の優先順: `failed` > `sending` > `offline`(圏外で `pending`) > `queued` > `synced`)。
+- S04 の記録の行にも、outbox 行がある記録には『未送信』バッジ(`badge.unsent`)を出す(『下書きあり』とは別)。
+
+#### 8.11.7 未送信バッジ(ヘッダ)の強化
+- 既存のヘッダの『未送信 {n}』(`outbox.badge`。押すと S20)を次のとおり目立たせる: n=0 は従来どおり控えめ。**n≥1 は黄色の塗り**。**`failed`/`blocked` が1件でもあれば赤の塗りにして『未送信 {n} ・要対応 {m}』**(`outbox.badge_bad`)。圏外で n≥1 のとき、`aria-label` に『圏外のため送信待ち』を含める。タップ領域は従来どおり44px以上。
+- `failed`/`blocked` がある間は、ヘッダの下(打設停止の送信待ちバナーと同じ場所)に **画面を問わず出るバナー**『送信できていない操作があります』(`outbox.problem_banner`)+[確認する(S20)] を出す。閉じられない。解消すると消える。アプリを開いたとき・前景に戻ったときも、該当する間は最初から出ている。
+
+#### 8.11.8 待つ操作の進行中表示と、getRecord を省く規則
+1. 待つ操作(B)のボタンは、押した直後に **無効化+ラベルを『送信中…』(`act.sending`)に差し替え+スピナー** にする(`C.guard` の標準動作にする)。PIN入力モーダル(M1)の『OK』も同じ。PIN送信中の『キャンセル』は無効(従来どおり)。
+2. 応答が **8秒** を超えたら、ボタンの下に『通信に時間がかかっています。そのままお待ちください』(`msg.slow_wait`)を出す(GASの起動待ちのとき)。30秒でタイムアウト(§1.4)=通信エラー。PIN付きの操作の再試行は §3.8 のとおり(同じ `clientId`・同じPIN)。
+3. 成功したら **応答の `record`(§5.1a)で次の画面を描く**(`getRecord` を呼ばない):
+   - 応答の `record` は、まず `records` キャッシュに反映する(§5.1a の3)。
+   - 反映した直後(キャッシュの `fetchedAt` から **15秒以内**)に開く記録の画面(S06/S07/S08/S10)は、`getRecord` を呼ばずキャッシュの詳細で描く(`KW.data.loadDetail(recordId, {maxAgeMs})`。15秒を超えた/詳細が無い/応答に `record` が無かったときは従来どおり `getRecord`)。
+   - `claimReview`/`takeoverReview` の成功のあと、同じ画面を描き直すために `getRecord` を呼ばない(応答が既に RecordDetail)。
+   - 写真の送信完了(§8.4 の2)でも `getRecord` を呼ばない(応答の `record` を反映する)。
+4. 拒否(`ALREADY_CLAIMED` `STATE_CONFLICT` `RECORD_LOCKED` `NOT_CLAIMER` 等)は従来どおり: エラーを表示し、記録を `getRecord` で取り直して画面を更新する(§8.7)。PIN誤り(`PIN_INVALID`)はPINモーダル内に『あと{remaining}回』を出し、ロック(`USER_LOCKED`)は S02 へ(従来どおり)。**これらを先出しには戻さない**。
+5. 圏外のとき、オンライン限定の操作は従来どおり無効+`msg.offline_required`(§8.1)。
+
+#### 8.11.9 読み取り側の待ち短縮(仮置き P-45。ユーザー未確認。確認が取れるまで実装・テストとも対象外)
+書き込みではなく『起動する・開く』ときの待ちを減らす案。**2026-10-17 の承認範囲(REQUIREMENTS §15 の1〜6)には明記が無い**ため、メインがユーザーに確認してから着手する(§14.2 の14)。承認されたら本節を『仮置き』から外す。
+1. 起動時の `me` と `getBootstrap` は **並列に呼ぶ**(いまは直列で、両方の応答までホームが出ない。付録A-1)。どちらかが認証系エラー(§8.4 の表)ならその処理に従う。
+2. 端末に `deviceToken` と、保存済みの `me`・`bootstrap` があるとき、**ネットワークの応答を待たずにホームを描く**(スプラッシュを出さない)。応答が来たら差し替える。認証系エラー(`UNAUTHENTICATED` `DEVICE_REVOKED` `USER_DISABLED` `USER_LOCKED` `CLIENT_OUTDATED`)が返ったときは従来どおり S01/S02 へ遷移する(端末内の自分のデータが一瞬見えるだけで、サーバーの認可は変わらない)。
+3. 記録の画面(S06/S07/S08/S10)を開くとき、`records` に詳細のキャッシュがあれば **先にそれで描き**、裏で `getRecord` を呼んで、`version` が大きければ差し替える(同じか小さければ何もしない。編集中の入力欄は作り直さない)。画面の上部に小さく『最新を確認中…』(`msg.checking_latest`)を出す。判定・提出・確認中にするなどの操作は、これまでどおりサーバーが最終判定する(古い画面で押しても `STATE_CONFLICT` 等で拒否される)。詳細が無いときだけスケルトン。
+
 ---
 
 ## 9. 画面一覧・表示制御・i18n
@@ -1522,6 +1682,7 @@ PDF: `generateReport` `listReports`
 - ヘッダ(固定): アプリ名。**現場に関する画面では現場名を固定表示**。**S06/S07/S08/S10/S12/S13 は、読み込み中・通信エラー・記録が取得できない状態でも現場名を表示する**(キャッシュ `bootstrap`/`records`、ルートの `siteId`、S13 は `n` から引く)。それでも現場名が分からないときは `siteId` を出さず「現場不明」(`app.site_unknown`。ja「現場不明」/ id は暫定訳)を表示する。右側に 接続インジケータ(オンライン/オフライン)・outboxバッジ(未送信件数。`failed`/`blocked` があれば警告色。タップでS20)・言語ボタン(`日本語`⇄`Indonesia`)。
 - 下部タブ(固定、`env(safe-area-inset-bottom)` 考慮): 職長=`現場`/`履歴`/`設定`、QA=`ボード`/`履歴`/`担当表`/`設定`、責任者=`ボード`/`履歴`/`担当表`/`管理`/`設定`。サブ画面(編集・確認・詳細・管理サブ)ではタブを隠し「戻る」を出す。
 - ライト/ダーク: `prefers-color-scheme` に追従(色はCSS変数)。外部CDN・Webフォント不使用(§1.2)。
+- **待ち・未送信の見える化(版1.10。§8.11)**: 待つ操作は押した瞬間にボタンを無効にして『送信中…』(`act.sending`)を出し、先出しした操作は保存状態行と写真ごとの状態で『まだ届いていない』ことを見せる。ヘッダの未送信バッジは n≥1 で黄色、失敗・保留があれば赤で『要対応』(§8.11.7)。
 - ルーティング: ハッシュルーティング(`#/…`)。画面遷移でスクロールを先頭へ。
 - **表示制御の原則**: 記録に対するボタン・入力の有効/無効は **`RecordSummary.actions`/`RecordDetail.actions` に含まれるaction名のみ**で決める。フロントに役割や担当の判定ロジックを書かない(最終判定は常にサーバー)。役割(`Me.role`)はナビゲーションの出し分け(どのタブ・どの管理メニューを出すか)にのみ使う。
 - 表示テキストは全て `t(key)`(§9.4)。サーバーからの文字(氏名・現場名・項目文・コメント)は **必ずエスケープして `textContent` で描画**(`innerHTML` に生文字を入れない)。
@@ -1569,9 +1730,29 @@ PDF: `generateReport` `listReports`
 | M9 | 参加承認(班名の入力=必須・既定は「{氏名}班」、役=職長/副職長) |
 | M10 | 図面の書き込みエディタ(版1.6。全画面。画像の選択→番号ボタン列・倍率・回転・印の置換/削除・ひとつ戻す・「登録」。§7.7) |
 
+### 9.2a 版1.10 による画面の追加・変更(先出しと送信状態の可視化。§8.11)
+
+上の表(§9.2)と食い違うときは、本節が優先する。画面IDと action の対応は変えない。
+
+| 画面/部品 | 変更 |
+|---|---|
+| 共通(ヘッダ・バナー) | 未送信バッジを n≥1 で黄色、`failed`/`blocked` があれば赤『未送信 {n} ・要対応 {m}』。`failed`/`blocked` の間は画面を問わず出るバナー(§8.11.7) |
+| 共通部品 `C.guard` | 待つ操作のボタンは、押した直後に『送信中…』+スピナー、8秒超で『通信に時間がかかっています…』(§8.11.8) |
+| 共通部品 `C.saveState` | S06/S08/S10 のヘッダ直下に記録の保存状態を1行(§8.11.6) |
+| S04 | outbox 行がある記録の行に『未送信』バッジ(`badge.unsent`) |
+| S05 | 『作成して入力へ』は『送信中…』を出して応答を待つ(先出しにしない。P-47)。成功したら応答の RecordDetail で S06 を描く |
+| S06 | 写真・図面のサムネに送信状態ラベル(§8.11.5)。撮影後の『処理中…』。保存状態行。`saveDraft` の確定失敗で赤バナー(§8.11.4)。『確認へ進む』は従来どおり |
+| S07 | 提出ボタン: 無効の間は『送信中(残りN件)』に加え『写真の送信が終わるまでお待ちください』と『写真 {done}/{total} 送信済み』(失敗があれば件数とS20への導線)。押した後は『送信中…』。成功したら応答の `record` で S08 を描く(`getRecord` を呼ばない) |
+| S08 | コメント追記は先出し(『送信待ちのコメント』枠。§8.11.3)。保存状態行。確定失敗の導線(§8.11.4)。`stopPour`・`recordPrimeSign` 成功後は応答の `record` で描き直す |
+| S10 | 保存状態行・失敗バナー・写真の状態ラベル。『確認中にする』『引き継ぐ』『確認を中止』『合格』『軽微』『重大』は押した後『送信中…』。`claimReview`/`takeoverReview` 成功後に `getRecord` を呼ばない。判定の成功後は応答の `record` で S08 を描く |
+| S20 | 先頭に『要対応 {m}件』のサマリ(`failed`/`blocked` がある間)。各行の状態・理由・[再送][破棄] は従来どおり。写真の行の状態表示は §8.11.5 の語に揃える |
+| M1 | 『OK』は押した後『送信中…』+スピナー、8秒超で『通信に時間がかかっています…』。PIN誤りはモーダル内に残す(従来どおり) |
+| M2 | シャッター後に『処理中…』(§8.11.5) |
+| M4 / M5 / M6 / M9 | 確定ボタンは押した後『送信中…』(M6 は生成中の表示が既にある) |
+
 ### 9.3 画面ごとの空状態・エラー表示
 - 一覧が空: `scr.<ID>.empty` の文言。通信エラー: 画面上部にバナー(`err.network`)+キャッシュ表示。サーバーエラー: `err.<CODE>`(§5.3の全コードに辞書キー必須)。`VALIDATION_FAILED` は `rule.<RULE>` を該当項目の下に表示。
-- 読み込み中はスケルトンまたはスピナー。操作ボタンは二重押下防止(送信中は無効)。
+- 読み込み中はスケルトンまたはスピナー。操作ボタンは二重押下防止(送信中は無効)。 **待つ操作の進行中表示(『送信中…』と8秒後の `msg.slow_wait`)は §8.11.8**。
 
 ### 9.4 i18n(日本語/インドネシア語)
 - 言語キーは `ja` / `id`。辞書は **`frontend/i18n.js` の1か所**(`window.I18N = { ja:{…}, id:{…} }`、キーはフラットなドット区切り)。HTML・他のJSに日本語/インドネシア語の文字列を直書きしない(`tests` が検査)。
@@ -1612,6 +1793,43 @@ PDF: `generateReport` `listReports`
 | `scr.S09.major`(重大不適合・打設停止中) | 重大不適合 | Ketidaksesuaian berat |
 
 - 版1.9 で足す通常のキー: `scr.S05.stage_hint_post_demold`=「出来形検査は、脱型・解体のあとに行う検査です。打設予定日時は要りません」/ id「Pemeriksaan hasil pekerjaan dilakukan setelah bongkar bekisting. Rencana waktu pengecoran tidak diperlukan」。段階名の表示は既存の `stage.*`、ステータスは `st.*`、`lbl.stage` を使う(段階とステータスを並べる表示は `t('stage.x')` と `t('st.y')` をつなげて作る)。
+- **版1.10 で足すキー**(ja/id の両方。インドネシア語は暫定訳 P-22。既存の `photo.uploading`(送信中)・`act.resend`・`act.discard`・`outbox.badge`・`outbox.st.*` は残して使う。`@` を含まない通常のキー):
+
+| キー | ja | id(暫定) |
+|---|---|---|
+| `act.sending` | 送信中… | Mengirim… |
+| `msg.slow_wait` | 通信に時間がかかっています。そのままお待ちください | Koneksi lambat. Mohon tunggu |
+| `msg.wait_photos` | 写真の送信が終わるまでお待ちください | Tunggu sampai pengiriman foto selesai |
+| `msg.delete_failed` | 削除できませんでした | Gagal menghapus |
+| `msg.checking_latest` | 最新を確認中… | Memeriksa data terbaru… |
+| `scr.S07.photo_progress` | 写真 {done}/{total} 送信済み | Foto terkirim {done}/{total} |
+| `scr.S07.photo_failed` | 写真の送信に失敗が{n}件あります | {n} foto gagal terkirim |
+| `photo.processing` | 処理中… | Memproses… |
+| `photo.save_failed` | 保存できません。撮り直してください | Gagal menyimpan. Ambil ulang |
+| `photo.st.queued` | 送信待ち | Menunggu |
+| `photo.st.retry` | 送信待ち(再試行{n}回目) | Menunggu (percobaan ke-{n}) |
+| `photo.st.sending` | 送信中 | Mengirim |
+| `photo.st.failed` | 失敗 | Gagal |
+| `photo.st.saved` | 保存済み | Tersimpan |
+| `photo.st.offline` | 圏外のため送信待ち | Menunggu (tidak ada sinyal) |
+| `save.synced` | 送信済み | Terkirim |
+| `save.sending` | 送信中… {n}件 | Mengirim… {n} |
+| `save.queued` | 送信待ち {n}件 | Menunggu {n} |
+| `save.offline` | 圏外のため端末に保存中({n}件)。電波が戻ると自動で送ります | Tidak ada sinyal: tersimpan di perangkat ({n}). Dikirim otomatis saat sinyal kembali |
+| `save.failed` | 送信できていない操作が{m}件あります | {m} operasi belum terkirim |
+| `save.check` | 確認する | Periksa |
+| `outbox.badge_bad` | 未送信 {n} ・要対応 {m} | Tertunda {n} · perlu tindakan {m} |
+| `outbox.problem_banner` | 送信できていない操作があります | Ada operasi yang belum terkirim |
+| `outbox.problem_input` | 送信できなかった入力があります | Ada input yang gagal terkirim |
+| `outbox.locked_hint` | 他の人が先に状態を変えました。入力は端末に残っています | Orang lain sudah mengubah status. Input tetap tersimpan di perangkat |
+| `outbox.need_action` | 要対応 {m}件 | Perlu tindakan {m} |
+| `note.pending_title` | 送信待ちのコメント | Komentar menunggu kirim |
+| `note.failed` | 送信できませんでした | Gagal dikirim |
+| `note.discard_restore` | 破棄(本文を入力欄に戻す) | Buang (kembalikan teks ke kolom) |
+| `badge.unsent` | 未送信 | Belum terkirim |
+
+(`msg.checking_latest` は仮置き P-45 の承認後に使う。承認前は辞書に置いてよいが使わない。)
+
 - 項目マスタ・グループ名は辞書ではなくマスタ列を使う: `lang==='id' ? textId : textJa`、`groupJa/groupId`。
 - 言語の決定: ログイン後は `Me.lang`、未ログインは `kv.lang`、なければ `navigator.language` が `id` で始まれば `id`、それ以外 `ja`。ヘッダの言語ボタンで即時切替(再描画)し、`kv.lang` に保存、オンラインなら `setLang`(失敗しても無視)。
 - 日時表示は言語に依らず `MM/DD HH:mm`(JST固定)。経過は `time.min_ago`/`time.hour_ago`。
@@ -1716,6 +1934,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - **段階(版1.9。§6.8)**: `createRecord` は `enabledStages` に無い値・その段階の有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は `pre_pour` のみ保存。`stopPour` と `allowedActions` の `stopPour` は `stage=pre_pour` のみ(出来形は `STATE_CONFLICT`)。`computeTiming` は `post_demold` で全て `null`/`false`(`warnings` なし)。エスカレーションは段階を見ない。メール件名は出来形のとき末尾に ` 出来形`。PDFは段階名・ステータス表示名・打設予定日時の有無が §10 のとおり。
 - **ロック**: 更新系は1本のFIFOミューテックスで直列化し、「冪等キー確認→authorize→PIN→更新→Events→Idem保存」を原子的に行う(同時claimで先着のみ成功する)。`--latency` は直列化の前に適用する(並行到着を再現)。**例外 `uploadPhotoChunk`(版1.4)**: 認証・検証・仮想Drive保存はミューテックスの **外**、再認証〜既存行確認〜上限確認〜Photos追記〜touchだけをミューテックスの **内** で行い(§5.4.4)、ミューテックスの前後で必ずイベントループに制御を返す(`await`)こと(別リクエストが間に割り込める。`/__mock/interleave` もこの境界で適用する)。仮想Driveに作ったファイルは、ロック内で `Photos` 行にならなかった場合に削除(ゴミ箱扱い)する。
 - **冪等キー**: §5.2 通り(`replayed:true`、`IDEMPOTENCY_CONFLICT`、RecordDetail系の再構築)。
+- **更新後の記録(版1.10。§5.1a)**: §5.1a の表の action は、本処理のあと `getRecord` と同じ関数で `record` を作って返す。`Idem` には従来の形で保存し、再生時に最新のDetailへ差し替える。`Config` の初期値に `keepWarmMinutes=5` を含め(`bootstrap.config` には出さない)、状態ダンプにも出す。`installKeepWarmTrigger` 等のGASエディタ専用関数はモックの対象外。
 - **PIN/トークン**: §3 通り。`pinHash`/`tokenHash` は同アルゴリズムで保持(ペッパー=`mock-pepper`)。状態ダンプ(`/__mock/state`)に `pinHash`/`pinSalt`/`tokenHash`/招待`codeHash` を出さない。
 - **時計**: すべての時刻・期限・エスカレーションはモックの仮想時計 `now()` を使う(初期値=起動時の実時刻。`/__mock/clock` で変更)。`meta.serverTime` も仮想時計。
 - **エスカレーション**: `escalationTick` を **各リクエスト処理の直前に遅延実行**し、`/__mock/tick` でも実行可。送信メールは送らず記録だけ(`/__mock/mails`)。
@@ -1813,6 +2032,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | 職長が提出後に編集できない | C-PERM-05, E-04 |
 | 職長コメントが管理者操作で消えない | C-PERM-06 |
 | 5回誤りでロック、ロック中は操作不可、責任者のみ解除 | C-AUTH-04, C-PIN-01, C-PIN-04, E-09 |
+| 反応速度の改善(版1.10。先出し・応答の `record`・未送信の見える化・起動待ち対策) | C-RESP-01〜05, C-KEEP-01〜02, U-OUTBOX-05〜06, U-CLASS-01, U-RESP-01, E-23〜E-28(E-29 は P-45 承認後)、PERF-04〜05 |
 | 圏外で入力→復帰で自動送信、二重送信されない | C-IDEM-01〜04, U-OUTBOX-*, E-05 |
 | 2人のQAが同時に確認中→先着のみ | C-CONC-01, E-06 |
 | スマホ幅375pxで崩れない、ja/idで欠けがない | E-07, E-08, U-I18N-01 |
@@ -1877,11 +2097,19 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-CONC-05: (mock-only)別の記録への `claimReview` と `uploadPhotoChunk` 単発を同時に送っても双方成功し、`claimReview` の先着規則(C-CONC-01)は崩れない。
 
 **冪等**
-- C-IDEM-01: 同じ `clientId`+同内容で `submitRecord`/`submitVerdict`/`recordPrimeSign` を2回 → 2回目 `meta.replayed=true`・同一 `data`・Events の件数は1回分・`round` 不変。
+- C-IDEM-01: 同じ `clientId`+同内容で `submitRecord`/`submitVerdict`/`recordPrimeSign` を2回 → 2回目 `meta.replayed=true`・同一 `data`・Events の件数は1回分・`round` 不変。 (版1.10の読み替え: 2回目の `data` は **`record` を除いて同一**で、`record` は最新のRecordDetail(`record.version` は1回目以上)。`record` を載せない action は従来どおり完全一致)
 - C-IDEM-02: 同じ `clientId` で内容違い → `IDEMPOTENCY_CONFLICT`。別ユーザーが同じ `clientId` → `IDEMPOTENCY_CONFLICT`。
 - C-IDEM-03: `createRecord`/`claimReview` の再送が成功(再構築。§5.2)。`saveDraft`・`addNote` の再送でNotes/項目が重複しない。
 - C-IDEM-04: 検証エラーで失敗した `clientId` は保存されず、直した内容で同じ `clientId` を再送すると成功。
 - C-IDEM-05: (mock-only)`/__mock/fail`(`mode:"network"`,`after:true`)で応答喪失を1回起こし、同じ `clientId` で再送 → 2回目は `replayed:true` で成功し、状態・Events・Notesが二重にならない。
+**応答の更新後の記録(版1.10。§5.1a)**
+- C-RESP-01(返す形): 田中の `submitRecord`(PIN)、佐藤の `submitVerdict`(`ok`(PIN)・`minor`・`major` それぞれ別の記録で)、`recordPrimeSign`(PIN)、`stopPour`(打設前)の `data.record` が **RecordDetail**(`items` `notes` `events` `signatures` `timing` `actions` `version` を持つ)。`getRecord` を直後に呼んだ結果と、`events`・`notes` を含めて(`version` も)一致する。見え方は `getRecord` と同じ規則: 職長の `submitRecord` の `record.items[].qa` は `null`(`submitted` の間)、QAの `submitVerdict` の `record` は QA の見え方。他班の職長が `stopPour` した応答の `record` は masked 形(`items` を含まない最小キー)。`saveDraft` `saveQaDraft` `releaseClaim` の `record` は従来どおり RecordSummary(`items` を含まない)。
+- C-RESP-02(`addNote`・写真): `addNote` の応答に `note` と `record` があり、`record.notes` にその `noteId` が含まれ、`record.version` が呼出し前の `getRecord.version` より1大きい。`uploadPhotoChunk`(単発)の `complete:true` の応答に `record` があり、対象項目の `self.photos` に新しい `photoId` が載り `version` が1大きい。同じ `photoId` の再送(既存行の冪等成功)にも `record` が付く。分割の途中チャンク(`complete:false`)には `record` が付かない。
+- C-RESP-03(重さ): どの `record` にも `dataUrl`・`thumb` というキーが無く、base64 の本体を含まない(`PhotoMeta` のみ)。エラー応答には `record` が付かない。
+- C-RESP-04(version): 同じ記録に `saveDraft` → `addNote` → `uploadPhotoChunk` → `submitRecord` を順に行うと、各応答の `record`(Detail の応答)の `version` が単調に増える。`uploadPhotoChunk` 単発3本を `Promise.all` で送った場合、各応答の `record.version` は「その写真の追加直後の版」以上で、最終的な `getRecord.version` = 開始 + 3、**3本のうち `version` が最大の応答の `record` には3枚とも載っている**(遅れて届く応答に古い状態があっても、クライアントが `version` で採否を決められる)。
+- C-RESP-05(冪等再生): `submitRecord`(PIN)を同じ `clientId` で再送 → `meta.replayed=true`・`record` は RecordDetail・`record` を除く `data`(`warnings`)は初回と同一・`record.version` は初回以上・Events の件数は1回分。`addNote` の再送も同様で Notes は重複しない。(mock-only/harness)`Idem.responseJson` に `items` を含む RecordDetail が保存されておらず、45,000文字以内。
+- C-KEEP-01(harness-only。GASエディタ専用の関数。§6.7a): ①`ACTIONS` のキー数は43のままで、`installKeepWarmTrigger`・`removeKeepWarmTrigger`・`keepWarm` を含まない。HTTP でこれらを `action` に送ると `BAD_REQUEST`。②`installKeepWarmTrigger()` を2回実行しても、ハンドラ `keepWarm` の時間主導トリガーは1本で間隔は5分。`Config.keepWarmMinutes` を 10 にして実行すると10分。1・7・数でない値・欠落のときは5(`1` のときは `Logger` に理由が出る)。③`removeKeepWarmTrigger()` で `keepWarm` のトリガーが0本になり、`escalationTick`・`dailyMaintenance` のトリガーは残る。`setupTriggers()` を実行しても `keepWarm` のトリガーは消えない。④`keepWarmMinutes` の行が無い既存の Config に対し `setupSheets()` が1行だけ追記し、既存の行・値を変えない。
+- C-KEEP-02(harness-only): `keepWarm()` の実行の前後で、全シートのセルの内容・Drive のファイル・ScriptProperties・送信メール・`Events`・`Idem` が完全に同じ(書き込み0回)。ロックを取らない。`Users`/`Devices`/`Assignments`/`Memberships`/`Absences` を読まない(shims の読み取り記録で確認)。読み込みを失敗させても例外を投げない。
 
 **写真**
 - C-PHOTO-01(単発): `total=1,index=0`(`data`=本体全体、`thumb` 同梱)の **1回の** `uploadPhotoChunk` で `complete:true`+`received:[0]`+`PhotoMeta`、`getPhotoThumbs`/`getPhoto` が返る(`getPhoto` のバイト列のSHA-256が申告値と一致)。同じ内容の再送 → 成功・`Photos` 重複行なし・仮想Driveの有効ファイルは本体1+サムネ1のまま。`data` が `photoChunkChars`(90,000)を超える(例 400,000文字)単発も成功。**分割(後方互換)**: 3チャンク(`total=3`)でも従来どおり最終で `complete:true`、全チャンク再送も成功。`getBootstrap.config` に `photoSingleMaxChars=1200000`・`photoParallel=3` が含まれる。
@@ -1933,6 +2161,11 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-OUTBOX-02: 順序(同一record内FIFO・`stopPour` 優先)、バックオフ列(2,5,15,30,60,60…秒)、確定エラーで後続行が `blocked`、`CHUNK_MISSING` で `nextIndex=0`、認証エラーで全停止→同一ユーザー再登録で再開。
 - U-OUTBOX-03: 作成から30日超の行が `failed`(`lastError.code='EXPIRED'`)になり、送信ループは送らず、S20 は「破棄」のみ出す(「再送」「今すぐ送信」を出さない・呼んでも送信しない)。29日の行は通常どおり送る。
 - U-OUTBOX-04(送信可否規則 §8.4。フロントは `outbox.js` に純関数 `selectSendable(rows, {now, photoParallel})`(送る行の `seq` 配列を返す。**契約として確定。テストが直接呼ぶ**)を置く。`claimSendable`・`normParallel` などの内部関数は実装の自由でSPEC外(テストは依存しない)。データ駆動 `tests/fixtures/outbox-schedule-cases.json`): ①写真の行3件(先行の非写真の行なし)で `photoParallel=3` → 3件、`=2` → 2件、`=9` → 6件を上限、設定なし/`null`/0以下 → 1件(入力は整数のみ。小数・文字列の丸めは検査しない) ②同じ記録に先行する `createRecord`(`pending`/`sending`/`failed`/`blocked`)があるうちは写真の行を選ばない(完了して行が消えたら選ぶ) ③`seq` が 写真A・写真B・`saveDraft`・写真C の順 → A,B は同時に選ばれ、`saveDraft` は A,B が両方消えるまで選ばれず(`sending` 中・`failed` でも)、C は `saveDraft` が消えるまで選ばれない ④別の記録の `saveDraft` 2件 → 同時に1件だけ ⑤別の記録の写真の行と非写真の行は同時に選べる ⑥同じ `photoId` の行が2件 → 1件だけ ⑦写真Aが `failed` でも同じ記録の写真B,Cは選ばれ続け、後続の `saveDraft` は選ばれない(確定失敗の通知で `blocked`)。非写真の行が `failed` なら同じ記録の後続の写真の行も `blocked` ⑧`stopPour` は写真の行の完了を待たず最優先で選ばれる。写真の行・非写真の行(`saveDraft` 等)が `failed` になっても、同じ記録の `pending` の `stopPour` は `blocked` にならず選ばれる(`stopPour` 自身が `failed` のときだけ後続が `blocked`) ⑨写真の行が backoff 待ちでも他の写真の行は選ばれる ⑩連続通信失敗カウントは並行する要求を通算し、成功1件でリセット(3回でオフライン)。
+- U-OUTBOX-05(写真の送信状態。§8.11.5): `KW.outbox.photoState(row)` が データ駆動(`tests/fixtures/photo-state-cases.json`)で、`null`→`saved`、`pending`(`tries=0`)→`queued`、`pending`(`tries=2`)→`queued`、`sending`→`sending`、`failed`→`failed`、`failed`(`lastError.code='EXPIRED'`)→`failed`、`blocked`(`blockReason='record'`)→`failed`。
+- U-OUTBOX-06(保存状態。§8.11.6): `KW.outbox.saveStateOf(rows, online)` が、0件→`synced`、`sending` あり→`sending`、`pending` のみ+オンライン→`queued`、`pending` のみ+圏外→`offline`、`failed` または `blocked` あり→`failed`(`sending` と混在しても `failed`)を返し、`n`=全行数・`m`=`failed`+`blocked` の数になる。
+- U-CLASS-01(操作の分類。§8.11.2): SPEC の §8.11.2 の表(`#### 8.11.2` から次の `####` まで)にバッククォートで書かれた action 名の集合が、§5.5 の43 action と完全に一致し、同じ名前が2回出ない。`spec-sync.test.js` に加える。
+- U-RESP-01(応答の反映。§5.1a の3): `KW.data.putDetail` に、`version` が小さい詳細→捨てて既存を残す/同じ→反映/大きい→反映、を渡す。`masked` 形は既存の詳細を上書きしない。`drafts`・`outbox`・`photoBlobs` は変わらない。応答に `record` が無い(または `items` が無い)ときは `getRecord` にフォールバックする(`loadDetail` のモック呼び出しで確認)。反映から15秒以内の `loadDetail(recordId, {maxAgeMs:15000})` は API を呼ばず、16秒後は呼ぶ。
+
 - U-PHOTO-01: base64分割(分割モードに入ったときのみ): 連結=元、各チャンク≤90,000文字かつ4の倍数、`total=ceil(len/90000)`、最大12(超えたら `err.photo_too_large`)。
 - U-PHOTO-02: `stampText` 生成が §7.2 通り(工区あり/なし、JST固定、`skewMs` 補正)。圧縮の段階的再エンコード(400KB超→0.6→0.5→0.85倍)。
 - U-PHOTO-03(モード選択。対象は `planUpload`): `L ≤ photoSingleMaxChars` → `total=1`(`photoMaxBytes` 600,000 の最大 `L=800,000` も単発)。`L > photoSingleMaxChars` → 分割。`config` に `photoSingleMaxChars` が無い → 常に分割(旧サーバー互換)。送信直前(`nextIndex=0`)に config を見て決め直せるが、`nextIndex>0` では変えない。
@@ -1958,6 +2191,14 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-13 写真の単発・並行送信(mockを `--latency 300` で起動): オンラインで5枚を続けて撮影(別項目)→ Playwright のリクエスト監視で ①各 `photoId` につき `uploadPhotoChunk` が **ちょうど1回**(`total=1`) ②同時に進行する `uploadPhotoChunk` の最大が 2 以上かつ `photoParallel`(3)以下 ③全て完了後にoutboxバッジ0、サーバーの `Photos` が5行・仮想Driveの有効ファイルが本体5+サムネ5。さらに写真送信中は「提出する」が無効で「送信中(残りN件)」が出て、全完了後に提出でき `PHOTO_REQUIRED` にならない(§8.6)。写真の1枚が確定失敗(`/__mock/fail` の `mode:"error",code:"PHOTO_INVALID",match:"uploadPhotoChunk"`)しても他の4枚は送られ、S20 に失敗1件が出る。
 - E-15 出来形検査(版1.9。ja/id、375px): 職長でS04を開くと各階のカードに「打設前」「出来形」の段が並び、記録の無い段階は「未着手」。S05で段階を「出来形」にすると打設予定日時の欄とヒントが消え、「打設前」に戻すと出る。同じ階・工区・ロットで打設前と出来形をそれぞれ作成でき(2件目で `ALREADY_EXISTS` にならない)、S06 に出来形の8項目(No.1〜8)、打設前の新規記録に28項目(No.17〜28 が i58〜i69。グループ見出しが二重に出ない)が出る。出来形を入力→提出(PIN)→QA(S10。ヘッダに段階)が合格(PIN)→元請サイン記録(M5。説明文・ボタンの語が「出来形確認済」)→S08/S04/S09/S11 のステータスが「出来形確認済」になる(打設前の `approved` は「打設可」のまま)。出来形の画面(S04〜S08・S10・S11・M4/M5・S09・PDFのM6)のどこにも「打設可」「打設を止める」「打設停止」「打設予定日時」が出ない(打設前の記録には従来どおり出る)。S09 のグリッドは階ごとに段階別のチップ、S03 の現場カードは段階ごとの件数行。他班の職長から見た出来形の行に「打設を止める」ボタンが出ない。
 
+- E-23 先出し(待たない。mock を `--latency 2000` で起動。版1.10): ①田中が S06 で項目の回答・実測・コメントを入力 → 画面(ボタンの選択・進捗バー・入力欄)が **300ms以内**に反映される(サーバー応答を待たない)。保存状態行は『送信待ち/送信中… → 送信済み ✓』と変わる。②`fix` の記録の S08 でコメントを追記して『追加』 → **500ms以内**に入力欄が空になり『送信待ちのコメント』に本文が出る。約2秒後に確定コメントに入れ替わってカードが消え、この間 `getRecord` の呼び出しが **0回**(Playwright のリクエスト監視)。③『追加』の直後に続けて別のコメントも追記できる。④ja/id、375pxで崩れない。
+- E-24 先出しの失敗(ロールバックと導線。版1.10): ①`/__mock/fail`(`mode:"error"`,`code:"RECORD_LOCKED"`,`match:"addNote"`,`next:1`)で追記が失敗 → カードが赤『送信できませんでした』+[再送][破棄]。『再送』で成功しカードが消える。もう一度失敗させて『破棄』 → 本文が入力欄に戻り outbox は0件。②`saveDraft` を同様に失敗(`RECORD_LOCKED`)→ S06 の上部に赤バナー『送信できなかった入力があります』+『他の人が先に状態を変えました。入力は端末に残っています』、入力値は画面に残る。『破棄』→確認ダイアログ→サーバーの値で再表示。③送信済みの写真を削除して `deletePhoto` を失敗させる → 写真が再表示され『削除できませんでした』が出る。④いずれの失敗のときも、ヘッダのバッジが赤『未送信 {n} ・要対応 {m}』、画面を問わず出るバナー『送信できていない操作があります』が出て、[確認する]で S20 へ行ける。解消するとバナーが消える。
+- E-25 PIN・先着の操作は先出しされない(mock を `--latency 2000` で起動。版1.10): ①提出(S07→M1)・合格(S10→M1)・元請サイン(M5→M1): PINを入れて『OK』 → 応答まで画面が遷移しない(S07/S10/M5 のまま)。『OK』は『送信中…』+スピナーで無効、『キャンセル』も無効。応答後に応答の `record` で S08 が描かれ、**その間の `getRecord` 呼び出しは0回**。②`--latency 9000` で『通信に時間がかかっています。そのままお待ちください』が出る。③誤PIN → M1 に『あと{n}回』が出て画面は進まない。5回誤り → S02。④2つのブラウザコンテキストで佐藤・鈴木が同時に『確認中にする』 → 後着に『{名前}が確認中』が出る。後着の画面が一度でも『自分が確認中』にならない(先出しの痕跡がない)。`claimReview` の成功のあと `getRecord` は呼ばれない。⑤`STATE_CONFLICT`/`RECORD_LOCKED` の拒否はエラー表示となり、画面は進まず、記録は取り直される。
+- E-26 写真の状態表示(mock を `--latency 1500` で起動。版1.10): 5枚を続けて撮影(別項目) → ①『使う』から **300ms以内**にサムネが出る。②各サムネに状態ラベルが付き、同時送信数(`photoParallel`)ぶんが『送信中』、残りが『送信待ち』になる。③完了した写真は『保存済み ✓』を約2秒出して消える(以後ラベルなし)。全完了で保存状態行が『送信済み ✓』。④完了のたびの `getRecord` は **0回**(§8.4・§8.11.8)。各 `photoId` の `uploadPhotoChunk` はちょうど1回(E-13 と同じ)。⑤`/__mock/fail`(`mode:"error"`,`code:"PHOTO_INVALID"`,`match:"uploadPhotoChunk"`,`next:1`)で1枚が『失敗』(赤)になり、タップ→[再送][破棄]。失敗が残る間 S07 の提出ボタンは無効で、『写真の送信が終わるまでお待ちください』『写真 n/5 送信済み』『写真の送信に失敗が1件あります』が出る。再送して全て完了すると提出できる(`PHOTO_REQUIRED` にならない。§8.6)。⑥圏外(`context.setOffline(true)`)では『圏外のため送信待ち』が出て、復帰で自動送信される。⑦図面も同じ状態ラベルになる。
+- E-27 未送信の可視化(版1.10): 圏外で下書きを入力 → ヘッダのバッジが黄色『未送信 {n}』、保存状態行『圏外のため端末に保存中({n}件)…』。復帰して自動送信 → バッジが 0 になり『送信済み ✓』。S04 の該当の記録の行に『未送信』バッジが付き、送信後に消える。375px・ja/id で横スクロールなし、バッジ・[再送][破棄]・[確認する]のタップ領域が44px以上(E-07 の巡回にも含める)。
+- E-28 getRecord を省く(版1.10): 提出(S07)・合格/軽微/重大(S10)・元請サイン(M5)・打設停止(M4)・確認中にする(S10)の成功直後(15秒以内)に開く S08/S10 の描画のために `getRecord` が呼ばれない(リクエスト監視)。描かれた内容は `getRecord` の結果と一致する。Playwright の `route` で応答から `record` を取り除いた場合は、従来どおり `getRecord` で取り直して同じ画面になる(後方互換)。
+- E-29 読み取り側の待ち短縮(仮置き P-45 の承認後のみ): 起動で `me` と `getBootstrap` が同時に送られる。`deviceToken` とキャッシュがある端末は、応答を待たずにホームが描かれる(`--latency 2000` で 500ms以内)。応答が `UNAUTHENTICATED`/`USER_LOCKED` ならS01/S02 へ遷移する。キャッシュのある記録の S08/S10 は先に描かれ、裏の `getRecord` で `version` が大きければ差し替わる。**承認までは実装・実行しない**。
+
 ### 12.6 性能の受け入れ基準(版1.5。実GASでの目標。手動確認項目)
 
 自動テストにはしない(`run-all.js`・mock・harness は対象外。通信と GAS の実行時間は環境で変わるため)。**本番相当のデプロイ(実GAS + 実スマホ)でバックエンド/フロント担当(または責任者)が手動で測り、結果を日付つきで `docs/OPERATIONS.md` の「性能確認」欄に残す**(バックエンド担当)。
@@ -1967,6 +2208,8 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | PERF-01 | `GET {API_URL}?action=ping` | 約1.5秒以内 | 2回目以降(ウォーム状態)。ブラウザの開発者ツールのネットワーク時間、または端末のクライアント側タイマー |
 | PERF-02 | 写真1枚(約300KB)の送信(`uploadPhotoChunk` 1回) | 約10秒以内(撮影確定〜サーバー応答までではなく、リクエスト送信〜応答) | `total=1` の1リクエストで完了していること(ネットワークタブで同じ `photoId` のリクエストが1回) |
 | PERF-03 | 写真10枚(各約300KB、別項目)の送信完了 | 約40秒以内(3並列=`photoParallel` 既定) | 10枚撮影してから outbox バッジが0になるまで。同時に進行するリクエストが最大3であること |
+| PERF-04 | 先出し操作の画面反映(版1.10) | 300ms以内(各3回測って中央値) | 実機で、回答の入力・コメント追記の『追加』・写真の『使う』を押してから、画面が変わるまで。サーバー応答は待たない。端末の動画撮影または開発者ツールの Performance で測る |
+| PERF-05 | 待つ操作の『押してから次の画面が描かれるまで』(版1.10) | 往復1回分+描画(`getRecord` の追加往復が0) | 提出・合格・元請サイン・確認中にする。ネットワークタブで `getRecord` が追加で呼ばれていないこと。S21 通信診断の `rt` の1回分に近いこと。結果を日付つきで `docs/OPERATIONS.md` の『性能確認』欄に残す |
 
 - 前提: モバイル回線またはWi-Fiで通常の電波状態。GASのコールドスタート直後の1回目は除く(別途「初回は遅い」ことを許容)。
 - 目標を満たさないとき: ①ネットワークタブで同一 `photoId` の複数リクエスト(分割になっていないか)・並列数を確認 ②Apps Script の実行ログで `uploadPhotoChunk` の所要時間を確認し、§2.16(重複読込・全件読込)と §1.6 の7(`uploadPhotoChunk` のロック範囲)の実装漏れを探す ③それでも届かなければ実測値を添えて設計担当へ「SPEC変更要望」(目標値や方式の見直し)。**目標未達は不具合ではなく、原因が実装漏れか目標の見直しかを分類する**(CLAUDE.md §5 の5)。
@@ -1986,7 +2229,7 @@ katawaku-inspection/
 │   ├─ appsscript.json                          マニフェスト(§1.3)
 │   ├─ Code.gs        doGet/doPost・封筒検査・dispatcher(§1.6)・エラー変換・ACTIONS表
 │   ├─ Util.gs        now()/newId(prefix)/JST整形/canonicalJSON/SHA-256/HMAC/base64/入力検査ヘルパ
-│   ├─ Schema.gs      SCHEMA(§2の全シート・列・型)・setupSheets()・setupSecrets()・setupTriggers()
+│   ├─ Schema.gs      SCHEMA(§2の全シート・列・型)・setupSheets()・setupSecrets()・setupTriggers()・installKeepWarmTrigger()・removeKeepWarmTrigger()・keepWarm()(版1.10。§6.7a。いずれも action ではない)
 │   ├─ Repo.gs        シート読み書き(一括読み・型変換・参照シート(Config/Items/Sites)のみ60秒キャッシュ §2.15・追記専用の保護)
 │   ├─ Seed.gs        SEED_ITEMS(§2.6.1)・初期Config(§2.14)
 │   ├─ Auth.gs        registerDevice・PIN/招待・deviceToken・stepUp検証・ロック(§3)
@@ -2041,6 +2284,11 @@ katawaku-inspection/
 | モック | `mock/` | `mock/` | 契約テスト全通過。§11の全機能(`/__mock/*` 含む)。SPECとの同期テスト通過 |
 | テスト | `tests/` | `tests/` | §12の全ケースを実装。`run-all.js` で一括実行できる。失敗時は原因がどの担当かわかる出力 |
 | 設計 | `SPEC.md` | `SPEC.md` | 本書の保守。変更履歴の記録 |
+
+版1.10 の責務(SPEC §5.1a / §6.7a / §8.11 / §9.2a / 付録A):
+- バックエンド: ①`record` を載せる action(§5.1a)と `Idem` の再構築 ②`keepWarmMinutes`(Config・`setupSheets` の不足キー追記) ③`installKeepWarmTrigger` `removeKeepWarmTrigger` `keepWarm` ④`docs/OPERATIONS.md` に導入・解除手順 ⑤harness の `ScriptApp` の代役と C-RESP / C-KEEP。
+- フロント: ①`KW.outbox.photoState` `saveStateOf` ②待つ操作の『送信中…』と8秒の案内 ③`loadDetail(recordId,{maxAgeMs})` と書き込み後の `getRecord` 廃止 ④保存状態行・写真ごとの状態・バッジ・全画面バナー・保留中のコメント欄・失敗時の再試行/破棄 ⑤新しい i18n キー(§9.4)。
+- モック+テスト: ①`record` の返却と `Idem` の再生 ②Config 初期値 `keepWarmMinutes` ③C-RESP / C-KEEP / U-OUTBOX-05,06 / U-CLASS-01 / U-RESP-01 / E-23〜E-28 / PERF-04,05。E-29 は P-45 の承認後。
 
 ### 13.3 契約変更の手順
 1. 実装者が食い違い・不足を見つけたら、**実装を直す前に**設計担当(親エージェント)へ報告する(契約外のフィールド/エンドポイントを勝手に足さない)。
@@ -2103,6 +2351,11 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-40 | 図面(版1.6) | PDFファイルの直接取り込みは対象外(pdf.js追加が必要=CLAUDE.md §4の例外。ユーザー判断待ち)。元画像(印なし)は保存せず、やり直しは削除→取り込み直し。上限は記録×sideあたり5枚(固定)。項目番号は `seq` 昇順の添字(現行は全項目 both のため役割間で一致。将来分かれたらSPEC変更要望)。印の色は職長ピンク/管理者青(仮)。iPhoneのHEIC画像はブラウザが読めた場合のみ対応(未確認) |
 | P-41 | 出来形検査の流れ(版1.9。REQUIREMENTS §14 の「Claudeの解釈。ユーザー未確認」を本書で確定した仮置き) | 最終状態の表示名は「出来形確認済」。`stopPour` は打設前のみ(出来形は `STATE_CONFLICT`)。時間ルール(§6.5)は出来形に適用しない・エスカレーション(§6.4)は適用する(現行実装のまま成り立つ側)。`pourPlannedAt` は出来形で使わない(指定されても保存しない)。出来形の取消手段は無い(誤承認は再検査 `reinspectOf`)。出来形の作成に打設前の承認を要件としない。メール件名の末尾に「出来形」。PDF名に段階名(打設前の新規PDFの名前も変わる)。詳細は §6.8、確認事項は §14.2 の13 |
 | P-42 | 追加項目 i50〜i69 の決め方(版1.9) | `key` は全て FALSE(責任者が後で決める)。`textJa` に基準を文中で入れた(i50〜i57。PDFの項目列では切れる)。i59(設計かぶり厚以上)は片側基準のため `tol` なし・`measure=none`。i58/i2・i62/i6・i67/i14・i68/i16 は有効項目同士で意味が重なりうるが、ユーザー指示どおり別項目で追加。`seq` は itemId の数字・末尾追加・同じ `groupKey` を連続(§2.6.1a)。`textId` は暫定訳(P-22) |
+| P-43 | 先出しの対象(版1.10。ユーザー承認 2026-10-17 の方針1・2の具体化) | §8.11.2 の分類表が正本。先出しは `saveDraft` `saveQaDraft` `addNote` `uploadPhotoChunk` `deletePhoto` `setLang` だけ。PIN・先着・状態の取り合い・参加・端末登録・ログイン・管理操作は待つ(進行中表示つき)。失敗時は巻き戻さず残す(`deletePhoto` だけ元に戻す)。分類の追加は表を先に直す |
+| P-44 | 書き込み応答の `record`(版1.10。方針3) | §5.1a。`submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` は RecordDetail に広げ、`addNote` `uploadPhotoChunk`(完了時)には追加。`saveDraft` `saveQaDraft` `releaseClaim` は広げない(高頻度・裏の操作で、読み込みを増やすと次の送信が遅れるため)。`Idem` には従来の形で保存し、再生時に最新のDetailへ差し替える。`uploadPhotoChunk` の `record` はロック解放後に作る。反映直後15秒は `getRecord` を省く(§8.11.8)。**応答サイズ・サーバー時間への影響は未測定**(実GASで PERF-05 を測って見直す) |
+| P-45 | 読み取り側の待ち短縮(版1.10。**ユーザー未確認・実装保留**) | §8.11.9 の3案: ①起動時の `me`/`getBootstrap` を並列に ②キャッシュがあればホームを応答前に描く ③記録の画面をキャッシュで先に描き裏で `getRecord`。承認範囲(方針1〜6)に明記が無く、体感の改善は大きいと見込まれる。確認が取れるまで実装・テストとも対象外 |
+| P-46 | keepWarm の効果と名前(版1.10。方針5) | 既定5分(`Config.keepWarmMinutes`)。**効果は未検証**(トリガーと Webアプリの実行環境が同じ保証がない)。設置前後の `rt` で比べ、効かなければ外す。本体の名前は末尾 `_` なしの `keepWarm`(2026-10-17 決定)。1日の実行時間上限(個人約90分/Workspace約6時間)に注意 |
+| P-47 | `createRecord` は先出しにしない(版1.10。**ユーザー未確認**) | 同じ場所(現場・階・工区・ロット・段階)の記録の先着があり(`ALREADY_EXISTS`)、後続の写真・下書きが `createRecord` の成功に依存する(§8.4 の送信可否規則)ため、オンラインでは応答を待つ(『送信中…』)。圏外は従来どおり端末に仮の記録を作ってキューに積む。先出しにすると入力後に失敗して失われるリスクが出る |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -2118,12 +2371,59 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 11. **版1.4の確認(1.4.1で①②は確定済み。参考として残す)**: ①P-38 直接編集の反映が最大60秒遅れる運用(責任者への周知)で良いか ②P-37 実行強制終了時の孤児ファイルを自動掃除しない扱いで良いか ③参照キャッシュの対象に `Sites` を含めたが、`joinKey` を扱う `requestJoin`/`adminGetJoinInfo`/`adminRotateJoinKey` は `Sites` をキャッシュなしで読む(設計担当の追加判断)。
 12. **版1.5の確認**: ①性能目標(§12.6 / P-39)の数値で良いか。実機で測って乖離すれば見直す ②`Config`/`Items`/`Sites` のキャッシュTTLは60秒のまま(依頼にあった「5分まで」は採らず、直接編集の反映遅れを最大60秒に留めた)。延ばしたい場合は §2.15-10 のとおり本書を先に直す ③`photoChunkChars` を 700000 にする案は、分割モードのCache 100KB制限のため採用しなかった(§2.14)。
 13. **版1.9の確認**(ユーザー未確認の設計判断): ①出来形検査の流れ(REQUIREMENTS §14 の「Claudeの解釈」)を本書で確定した: 時間ルール(締切)は出来形に適用しない・エスカレーション30/60分は適用する・メール件名の末尾に「出来形」を付ける。②出来形の `approved`(出来形確認済)を取り消す操作が無い(`stopPour` が出来形で使えないため)。誤承認は再検査(`reinspectOf`)で対応する。取消が要るか。③出来形の作成条件に「同じスロットの打設前が `approved`」を入れていない(順序を縛らない)。入れるか。④打設前の追加12項目の `tol`/`measure`: i59(鉄筋かぶり「設計かぶり厚以上」)は下限だけの基準で `tol(±)` に表せないため `tol` なし・`measure=none`。i63「直下段差5mm以内」は `tol=5`(±扱い)。片側基準(以上/以下)を表す列が要るか(Items の列追加=SPEC変更要望)。⑤有効な既存項目と意味が重なる組: i58↔i2(墨)、i62↔i6(開口。許容が ±5mm と ±2mm で違う)、i67↔i14(打込み金物)、i68↔i16(型枠内の清掃)。ユーザー指示どおり別項目で追加したが、現場で重複して聞かれる。統合する(既存を無効化して新IDに寄せる)か。⑥出来形 i50〜i57 の `textJa` は「項目名(確認内容)/基準:…」と基準を文中に入れた。元請PDFの項目列は約62mmで切れるため、基準がPDFの表で見えないのを許容するか(基準を別列にする案は Items の列追加=SPEC変更要望)。⑦PDFファイル名に段階名を入れたことで、打設前の新規PDFの名前も変わる(出来形だけに限ることもできる)。⑧i50〜i57 の `note` に「管理項目表⑰〜㉓」と書いたが、i50〜i55 と⑰〜㉒ の1対1の対応は、ユーザー指定の並びからの推定(個別の番号は書かず範囲で書いた)。⑨インドネシア語は全て暫定訳(P-22)。
+14. **版1.10の確認**(ユーザー未確認の設計判断。2026-10-17 の承認範囲は REQUIREMENTS §15 の1〜6):
+   ①**読み取り側の待ち短縮(P-45。§8.11.9)を進めるか**。起動時の `me`/`getBootstrap` の並列化、キャッシュがあれば応答前にホームを描く、記録の画面をキャッシュで先に描く、の3つ。承認範囲に明記が無いため実装を止めている。体感の改善は大きいと見込まれる(いまは『開く』のたびに1往復待つ)。
+   ②**`createRecord`(新しい記録の作成)を先出しにするか(P-47)**。いまはオンラインでは応答を待つ。先出しにすると『作成して入力へ』が即座に進むが、同じ場所の記録が先に作られていた場合、入力したあとで失敗する。
+   ③**`stopPour`(打設停止)をオンラインでも待つ扱いにした**(確実に届いたことを見せるため。圏外はキューに積む従来の動作)。先出しにしてよいか。
+   ④**keepWarm(§6.7a)**: 効果は実測でしか分からない(P-46)。GoogleアカウントがWorkspaceか個人かで実行時間の上限が違う。5分ごとで良いか。
+   ⑤**画面の強さ**: 『保存済み ✓』を約2秒出して消す、`failed`/`blocked` の間は全画面共通の赤バナーを出し続ける、送信待ち/失敗のサムネは点線/赤枠にする、コメントの『破棄』は本文を入力欄に戻す、で良いか。
+   ⑥**8秒で『通信に時間がかかっています』を出す**閾値(GASの起動待ちは数秒〜10秒超のことがある)。
+   ⑦インドネシア語の新しい文言はすべて暫定訳(P-22)。
+   ⑧**実測は未取得**(通信診断の結果待ち)。本版の効果の大きさは、S21 の `rt`/`srv` で見て優先順位を見直す。応答に `record` を載せるとサーバー側の読み込みは増えるため、`totalMs` の増分と、省けた往復(1.3〜2.8秒)を比べる(PERF-05)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
 - prototype の「デモ用ユーザー切替」「データ初期化」「手書きサイン」「`<input capture>`撮影」「Google Fonts」は新アプリに持ち込まない。
 - prototype の「QAの結果を職長の結果で事前入力」は採用しない(P-12)。
 - 役割名(表示): 職長/品質管理者/管理責任者(要件の「管理部門責任者」)。値は `foreman`/`qa`/`lead`。
+
+---
+
+## 付録A. 操作ごとの待ち時間の現状(版1.10.0 調査。`frontend/js` のコード読み取りによる。実測ではない)
+
+目的: どの操作が、どこで通信の応答を待って画面を止めているかを一覧にし、先出し(§8.11)の対象と改善を決める根拠にする。「1往復」は GAS で1回 1.3〜2.8 秒(§1.4)、休止後の最初はさらに遅い。ファイル名・関数名は調査時点(build 28)のもの。実測は S21 通信診断(§1.9)で取る。
+
+凡例(先出し): **可**=失敗しても困らず先出しできる(§8.11.2 の A)/ **不可**=待つ(B)/ **—**=書き込みでない。
+
+| # | 操作 | 呼ぶ action | 現状: 応答待ちで止まっている箇所 | 先出し | 理由 | 版1.10 の扱い |
+|---|---|---|---|---|---|---|
+| 1 | アプリ起動(端末登録済み・オンライン) | `me` → `getBootstrap`(直列) | `app.js` の `boot()` が `me` の応答を待ち、`startSession()` が `getBootstrap(true)` の応答を待ってから最初の画面を描く。『読み込み中』のまま2往復分 | — | 書き込みでない | P-45(§8.11.9)の並列化・キャッシュ先出し(**要確認・保留**) |
+| 2 | 招待コードの確認(S01『次へ』) | `lookupInvite` | `s01.js`: ボタンを無効にするだけで進行中の表示なし。1往復 | 不可 | 認証(コードの検証・総当たり対策) | B: 『送信中…』(§8.11.8) |
+| 3 | 端末登録(S01『登録する』) | `registerDevice` → `getBootstrap` | `s01.js` が応答を待ち、成功後 `app.afterRegister` → `startSession()` が `getBootstrap(true)` を待ってから画面遷移。初回は合計3往復(lookup・register・bootstrap) | 不可 | PIN設定・招待コードの消費 | B: 『送信中…』。初回だけのため往復は減らさない |
+| 4 | ホーム・現場・履歴の表示(S03/S04/S11/S09) | (キャッシュ) | 待たない(`records` キャッシュで描き、`listRecords` 等は裏) | — | — | 変更なし |
+| 5 | 記録を開く(S06/S07/S08/S10) | `getRecord` | `data.js` の `loadDetail()`: オンラインなら **キャッシュに詳細があっても** `getRecord` の応答まで描かない(スケルトン)。1往復 | — | 書き込みでない | 書き込み直後は省く(15秒。§8.11.8)。一般化は P-45 |
+| 6 | 新しい記録を作る(S05) | `createRecord` | `s05.js`: 端末に仮の詳細を保存したあと `runQueued()` が `flush()` の応答を待つ(1往復)。拒否なら仮記録を消してエラー表示 | 不可 | 同じ場所の記録の先着(`ALREADY_EXISTS`) | B(P-47)。応答の Detail で S06 を描く |
+| 7 | 回答・実測・項目コメント(職長 S06) | `saveDraft` | 待たない(500msで端末に保存→outboxへ。`s06.js` の `doSave`)。**失敗時の画面の導線が無い**(S20 のみ) | 可(既に先出し) | 冪等・後勝ち | A: 失敗バナー・保存状態行を追加(§8.11.4・6) |
+| 8 | QA入力・総合コメント(S10) | `saveQaDraft` | 待たない(`s10.js`)。失敗時の導線は同じく無い | 可(既に先出し) | 同上 | 同上 |
+| 9 | 写真・図面を撮る/取り込む(S06/S10/M10) | `uploadPhotoChunk` | 『使う』で端末に保存→サムネ即表示(待たない)。送信は裏で並列(`photoParallel`)。**表示は『送信中』の1種類だけ**(待ち/送信中/失敗の区別なし)。送信完了のたびに `sync.js` の `finishPhoto()` が `getRecord` を1回呼び、終わるまで送信スロットを占有する(写真1枚あたり1往復の無駄) | 可(既に先出し) | `photoId` で冪等 | A: 4状態表示(§8.11.5)。応答の `record` で `getRecord` を廃止(§5.1a) |
+| 10 | 証跡写真(元請サイン M5) | `uploadPhotoChunk`(prime) | `modals.js` の `primeSign`: 撮影後 `sync.flush()` の完了を待ってから証跡を確定(サムネも送信完了後に出る) | 可 | 元請サイン前に確実に載せたい | 撮影直後にサムネと状態を出す。『サイン記録』を押せるのは送信完了後(現行維持) |
+| 11 | 写真の削除 | `deletePhoto` | 送信済みは `deletedPhotos` の印で即非表示→outbox(待たない)。**失敗時に元に戻らない** | 可 | 論理削除・冪等 | A: 失敗時は元に戻す(§8.11.4) |
+| 12 | コメント追記(S08) | `addNote` | `s08.js`: `runQueued()` が `flush()` を待ち(1往復)、続けて `reload()`=`getRecord`(1往復)。**2往復あとに入力欄が空になる** | 可 | 追記専用・冪等 | A: 先出し(§8.11.3)+応答の `record` |
+| 13 | 提出(S07 → M1) | `submitRecord`(PIN) | `modals.js` の `pinFlow`: 応答まで『OK』を無効にするだけ(進行中表示なし)。成功後 `mergeSummary`(要約のみ反映)→S08 が `getRecord` を待つ。**2往復分** | 不可 | PIN・提出は確定 | B: 進行中表示。応答の Detail で S08 を描く(`getRecord` 廃止) |
+| 14 | 確認中にする(S10) | `claimReview` | `s10.js`: ボタン無効のみ。応答は既に RecordDetail なのに、`putDetail` のあと `reload()` が `getRecord` をもう一度待つ(**無駄な1往復**) | 不可 | 先着 | B: 再取得を省く |
+| 15 | 引き継ぐ(S10) | `takeoverReview` | 同上 | 不可 | 先着 | 同上 |
+| 16 | 確認を中止(S10) | `releaseClaim` | `flushSave()` のあと応答待ち→ホームへ | 不可 | 状態の取り合い | B: 進行中表示 |
+| 17 | 合格(PIN)/軽微/重大(S10) | `submitVerdict` | まず `flushSave()` と `sync.flush()`(outbox全体)を待つ→M1(PIN)または確認ダイアログ→応答待ち→要約のみ反映→S08 が `getRecord` を待つ | 不可 | 判定・PIN・差し戻し | B: 応答の Detail(`getRecord` 廃止) |
+| 18 | 元請サイン記録(M5 → M1) | `recordPrimeSign`(PIN) | 証跡写真があれば `flush()` を待つ→M1→応答待ち→`reload()`=`getRecord` | 不可 | PIN・確定 | B: 応答の Detail |
+| 19 | 打設停止(M4) | `stopPour` | オンラインでは `runQueued()` が `flush()` を待ち、成功後 `reload()`=`getRecord`。圏外はキューに積む | 不可 | 状態の確定・安全(確実に届いたことを見せる) | B: 応答の Detail。圏外のキューは従来どおり |
+| 20 | 参加申請・承認・却下・取消(S13/S09/S14) | `requestJoin` `decideJoin` `revokeMembership` | 応答待ち→一覧を `listJoinRequests` で取り直す | 不可 | 参加の確定・先着 | B: 進行中表示のみ |
+| 21 | 元請提出用PDFの生成(M6) | `generateReport` | スピナーあり。最大120秒待つ | 不可 | 出力 | 変更なし |
+| 22 | 管理(招待・ロック解除・停止・端末解除・不在・合言葉)(S16〜S18) | `admin*` | 応答待ち→一覧を取り直す | 不可 | 責任者の管理 | B: 進行中表示のみ |
+| 23 | PIN変更・ログアウト(S19) | `changePin` `logoutDevice` | 応答待ち | 不可 | PIN・端末 | B |
+| 24 | 言語の切替 | `setLang` | 待たない(裏で送信。失敗は無視) | 可 | 本人の表示設定 | 変更なし |
+| 25 | 定期の更新(60秒ごと・前景化) | `me` `listRecords` `getBootstrap` `listJoinRequests` | 裏で実行(画面は止まらない) | — | — | 変更なし |
+
+要点: ①**画面が止まる主因は『書き込みの応答を待つ → 続けて getRecord を待つ』の2往復**(#12・#13・#17・#18・#19)と、**『開くたびに getRecord を待つ』1往復**(#5)、**『起動時に me → getBootstrap を直列で待つ』2往復**(#1)。②既に先出しの操作(#7・#8・#9・#11)は待たないが、**失敗したときの画面の導線と、送信状態の見え方が足りない**。③写真は完了のたびの `getRecord` が送信スロットを占有している(#9)。④待つ操作はボタンが無効になるだけで『待っている』ことが見えない(#2・#3・#13〜#20)。
 
 ---
 
@@ -2154,3 +2454,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-12 | 1.8.1 | ユーザー要望(反応が遅い): 遅さの原因を数字で見るための計測を追加。①§1.5/§1.9: 全応答の `meta.timing`(処理時間の内訳)②`js/perf.js` と画面 S21 通信診断(設定から開く)③契約テスト C-ENV-02 に `meta.timing` の検査を追加、E-21 を追加。API・シート・既存の画面の動作は変更なし(action数43のまま)。 |
 | 2026-10-12 | 1.8.2 | 責任者のスマホにテスト現場の記録が残った不具合の修正。§8.9: 全件取得の結果に無い記録を端末から消す(未送信・下書きのある記録は残す)。API・シート・エラーコードは変更なし。 |
 | 2026-10-14 | 1.9.0 | ユーザー決定(2026-10-14): 出来形検査(`stage=post_demold`)を打設前検査と並べて使う。既存の列名・action名・エラーコード・action数(43)は変更なし(追加のみ)。①§0.2・§2.7・§2.14・§6.8新設・§14 P-10/P-41: 使う段階は `pre_pour` と `post_demold`(`Config.enabledStages` 既定 `pre_pour,post_demold`)。`during_pour`(⑯)は保留。同じ現場・階・工区・ロットでも段階ごとに別の記録(一意制約は元から段階を含む)。出来形は打設前と同じ流れ・状態遷移・PIN・差し戻し・コメント分離・元請サインを再利用し、違いは ⓐ`approved` の表示名=「出来形確認済」(§9.4 の `@post_demold` 上書きキー) ⓑ`stopPour`・打設に関する語を出さない(`stopPour` は `pre_pour` のみ。出来形は `STATE_CONFLICT`、`actions` に出ない)。時間ルール(§6.5)は出来形に適用しない(既存の「他段階は null」のまま)、エスカレーション(§6.4)は適用(変更なし)。`pourPlannedAt` は出来形で使わない(指定されても保存しない)。②§2.6.1・§2.6.1a・§2.6.1b・§11.5・§14 P-26/P-42: Items を i1〜i69 の69行に(出来形 i50〜i57 と打設前 i58〜i69 の20項目を `active=TRUE`・`key=FALSE` で追加。有効36項目=打設前28+出来形8。i1〜i49 は変更なし)。新グループ `demold_check`・`ctl_*`、`seq` の方針(itemId番号・末尾追加・同じ `groupKey` を連続)。`setupSheets()` は既存シートへ追加しないため、GASエディタ専用の `addMissingSeedItems()` を新設(actionではない)。③§5.4.3 `createRecord`: `stage` は `enabledStages` に無い値・有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は打設前のみ保存。④§9.2・§9.4: S03/S04/S05/S09 に段階の表示と段階の選択、S10/S11 に段階名、`stage.post_demold`=出来形。⑤§10・§7.4: PDFファイル名に段階名(`{subject}_{段階名}_v...`。打設前の新規PDFの名前も変わる)、出来形は打設予定日時の行なし・ステータス「出来形確認済」。⑥§6.6: 出来形のメール件名の末尾に ` 出来形`。⑦§12: C-STAGE-01〜06・C-ITEM-02,03・E-15 を追加、C-ITEM-01/C-STATE-07,08/U-SEED-01/U-I18N-01/U-VALID-01/E-02/E-11 を更新。⑧§14.2 の13(版1.9の確認事項)。 |
+| 2026-10-17 | 1.10.0 | ユーザー決定(2026-10-17。REQUIREMENTS §15): 「ログイン、写真登録、コメント登録など、操作の後に画面が切り替わるまでの待ち時間をなるべく無くしたい」。原因は操作のたびの スマホ→GAS→スプレッドシート の往復と、応答を待ってから画面を更新していること(実測は未取得=通信診断の結果待ち)。**既存の列名・action名・エラーコード・action数(43)は変更なし(追加のみ)**。①§8.11 新設・§8.1・§9.2a・§9.1・§9.4: **先出し(楽観的UI)の分類**(§8.11.2。全43 actionをA先出し/B待つ/C参照に分類。先出しは `saveDraft` `saveQaDraft` `addNote` `uploadPhotoChunk` `deletePhoto` `setLang` だけ。PIN・先着・状態・参加・端末登録・ログインは待つ)、先出しの失敗時の巻き戻し・再試行・破棄の導線(§8.11.4)、待つ操作の『送信中…』+8秒の『時間がかかっています』(§8.11.8)。②§5.1a 新設・§5.2・§5.4・§1.6: **書き込み応答の `record`**(`submitRecord` `submitVerdict` `recordPrimeSign` `stopPour` を RecordDetail に広げ、`addNote` と `uploadPhotoChunk`(完了時)に `record` を追加。`saveDraft` 系は広げない)で `getRecord` の再取得をなくす。`Records.version` による採否規則、`Idem` は従来の形で保存し再生時に最新のDetailへ差し替え、反映直後15秒は `getRecord` を省く。サムネ・写真本体は含めない。③§8.11.5〜7・§8.4・§9.2a: **写真ごとの状態表示**(送信待ち/送信中/失敗/完了)、記録の保存状態行、ヘッダの未送信バッジの強化(n≥1黄・要対応赤)と全画面の失敗バナー。提出は写真の送信完了まで押せない(§8.6・FE-03 の趣旨を維持)。純関数 `KW.outbox.photoState`・`saveStateOf`。④§6.7a 新設・§2.14・§13.1: **GASの起動待ち対策**=GASエディタ専用の `installKeepWarmTrigger()`/`removeKeepWarmTrigger()`/トリガー本体 `keepWarm()`(末尾 `_` の関数はトリガーの実行先にできない恐れがあるため、名前は `_` なし。エディタの実行候補に出ても、読み取りのみで誰が実行しても無害。actionではない。`ACTIONS` に登録せず43のまま)、Config `keepWarmMinutes`(既定5。5/10/15/30)。書き込みなし。インストール運用は `docs/OPERATIONS.md`。⑤§11.3・§12・§13.2: mock の `record`、C-RESP-01〜05・C-KEEP-01,02・U-OUTBOX-05,06・U-CLASS-01・U-RESP-01・E-23〜E-29・PERF-04,05 を追加、C-IDEM-01 を読み替え。⑥付録A 新設: 操作ごとの待ち時間の現状(frontend のコード調査)。⑦§14 P-43〜P-47(P-45 読み取り側の待ち短縮と P-47 `createRecord` の扱いは**ユーザー未確認**)、§14.2 の14。**対象外**: 認証・認可に関わる参照(Users/Devices/Assignments 等)のサーバー側キャッシュ(§2.15 の決定のまま)、GAS以外のサーバーへの移行。 |

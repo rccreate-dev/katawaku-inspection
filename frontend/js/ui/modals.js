@@ -106,7 +106,7 @@
   };
 
   /* ---- M1 PIN入力 ----
-   * pinFlow({title, action, params, clientId}) -> Promise<res|null>
+   * pinFlow({title, action, params, clientId, onBusy?}) -> Promise<res|null>   (onBusy(true|false): PIN送信の開始/終了)
    * res: api.call の結果。null=キャンセル。res.network=true は通信不可(同じclientIdで再実行できる) */
   M.pinFlow = function (o) {
     return new Promise(function (resolve) {
@@ -131,6 +131,10 @@
           input.value = '';
           busy = true; sync(); cancel.disabled = true;
           KW.clear(msg);
+          // 待つ操作(PIN): 『OK』を『送信中…』+スピナーにし、8秒超で案内文(SPEC §8.11.8)
+          C.setBusy(ok, true);
+          var stopSlow = C.slowNote(ok);
+          if (o.onBusy) o.onBusy(true); // 呼び出し元のボタンも『送信中…』にしたいとき(S07 の提出など)
           var tries = 0;
           function attempt() {
             return KW.api.call(o.action, o.params, { clientId: o.clientId, pin: pin, timeoutMs: o.timeoutMs }).then(function (res) {
@@ -140,6 +144,8 @@
           }
           attempt().then(function (res) {
             pin = null;
+            stopSlow(); C.setBusy(ok, false);
+            if (o.onBusy) o.onBusy(false);
             busy = false; cancel.disabled = false;
             if (res.ok) { fin(res); m.close(); return; }
             if (res.network) { fin(res); m.close(); return; }
@@ -204,6 +210,9 @@
         var ms = KW.time.nowMs(KW.state.skewMs);
         lastSrc = { source: source, w: w, h: hgt };
         shutter.disabled = true;
+        // 縮小・スタンプ・圧縮・ハッシュの間は『処理中…』を出す(SPEC §8.11.5)
+        msg.hidden = false; KW.clear(msg).appendChild(document.createTextNode(t('photo.processing')));
+        rotate.disabled = true; use.disabled = true;
         return KW.photo.process({ source: source, width: w, height: hgt }, stampCtx(ms)).then(function (p) {
           p.takenAt = KW.time.toIso(ms);
           result = p;
@@ -212,9 +221,10 @@
           shutter.hidden = true; retake.hidden = false; rotate.hidden = false; use.hidden = false;
           KW.clear(info).appendChild(document.createTextNode(p.stampText));
           msg.hidden = true;
+          rotate.disabled = false; use.disabled = false;
         }, function (e) {
           showErr(e && e.code === 'PHOTO_TOO_LARGE' ? 'err.photo_too_large' : 'err.INTERNAL');
-          shutter.disabled = false;
+          shutter.disabled = false; rotate.disabled = false; use.disabled = false;
         });
       }
       shutter.addEventListener('click', function () {

@@ -3,6 +3,7 @@
   --bg:#f1f2ee; --surface:#ffffff; --ink:#1b2420; --muted:#5b6862; --line:#d8dcd4;
   --accent:#0c6b67; --accent-ink:#ffffff; --accent-soft:#dcefed;
   --good:#1d7a3c; --good-soft:#dff1e4; --warn:#a85f00; --warn-soft:#fbecd3; --bad:#b3261e; --bad-soft:#fae0dd;
+  --info:#1f5fbf; --info-soft:#dde9fb; --yellow:#f2c230; --yellow-ink:#2a2000;
   --shadow:0 1px 2px rgba(20,30,25,.08);
   --font:"Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
 }
@@ -11,6 +12,7 @@
     --bg:#111614; --surface:#1a211e; --ink:#e7eeea; --muted:#98a69f; --line:#2c3632;
     --accent:#42c2b9; --accent-ink:#04201e; --accent-soft:#183a38;
     --good:#62d088; --good-soft:#173a25; --warn:#f0b24c; --warn-soft:#3d2d10; --bad:#ff8c82; --bad-soft:#431d1a;
+    --info:#7fb0ff; --info-soft:#142a4a; --yellow:#e0b020; --yellow-ink:#1c1500;
     --shadow:none; color-scheme:dark;
   }
 }
@@ -38,7 +40,8 @@ button{cursor:pointer}
 .net.off{color:var(--warn)}
 .net.off i{background:var(--warn)}
 .obx{min-height:44px;min-width:44px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:0 8px;font-weight:700;font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap}
-.obx.bad{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.obx.pend{background:var(--yellow);border-color:var(--yellow);color:var(--yellow-ink)}
+.obx.bad{background:var(--bad);border-color:var(--bad);color:#fff;white-space:normal;text-align:center;line-height:1.2;font-size:12px;max-width:150px;padding:2px 8px}
 .lang{min-height:44px;min-width:44px;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:0 10px;font-weight:700;white-space:nowrap}
 .sitebar{padding:0 0 8px;font-size:14px;color:var(--muted);display:flex;gap:8px;align-items:center;min-width:0}
 .sitebar b{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -272,3 +275,50 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .dpoint{min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:15px;font-weight:700;padding:0 10px;cursor:pointer}
 .dpoint.placed{background:var(--accent-soft)}
 .dpoint[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+
+/* 版1.10: 待つ操作の進行中表示・送信状態の可視化(SPEC §8.11) */
+.spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;margin-right:6px;flex:none}
+@media (prefers-reduced-motion:no-preference){.spin{animation:kwspin .8s linear infinite}}
+@keyframes kwspin{to{transform:rotate(360deg)}}
+.btn[aria-busy="true"]{display:inline-flex;align-items:center;justify-content:center}
+.msg.slow{flex-basis:100%;width:100%}
+#banners .banner{margin-bottom:8px}
+
+/* 記録の保存状態(S06/S08/S10 のヘッダ直下) */
+.savestate{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:700;min-height:28px;margin-bottom:8px;overflow-wrap:anywhere}
+.savestate .ico{width:16px;height:16px}
+.savestate .spin{margin-right:0}
+.savestate.ss-synced{color:var(--good)}
+.savestate.ss-sending{color:var(--info)}
+.savestate.ss-queued{color:var(--muted)}
+.savestate.ss-offline{color:var(--warn)}
+.savestate.ss-failed{color:var(--bad)}
+.savestate.ss-failed .btn{min-height:44px}
+
+/* 写真ごとの送信状態 */
+.thumbwrap{width:72px}
+.thumb .up{display:flex;align-items:center;justify-content:center;gap:3px;font-size:10px;line-height:16px;min-height:16px;padding:0 2px;overflow-wrap:anywhere}
+.thumb .up .ico{width:11px;height:11px}
+.thumb .up .spin{width:9px;height:9px;border-width:2px;margin-right:0;vertical-align:baseline}
+.thumbwrap.ps-queued .thumb{border-style:dashed;border-color:var(--muted)}
+.thumbwrap.ps-queued .thumb img{opacity:.6}
+.thumbwrap.ps-queued .thumb .up{background:rgba(70,80,75,.85)}
+.thumbwrap.ps-sending .thumb{border-color:var(--info);border-width:2px}
+.thumbwrap.ps-sending .thumb .up{background:var(--info);color:#fff}
+.thumbwrap.ps-failed .thumb{border-color:var(--bad);border-style:solid;border-width:2px}
+.thumbwrap.ps-failed .thumb .up{background:var(--bad);color:#fff}
+.thumbwrap.ps-saved .thumb{border-color:var(--good);border-width:2px}
+.thumbwrap.ps-saved .thumb .up{background:var(--good);color:#fff}
+.pnote{font-size:11px;line-height:1.25;color:var(--muted);overflow-wrap:anywhere;display:block}
+.thumbwrap.ps-failed .pnote{color:var(--bad);font-weight:700}
+
+/* 送信待ちのコメント(S08) */
+.pendnote{border:1px dashed var(--muted);border-radius:8px;padding:8px 12px;margin-top:10px;background:var(--surface)}
+.pendnote .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted);font-weight:700}
+.pendnote .body{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;margin-top:4px}
+.pendnote.sending{border-color:var(--info)}
+.pendnote.sending .meta{color:var(--info)}
+.pendnote.failed{border:2px solid var(--bad);background:var(--bad-soft)}
+.pendnote.failed .meta{color:var(--bad)}
+.pendnote .gap{margin-top:8px}
+.ps-wait{display:flex;flex-direction:column;gap:4px;margin-top:8px}

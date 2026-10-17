@@ -285,7 +285,9 @@ function act_uploadPhotoChunk(ctx) {
         CacheService.getScriptCache().removeAll(ks);
       } catch (e4) { /* 消えなくてもTTLで失効する */ }
     }
-    return data;
+    // 版1.10(§5.1a): complete:true の応答に record(RecordDetail)。ロックを解放したあとに読み取りだけで作る。
+    // 作れなければ省く(書き込みの成否は変えない)
+    return RecordResp.afterUnlock(ctx, data, p.recordId);
   } finally {
     if (!committed) { photoTrash_(saved.fileId); photoTrash_(saved.thumbId); }
   }
