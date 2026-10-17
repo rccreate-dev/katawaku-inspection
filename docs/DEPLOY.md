@@ -54,13 +54,13 @@
 2. 必ずこのスプレッドシートの中から開くこと(「紐づいたスクリプト」にするため)。
 
 ### 3-3. `.gs` ファイルを貼る
-貼るのは `backend/` 直下の次の **14ファイル**(`harness/` は貼らない):
+貼るのは `backend/` 直下の次の **18ファイル**(`harness/` は貼らない):
 
-`Code.gs` `Util.gs` `Repo.gs` `Schema.gs` `Seed.gs` `Auth.gs` `Authz.gs` `Idem.gs` `Records.gs` `Photos.gs` `PhotoUpload.gs` `RefCache.gs` `Report.gs` `Membership.gs` `Notify.gs` `Admin.gs`
+`Code.gs` `Util.gs` `Repo.gs` `Schema.gs` `Seed.gs` `Auth.gs` `Authz.gs` `Idem.gs` `Records.gs` `Photos.gs` `PhotoUpload.gs` `RefCache.gs` `RecordResp.gs` `Report.gs` `ReportDoc.gs` `Membership.gs` `Notify.gs` `Admin.gs`
 
 手順:
 1. 最初からある `コード.gs`(`Code.gs`)の中身を全部消し、`backend/Code.gs` の中身を貼る。
-2. 左の「ファイル」の「+」→「スクリプト」で新しいファイルを作り、名前を上の各ファイル名(拡張子 `.gs` なし。例 `Util`)にして、中身を貼る。15回繰り返す。
+2. 左の「ファイル」の「+」→「スクリプト」で新しいファイルを作り、名前を上の各ファイル名(拡張子 `.gs` なし。例 `Util`)にして、中身を貼る。17回繰り返す(`Code.gs` 以外の17ファイル)。
 3. ファイルの並び順は問わない見込みです(他ファイルの関数を読み込み時に呼ぶ記述は確認できませんでした)。実機で動かないときは要確認。
 4. 保存(Ctrl+S / ディスクのアイコン)。
 
@@ -69,8 +69,18 @@
 2. エディタに `appsscript.json` が現れる。中身を **`backend/appsscript.json` の内容に全部置き換える**。内容の要点:
    - タイムゾーン `Asia/Tokyo`、ランタイム `V8`
    - Webアプリ: `executeAs: USER_DEPLOYING`(自分として実行)、`access: ANYONE_ANONYMOUS`(全員)
-   - 権限(スコープ): スプレッドシート、ドライブ、`script.scriptapp`(トリガー設置)、`script.send_mail`(メール通知)
+   - 権限(スコープ): スプレッドシート、ドライブ、`script.scriptapp`(トリガー設置)、`script.send_mail`(メール通知)、**`documents`(Googleドキュメント。版1.10.1。元請PDFをA4で作る「doc方式」(`ReportDoc.gs`)に必要)**
+   - **`documents` は後から足したスコープです。マニフェストを貼り替えただけでは承認されません。** 承認が済むまで doc 方式は「承認が必要」で失敗し、自動で従来の方式(HTML方式。用紙はレター)でPDFが作られます(画面は止まりません)。承認の手順は下の「3-4a」。doc 方式を使わない(Config `reportEngine` が `html` のまま)なら、承認しなくても今までどおり動きます。
 3. 保存する。(画面の表記は変わることがあります。見つからない場合は要確認)
+
+### 3-4a. doc 方式(元請PDFをA4で作る方式)を使えるようにする(版1.10.1。使うときだけ。責任者が1回)
+(SPEC §10.5.9。切替と見た目の確認は `docs/OPERATIONS.md` の「10. 元請PDFのA4化」)
+1. 上の3-4のとおり `appsscript.json` を `backend/appsscript.json` の内容に置き換え、`ReportDoc.gs` など `.gs` を貼り替えて保存する。
+2. エディタ上部の関数のプルダウンから **`checkReportEngine`** を選んで「実行」する。
+3. 初回は承認画面が出る。「権限を確認」→ アカウントを選ぶ →「詳細」→「(プロジェクト名)(安全ではないページ)に移動」→ **ドキュメントの作成・編集の権限を「許可」**。
+4. 実行ログに `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` と出れば成功。エラーが出たときはその文面を控えて Claude に伝える(ドライブに `_tmp_checkReportEngine_…` という一時文書ができても、自動でゴミ箱に入る)。
+5. 「デプロイ」→「デプロイを管理」→ 鉛筆 → バージョン「新バージョン」→「デプロイ」(Webアプリの実行ユーザーの承認を更新するため)。
+6. ここまでで doc 方式を**使える状態**になっただけです。実際に切り替える(Config `reportEngine` を `doc` にする)のは、`docs/OPERATIONS.md` の「10」の手順で見た目を確認するときに行います。既定は `html` のままです。
 
 ### 3-5. 初期化(シート自動作成・初期データ投入)
 Apps Script エディタ上部の関数選択プルダウンで関数を選び、「実行」を押します。**順番どおりに**:

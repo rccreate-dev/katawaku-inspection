@@ -2,10 +2,11 @@
 /**
  * shims.js — Google Apps Script サービスのインメモリ実装(GAS互換ハーネス用)。
  * SpreadsheetApp / DriveApp / LockService / CacheService / PropertiesService / Utilities /
- * ContentService / MailApp / HtmlService / Session / ScriptApp。
+ * ContentService / MailApp / HtmlService / Session / ScriptApp / DocumentApp(docshim.js)。
  * 実GASの制約に近づけるため、範囲外アクセスや大きすぎるキャッシュ値は例外にする。
  */
 const crypto = require('crypto');
+const { createDocShim } = require('./docshim');
 
 function toSigned(buf) {
   const out = new Array(buf.length);
@@ -36,6 +37,7 @@ function createShims(state) {
   state.driveFail = null;        // テスト用: { createFile: n } で n 回目の createFile を例外にする
   state.rootName = '';           // 仮想Driveのルートフォルダ名(パス表示用)
   state.cacheStats = { hits: 0, misses: 0, skippedTooLarge: 0 };
+  state.lastHtml = null;         // HtmlService で最後に作ったHTML(エンジン切替の検証用。reset で null)
 
   /* ---------- Blob ---------- */
   class Blob {
@@ -200,16 +202,28 @@ function createShims(state) {
       this.id = 'fi' + (++seq).toString(36) + crypto.randomBytes(4).toString('hex');
       this.name = name; this.blob = blob; this.parent = parent; this.sharing = null; this.trashed = false; nodes.set(this.id, this);
       this.created = state.nowMs();
+      this.description = ''; this.docModel = null;  // docModel: DocumentApp.create で作った文書(docshim.js)
     }
     getId() { return this.id; }
     getName() { return this.name; }
     getBlob() { return new Blob(this.blob._buf, this.blob._ct, this.name); }
     getSize() { return this.blob._buf.length; }
+    /** 文書は Drive 経由で PDF に変換できる(用紙は文書の設定)。通常のファイルは Blob の変換と同じ */
+    getAs(type) {
+      if (this.docModel) {
+        if (type !== 'application/pdf') throw new Error('未対応の変換: ' + type);
+        return new Blob(state.docShim.convert(this.docModel), 'application/pdf', this.name + '.pdf');
+      }
+      return this.blob.getAs(type);
+    }
+    setDescription(d) { this.description = String(d); return this; }
+    getDescription() { return this.description; }
     setSharing(access, perm) { this.sharing = { access, perm }; return this; }
     getDateCreated() { return new Date(this.created); }
     setTrashed(t) {
       if (t && !this.trashed) {
         state.driveLog.push({ op: 'trash', path: state.driveRel(this), fileId: this.id, lockHeld: state.lockHeld, at: state.nowIso() });
+        if (this.docModel) state.docShim.onTrashed();
       }
       this.trashed = !!t;
       return this;
@@ -229,6 +243,15 @@ function createShims(state) {
     getFolderById(id) { const n = nodes.get(id); if (!n || !(n instanceof Folder)) throw new Error('No item with the given ID could be found'); return n; },
     getFileById(id) { const n = nodes.get(id); if (!n || !(n instanceof File)) throw new Error('No item with the given ID could be found'); return n; },
   };
+  /** DocumentApp.create 用: マイドライブ直下に文書ファイルを作る(createFile と同じく driveLog に create を残す) */
+  const createDocFile = (title, model) => {
+    const f = new File(title, new Blob('', 'application/vnd.google-apps.document', title), driveRoot);
+    f.docModel = model;
+    driveRoot.files.push(f);
+    state.driveLog.push({ op: 'create', path: state.driveRel(f), fileId: f.id, lockHeld: state.lockHeld, at: state.nowIso() });
+    return f;
+  };
+  state.docShim = createDocShim(state, { createDocFile, advanceMs: (ms) => state.advanceMs(ms) });
   /** ルートフォルダからの相対パス(/__mock/drive と同じ表記) */
   state.driveRel = (f) => {
     const p = f.parent.path(); const i = p.indexOf(state.rootName);
@@ -388,7 +411,7 @@ function createShims(state) {
   };
 
   return {
-    globals: { Utilities, SpreadsheetApp, DriveApp, LockService, CacheService, PropertiesService, ContentService, MailApp, HtmlService, Session, ScriptApp, Logger, console: con },
+    globals: { Utilities, SpreadsheetApp, DriveApp, DocumentApp: state.docShim.DocumentApp, LockService, CacheService, PropertiesService, ContentService, MailApp, HtmlService, Session, ScriptApp, Logger, console: con },
     createSpreadsheet: () => SpreadsheetApp.create('harness'),
   };
 }

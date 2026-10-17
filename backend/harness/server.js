@@ -14,7 +14,7 @@ const { createShims } = require('./shims');
 const { seed } = require('./seed');
 
 const BACKEND_DIR = path.join(__dirname, '..');
-const LOAD_ORDER = ['Util', 'Schema', 'Seed', 'RefCache', 'Repo', 'Code', 'Idem', 'Auth', 'Authz', 'RecordResp', 'Records', 'Photos', 'PhotoUpload', 'Membership', 'Admin', 'Report', 'Notify'];
+const LOAD_ORDER = ['Util', 'Schema', 'Seed', 'RefCache', 'Repo', 'Code', 'Idem', 'Auth', 'Authz', 'RecordResp', 'Records', 'Photos', 'PhotoUpload', 'Membership', 'Admin', 'Report', 'ReportDoc', 'Notify'];
 const ROOT_FOLDER_NAME = 'RCCREATE 型枠検査';
 
 function loadSources() {
@@ -23,7 +23,7 @@ function loadSources() {
 
 /** 新しい vm コンテキスト(=新しいスクリプト実行環境+空のスプレッドシート/Drive)を作る */
 function buildContext(h) {
-  const state = { nowMs: () => h.nowMs(), nowIso: () => h.nowIso(), baseUrl: h.baseUrl };
+  const state = { nowMs: () => h.nowMs(), nowIso: () => h.nowIso(), baseUrl: h.baseUrl, advanceMs: (ms) => { h.offsetMs += ms; } };
   const shims = createShims(state);
   state.rootName = ROOT_FOLDER_NAME;
   const sandbox = Object.assign({}, shims.globals, { __clock: () => h.nowMs() });
@@ -120,6 +120,16 @@ function createHarness(opts) {
         else return { ok: false, error: { code: 'BAD_REQUEST', message: 'set か advanceMin が必要です' } };
         return { ok: true, data: { now: h.nowIso() } };
       case 'lastReportHtml': return { ok: true, data: { html: h.state.lastHtml || '' } };
+      case 'docShim': {
+        // DocumentApp の代役の制御と観測(harness 専用。SPEC §11.4)
+        const ds = h.state.docShim;
+        if (body.failMode !== undefined) {
+          if (!['none', 'create', 'image', 'convert', 'slow'].includes(body.failMode)) return { ok: false, error: { code: 'BAD_REQUEST', message: 'failMode が不正です' } };
+          ds.failMode = body.failMode; ds.slowDone = false;
+        }
+        if (body.reset === true) { ds.reset(); h.state.lastHtml = null; } // 観測値を空に戻す。HtmlService 側の lastHtml も null に(エンジン切替の検証用。SPEC §11.4)
+        return { ok: true, data: JSON.parse(JSON.stringify(ds.observe())) };
+      }
       case 'tick': return { ok: true, data: { notified: h.ctx.escalationTick() } };
       case 'issueDevice': {
         Repo.resetCache();
