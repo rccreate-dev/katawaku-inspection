@@ -20,15 +20,26 @@ var REPORT_DOC_FONT = 'Noto Sans JP';
 var REPORT_DOC_SIZE = { body: 7.5, table: 7.5, note: 6, foot: 6, h1: 12, h2: 9 };
 var REPORT_DOC_COLOR = { text: '#111111', label: '#555555', ng: '#CC0000', note: '#444444', border: '#666666', head: '#EEEEEE', ngRow: '#FDE8E8' };
 var REPORT_DOC_BORDER_PT = 0.75;
+var REPORT_DOC_H2 = { size: REPORT_DOC_SIZE.h2, bold: true, before: 9, after: 3, keepNext: true };   // 見出し(h2)の共通書式
 var REPORT_DOC_PAD = { v: 2, h: 3, photoV: 3 };   // セル余白(上下・左右・写真ブロックの上下)
 var REPORT_DOC_ROW_MIN_PT = 17.0;                  // 項目表・凡例表の最低行高(6mm)
 var REPORT_DOC_SIGN_MIN_PT = 36;                   // サイン欄本文行の最低高
 var REPORT_DOC_TIMEOUT_MS = 80000;                 // 組み立て開始からの上限(SPEC §10.5.8)
-var REPORT_DOC_BODY_W_MM = 186;                    // 本文領域の幅
+var REPORT_DOC_BODY_W_MM = 186;                    // 本文領域の幅(SPEC §10.5.2 の名目値。表の列幅の「設計上の合計」)
+/**
+ * 表の実効幅(mm)。実機のPDF(2026-10-19)で、列幅の合計を本文幅186mmにした表が右端で約9px@110dpi(≒6pt≒2mm)
+ * 本文右余白へはみ出した(Googleドキュメントは列幅に罫線・セル余白ぶんが外付けになる)。
+ * 全ての表の列幅を REPORT_DOC_TABLE_W_MM / REPORT_DOC_BODY_W_MM 倍して合計をこの値にする(docMm_ の手前の docColMm_)。
+ * 2mm 縮めた根拠: はみ出し約2mm(実測)。値は実機確認で調整する(定数1か所)。
+ */
+var REPORT_DOC_TABLE_W_MM = 184;
+var REPORT_DOC_TABLE_SCALE = REPORT_DOC_TABLE_W_MM / REPORT_DOC_BODY_W_MM;
 var REPORT_DOC_PHOTO_ROW_MM = 62;                  // 写真ブロックの最低高
 var REPORT_DOC_PHOTO_COLS_MM = [83, 103];          // 写真ブロックの列幅(左=写真 / 右=情報欄)
-var REPORT_DOC_PHOTO_BOX_MM = { w: 80, h: 58 };    // 写真の枠
-var REPORT_DOC_DRAWING_BOX_MM = { w: 186, h: 170 };// 図面の枠
+// 写真の枠・図面の枠は SPEC の名目値(80×58 / 186×170)を表と同じ倍率で縮める(縦横比は維持)。
+// 写真: 左列 83mm×倍率 − 左右余白(3pt×2)≒80.0mm の中に 79.1mm が収まる。図面: 画像セルの余白を0にして 184mm が列幅に収まる。
+var REPORT_DOC_PHOTO_BOX_MM = { w: 80 * REPORT_DOC_TABLE_SCALE, h: 58 * REPORT_DOC_TABLE_SCALE };
+var REPORT_DOC_DRAWING_BOX_MM = { w: 186 * REPORT_DOC_TABLE_SCALE, h: 170 * REPORT_DOC_TABLE_SCALE };
 var REPORT_DOC_PHOTOS_PER_PAGE = 4;
 var REPORT_DOC_PHOTOS_MAX = 60;
 var REPORT_DOC_DRAWINGS_MAX = 6;
@@ -36,6 +47,8 @@ var REPORT_DOC_CHECK_OK = 'OK: doc 方式の変換に成功しました(A4 595.2
 
 /** mm → pt(1mm = 72/25.4 pt) */
 function docMm_(mm) { return mm * 72 / 25.4; }
+/** SPEC 名目の列幅(mm。合計186)を実効幅に縮めた値(mm) */
+function docColMm_(mm) { return mm * REPORT_DOC_TABLE_SCALE; }
 
 /** 経過時間の確認。80秒を超えたら内部の例外を投げる(フォールバックの合図。API のエラーコードではない) */
 function docCheckTime_(t0) {
@@ -73,7 +86,7 @@ function docRuns_(p, runs) {
   });
 }
 
-/** 本文の段落を1つ作る(見出し・注記・通常文)。opts: size / bold / color / before / after / first(最初の空段落を再利用) */
+/** 本文の段落を1つ作る(見出し・注記・通常文)。opts: size / bold / color / before / after / first(最初の空段落を再利用) / keepNext(次の段落と同じページに置く。見出し用) */
 function docBodyPara_(body, runs, opts) {
   opts = opts || {};
   var p = opts.first ? body.getParagraphs()[0] : body.appendParagraph('');
@@ -84,6 +97,7 @@ function docBodyPara_(body, runs, opts) {
   p.setForegroundColor(opts.color || REPORT_DOC_COLOR.text);
   p.setSpacingBefore(opts.before || 0);
   p.setSpacingAfter(opts.after || 0);
+  if (opts.keepNext) p.setKeepWithNext(true);   // 見出しだけがページ末に孤立しないよう次の段落と同じページに置く
   marks.forEach(function (f) { f(); });
   return p;
 }
@@ -91,7 +105,7 @@ function docBodyPara_(body, runs, opts) {
 /* ---------- 表の部品 ---------- */
 
 /**
- * 空の表を作って共通の見た目(罫線・列幅)を付ける。widthsMm は mm の配列(合計186)。
+ * 空の表を作って共通の見た目(罫線・列幅)を付ける。widthsMm は SPEC 名目の mm の配列(合計186)。実際の列幅は docColMm_ で縮めた値(REPORT_DOC_TABLE_W_MM)。
  * 文字サイズ・色は内容を入れた後に docTableBase_ で付ける。
  */
 function docNewTable_(body, nRows, widthsMm, o) {
@@ -105,7 +119,7 @@ function docNewTable_(body, nRows, widthsMm, o) {
   var t = body.appendTable(cells);
   t.setBorderWidth(o.noBorder ? 0 : REPORT_DOC_BORDER_PT);
   if (!o.noBorder) t.setBorderColor(REPORT_DOC_COLOR.border);
-  widthsMm.forEach(function (w, c) { t.setColumnWidth(c, docMm_(w)); });
+  widthsMm.forEach(function (w, c) { t.setColumnWidth(c, docMm_(docColMm_(w))); });
   return t;
 }
 
@@ -233,12 +247,13 @@ function docCount_(rows, side) {
 /** 確認箇所(図面)の1ページ(SPEC §10.5.4) */
 function docDrawingPage_(body, ph, rows, seq, t0) {
   body.appendPageBreak();
-  docBodyPara_(body, '確認箇所(図面)', { size: REPORT_DOC_SIZE.h2, bold: true, before: 9, after: 3 });
+  docBodyPara_(body, '確認箇所(図面)', REPORT_DOC_H2);
   docBodyPara_(body, (ph.side === 'qa' ? '管理者' : '職長') + ': ' + userName_(ph.takenBy) + ' / ' + dtShort_(ph.takenAt));
 
   // 画像(1行1列の罫線なしの表。中央寄せ)
   var t = docNewTable_(body, 1, [REPORT_DOC_BODY_W_MM], { noBorder: true });
   var cell = t.getCell(0, 0);
+  cell.setPaddingTop(0); cell.setPaddingBottom(0); cell.setPaddingLeft(0); cell.setPaddingRight(0);   // 枠いっぱい(184mm)の画像を列幅に収める
   var p = cell.getChild(0).asParagraph();
   p.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
   var blob = docImageBlob_(ph.driveFileId);
@@ -338,7 +353,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   var hash = reportSnapshotHash_(rec, rows, verdicts);
   var stage = STAGE_LABEL_[rec.stage] || rec.stage;
   var ownerCompany = rec.ownerCompany || userCompany_(rec.ownerUserId);
-  var h2 = { size: REPORT_DOC_SIZE.h2, bold: true, before: 9, after: 3 };
+  var h2 = REPORT_DOC_H2;
 
   // 1・2. 件名(最初の空段落を再利用)とタイトル
   docBodyPara_(body, reportSubject_(rec, site), { first: true, size: REPORT_DOC_SIZE.h1, bold: true, after: 3 });

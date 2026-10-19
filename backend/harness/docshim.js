@@ -76,6 +76,7 @@ function createDocShim(state, hooks) {
     setSpacingBefore(v) { this._ck(); this.spacing.before = v; return this; }
     setSpacingAfter(v) { this._ck(); this.spacing.after = v; return this; }
     setLineSpacing(v) { this._ck(); this.lineSpacing = v; return this; }
+    setKeepWithNext(v) { this._ck(); this.keepWithNext = !!v; return this; }
     appendInlineImage(blob) {
       this._ck();
       if (ds.failMode === 'image') throw new Error('Service error: Document (注入された画像挿入の失敗)');
@@ -208,6 +209,7 @@ function createDocShim(state, hooks) {
       return {
         title: this.title, pageWidth: b.pageWidth, pageHeight: b.pageHeight, margins: Object.assign({}, b.margins),
         fontFamily: b.fontFamily, text: this.fullText(), pageBreaks: b.pageBreaks, images,
+        keepWithNextTexts: b.children.filter((c) => c.kind === 'p' && c.keepWithNext).map((c) => c.text),
         tables: tables.map((t) => ({
           rows: t.rows.length, cols: t.rows[0].cells.length, colWidths: t.colWidths.slice(),
           minRowHeights: t.rows.map((r) => r.minHeight), borderWidth: t.borderWidth,

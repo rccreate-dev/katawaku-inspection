@@ -16,6 +16,9 @@ const tanaka = h.as('u_tanaka'), sato = h.as('u_sato');
 test.beforeEach(() => h.resetAll());
 
 const MM = (mm) => mm * 72 / 25.4;
+// 表の実効幅(版1.10.1 実機PDF対応。ReportDoc.gs REPORT_DOC_TABLE_W_MM): SPEC 名目の列幅(合計186)×184/186
+const K = 184 / 186;
+const MMK = (mm) => MM(mm * K);
 const near = (a, b, eps, msg) => assert.ok(Math.abs(a - b) <= eps, `${msg || ''} ${a} ≈ ${b} (±${eps})`);
 const docShim = () => h.control('docShim', {}).data;
 const setEngine = (v) => {
@@ -184,16 +187,16 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.equal(d.images.length, 7);
   const inBlock = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 2);
   assert.equal(inBlock.length, 6);
-  inBlock.forEach((im) => { assert.ok(im.w <= MM(80) + 0.5 && im.h <= MM(58) + 0.5, `写真は枠内: ${im.w}x${im.h}`); });
+  inBlock.forEach((im) => { assert.ok(im.w <= MMK(80) + 0.5 && im.h <= MMK(58) + 0.5, `写真は枠内: ${im.w}x${im.h}`); });
   // 縦横比(サムネ実寸と±1%)。順序は写真の並び(NG項目優先)で変わるので比率の集合で確認
   const want = [[400, 300], [200, 400], [300, 300], [800, 200], [100, 100], [160, 90]].map(([w, hh]) => w / hh).sort();
   const got = inBlock.map((im) => im.w / im.h).sort();
   got.forEach((r, i) => assert.ok(Math.abs(r - want[i]) / want[i] <= 0.01, `縦横比 ${r} vs ${want[i]}`));
   const dr = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 1);
   assert.equal(dr.length, 1);
-  assert.ok(dr[0].w <= MM(186) + 0.5 && dr[0].h <= MM(170) + 0.5);
+  assert.ok(dr[0].w <= MMK(186) + 0.5 && dr[0].h <= MMK(170) + 0.5);
   near(dr[0].w / dr[0].h, 1600 / 900, 0.02, '図面の比率');
-  assert.ok(Math.abs(dr[0].w - MM(186)) < 0.5 || Math.abs(dr[0].h - MM(170)) < 0.5, '枠いっぱいに収める');
+  assert.ok(Math.abs(dr[0].w - MMK(186)) < 0.5 || Math.abs(dr[0].h - MMK(170)) < 0.5, '枠いっぱいに収める');
   // ④ 改ページ: 図面1 + 「写真」見出し前1 + floor((6-1)/4)=1
   assert.equal(d.pageBreaks, 3);
   // ⑤ 表
@@ -201,24 +204,29 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.equal(blocks.length, 6);
   blocks.forEach((t) => {
     assert.equal(t.rows, 1);
-    near(t.colWidths[0], MM(83), 0.5); near(t.colWidths[1], MM(103), 0.5);
+    near(t.colWidths[0], MMK(83), 0.5); near(t.colWidths[1], MMK(103), 0.5);
     near(t.minRowHeights[0], 175.75, 0.5);
     assert.equal(t.borderWidth, 0.75);
   });
   const items = d.tables.find((t) => t.cols === 7);
-  [8, 62, 14, 18, 24, 30, 30].forEach((mm, i) => near(items.colWidths[i], MM(mm), 0.5, '項目表の列' + i));
-  near(items.colWidths.reduce((a, b) => a + b, 0), 527.24, 0.5);
+  [8, 62, 14, 18, 24, 30, 30].forEach((mm, i) => near(items.colWidths[i], MMK(mm), 0.5, '項目表の列' + i));
+  near(items.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5);
+  // 全ての表の列幅合計が実効幅(184mm)で揃う(右端が本文右余白からはみ出さない)
+  d.tables.forEach((t, i) => near(t.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5, '表' + i + 'の列幅合計'));
+  // h2 見出しは次の段落と同じページに置く(孤立防止)
+  ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((h) => assert.ok(d.keepWithNextTexts.includes(h), 'keepWithNext: ' + h));
+  assert.ok(!d.keepWithNextTexts.includes('提出回数: 1'));
   items.minRowHeights.slice(1).forEach((v) => near(v, 17.0, 0.1));
   const info = d.tables[0];
   assert.equal(info.cols, 4);
-  [30, 63, 30, 63].forEach((mm, i) => near(info.colWidths[i], MM(mm), 0.5));
+  [30, 63, 30, 63].forEach((mm, i) => near(info.colWidths[i], MMK(mm), 0.5));
   const sign = d.tables.find((t) => t.cols === 3 && t.rows === 2);
   assert.ok(sign); near(sign.minRowHeights[1], 36, 0.01);
   const legend = d.tables.find((t) => t.cols === 5);
   assert.ok(legend, '図面の凡例表');
-  [24, 82, 24, 28, 28].forEach((mm, i) => near(legend.colWidths[i], MM(mm), 0.5));
+  [24, 82, 24, 28, 28].forEach((mm, i) => near(legend.colWidths[i], MMK(mm), 0.5));
   const sum = d.tables.find((t) => t.cols === 4 && t.rows === 3);
-  assert.ok(sum); [30, 52, 52, 52].forEach((mm, i) => near(sum.colWidths[i], MM(mm), 0.5));
+  assert.ok(sum); [30, 52, 52, 52].forEach((mm, i) => near(sum.colWidths[i], MMK(mm), 0.5));
   // ⑥ 内容
   const subject = pdfName(rep).split('_')[0];
   assert.ok(d.text.includes(subject) && d.text.includes('打設前'));
@@ -300,8 +308,8 @@ test('C-REP-03 図面の枠と凡例: 横長は幅186mm、縦長は高さ170mm�
   const dr = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 1);
   assert.equal(dr.length, 2);
   const tall = dr.find((im) => im.h > im.w), wide = dr.find((im) => im.w > im.h);
-  near(tall.h, MM(170), 0.5); assert.ok(tall.w <= MM(186));
-  near(wide.w, MM(186), 0.5); assert.ok(wide.h <= MM(170));
+  near(tall.h, MMK(170), 0.5); assert.ok(tall.w <= MMK(186));
+  near(wide.w, MMK(186), 0.5); assert.ok(wide.h <= MMK(170));
   assert.ok(d.text.includes('印の書き込みなし'));
   assert.equal(d.tables.filter((t) => t.cols === 5).length, 1, '印のある図面だけ凡例表');
   assert.equal((d.text.match(/確認箇所\(図面\)/g) || []).length, 2);
