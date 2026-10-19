@@ -209,6 +209,9 @@ function createDocShim(state, hooks) {
       return {
         title: this.title, pageWidth: b.pageWidth, pageHeight: b.pageHeight, margins: Object.assign({}, b.margins),
         fontFamily: b.fontFamily, text: this.fullText(), pageBreaks: b.pageBreaks, images,
+        // SPEC §11.4(版1.10.2): 本文直下の段落ごとの観測(表のセル内は含めない)
+        paragraphs: b.children.filter((c) => c.kind === 'p').map((c) => ({ text: c.text, keepWithNext: !!c.keepWithNext })),
+        // 後方互換(旧テスト用)
         keepWithNextTexts: b.children.filter((c) => c.kind === 'p' && c.keepWithNext).map((c) => c.text),
         tables: tables.map((t) => ({
           rows: t.rows.length, cols: t.rows[0].cells.length, colWidths: t.colWidths.slice(),

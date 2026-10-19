@@ -216,6 +216,18 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   // h2 見出しは次の段落と同じページに置く(孤立防止)
   ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((h) => assert.ok(d.keepWithNextTexts.includes(h), 'keepWithNext: ' + h));
   assert.ok(!d.keepWithNextTexts.includes('提出回数: 1'));
+  // SPEC §11.4 lastDoc.paragraphs: 本文直下の段落のみ(表のセル内を含めない)。h2 は true、h1・注記・本文は false
+  assert.ok(Array.isArray(d.paragraphs) && d.paragraphs.every((p) => typeof p.text === 'string' && typeof p.keepWithNext === 'boolean'));
+  const kw = (t) => d.paragraphs.filter((p) => p.text === t);
+  ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((hd) => {
+    assert.equal(kw(hd).length, 1, 'h2は1つ: ' + hd); assert.equal(kw(hd)[0].keepWithNext, true, 'paragraphs keepWithNext: ' + hd);
+  });
+  assert.equal(kw('提出回数: 1')[0].keepWithNext, false);
+  assert.equal(kw('管理者コメントの全文は写真ページおよび電子記録で確認できます。')[0].keepWithNext, false);
+  assert.equal(d.paragraphs[0].keepWithNext, false, 'h1 は false');
+  assert.deepEqual(d.paragraphs.filter((p) => p.keepWithNext).map((p) => p.text).sort(), d.keepWithNextTexts.slice().sort());
+  assert.equal(d.paragraphs.length, model.body.children.filter((c) => c.kind === 'p').length, '表のセル内の段落は含めない');
+  assert.ok(!d.paragraphs.some((p) => p.text.indexOf('撮影') === 0), '写真ブロックのセル内の段落は含めない');
   items.minRowHeights.slice(1).forEach((v) => near(v, 17.0, 0.1));
   const info = d.tables[0];
   assert.equal(info.cols, 4);
