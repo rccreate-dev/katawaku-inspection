@@ -184,17 +184,17 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     assert.equal(d.images.length, nPhoto + nDrawing, '画像の数');
     const expectBreaks = nDrawing + 1 + Math.floor((nPhoto - 1) / 4);
     assert.equal(d.pageBreaks, expectBreaks, '改ページ数');
-    // 写真ブロックの表(2列・235.28/291.96pt・最低行高175.75pt)の数 = 写真の枚数
-    const photoTables = d.tables.filter((tb) => tb.cols === 2 && tb.colWidths.length === 2 && Math.abs(tb.colWidths[0] - 235.28) <= 0.5);
+    // 写真ブロックの表(2列・232.49/288.47pt(=83・103mm×184/186)・最低行高175.75pt)の数 = 写真の枚数
+    const mm = (x) => x * 72 / 25.4;
+    const photoTables = d.tables.filter((tb) => tb.cols === 2 && tb.colWidths.length === 2 && Math.abs(tb.colWidths[0] - mm(83 * 184 / 186)) <= 0.5);
     assert.equal(photoTables.length, nPhoto, '写真ブロックの表の数');
     for (const tb of photoTables) {
-      near(tb.colWidths[1], 291.96, 0.5, 'colWidths[1]');
+      near(tb.colWidths[1], mm(103 * 184 / 186), 0.5, 'colWidths[1]');
       assert.ok(tb.minRowHeights.some((x) => Math.abs(x - 175.75) <= 0.5), '最低行高175.75pt');
     }
     const itemTable = d.tables.find((tb) => tb.cols === 7);
     assert.ok(itemTable, '項目表は7列');
-    const mm = (x) => x * 72 / 25.4;
-    [8, 62, 14, 18, 24, 30, 30].forEach((w, i) => near(itemTable.colWidths[i], mm(w), 0.5, 'itemTable.colWidths[' + i + ']'));
+    [8, 62, 14, 18, 24, 30, 30].forEach((w, i) => near(itemTable.colWidths[i], mm(w * 184 / 186), 0.5, 'itemTable.colWidths[' + i + ']'));
     assert.ok(d.tables.some((tb) => tb.cols === 4), '基本情報表は4列');
     assert.ok(d.tables.some((tb) => tb.cols === 3), 'サイン表は3列');
     assert.ok(d.tables.some((tb) => tb.cols === 5), '図面の凡例表は5列');
