@@ -188,22 +188,31 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .note{color:var(--muted);font-size:13px;margin-top:16px;overflow-wrap:anywhere}
 
 /* モーダル */
-.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.scrim{position:fixed;left:0;right:0;top:0;height:100vh;height:100dvh;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20}
 .sheet{background:var(--bg);width:100%;max-width:560px;max-height:90%;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
 .sheet h2{margin-bottom:8px}
 .sheet .btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .sheet .btns .btn{flex:1;min-width:120px}
 .code{font-size:36px;letter-spacing:.2em;font-weight:700;text-align:center;font-variant-numeric:tabular-nums;padding:8px 0}
-.cambox{position:fixed;inset:0;z-index:30;background:#000;color:#fff;display:flex;flex-direction:column}
-.cambox video,.cambox img.prev{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
-.cambox .bar2{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));background:rgba(0,0,0,.85)}
-.cambox .stamp{padding:8px 16px;font-size:13px;background:rgba(0,0,0,.85);overflow-wrap:anywhere}
+.cambox{position:fixed;left:0;right:0;top:0;height:100vh;height:100dvh;z-index:30;background:#000;color:#fff;display:flex;flex-direction:column;overflow:hidden}
+/* プレビューは余った高さだけを使う(縦長画像でも下部の操作を押し出さない)。操作列は常に画面内 */
+.cambox video,.cambox img.prev{flex:1 1 0;min-height:80px;width:100%;object-fit:contain;background:#000}
+.cambox .bar2{flex:none;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));background:rgba(0,0,0,.85)}
+.cambox .bar2 .cambtn{flex:1 1 92px}
+.cambox .bar2 .cambtn.primary{order:-1;flex:1 1 100%;min-height:52px}
+.cambox .bar2 .row{flex:1 1 auto;justify-content:center;font-size:14px}
+.cambox .stamp{flex:none;padding:6px 16px;font-size:13px;background:rgba(0,0,0,.85);overflow-wrap:anywhere;max-height:22%;overflow:auto}
+@media (orientation:landscape) and (max-height:520px){
+  .cambox .camhint{display:none}
+  .cambox .bar2{padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px))}
+  .cambox .bar2 .cambtn.primary{flex:1 1 92px;min-height:48px;order:0}
+}
 .shutter{width:72px;height:72px;border-radius:50%;border:5px solid #fff;background:#e33;flex:none}
 .shutter[disabled]{opacity:.4}
 .cambtn{min-height:48px;min-width:96px;border-radius:10px;border:1px solid #fff;background:none;color:#fff;font-weight:700;padding:0 12px}
 .cambtn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.photoview{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);color:#fff;display:flex;flex-direction:column;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
-.photoview img{flex:1;min-height:0;width:100%;object-fit:contain}
+.photoview{position:fixed;left:0;right:0;top:0;height:100vh;height:100dvh;z-index:30;background:rgba(0,0,0,.92);color:#fff;display:flex;flex-direction:column;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.photoview img{flex:1 1 0;min-height:0;width:100%;object-fit:contain}
 .photoview p{font-size:13px;overflow-wrap:anywhere;margin:8px 0}
 
 .toasts{position:fixed;left:0;right:0;bottom:calc(76px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;padding-inline:16px}
@@ -247,12 +256,16 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .drawings .dside h4{margin:0 0 4px}
 
 /* M10 図面の書き込みエディタ(全画面)。印は番号の文字だけ。枠・塗りは付けない */
-.dedit{position:fixed;inset:0;z-index:30;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));gap:6px}
+.dedit{position:fixed;left:0;right:0;top:0;height:100vh;height:100dvh;overflow:hidden;z-index:30;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));gap:6px}
 .dedit .dtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .dedit .dsub,.dedit .dhint{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .dedit .dhint{color:var(--ink);font-weight:700}
 .dedit .dmsg{font-size:14px;color:var(--bad);font-weight:700}
-.dnums{display:flex;flex-wrap:wrap;gap:6px;max-height:28vh;overflow:auto}
+.dnums{display:flex;flex-wrap:wrap;gap:6px}
+/* 操作パネル: 番号・実測値が増えても高さを画面の半分までに抑え、超えた分はパネル内でスクロール。図面は常に40%以上(最低240px)確保 */
+.dedit .dpanel{flex:0 1 auto;min-height:0;max-height:50%;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px;-webkit-overflow-scrolling:touch}
+.dedit .dpanel>*{flex:none}
+.dedit .dtop,.dedit .dtools,.dedit .dhint,.dedit .dmsg{flex:none}
 .dnum,.dtool{min-width:44px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:18px;font-weight:700;padding:0 8px;cursor:pointer}
 .dnum.has{background:var(--accent-soft)}
 .dnum[aria-pressed="true"],.dtool[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -261,7 +274,12 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .dtool.wide{padding:0 12px}
 .dtool.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .dtool[disabled]{opacity:.45;cursor:default}
-.dview{flex:1;min-height:0;overflow:auto;background:#222;border-radius:8px}
+.dview{flex:1 0 max(240px,40%);min-height:0;overflow:auto;background:#222;border-radius:8px;overscroll-behavior:contain}
+/* 横向きで高さが低いとき: 左に操作、右に図面 */
+@media (orientation:landscape) and (max-height:520px){
+  .dedit{display:grid;grid-template-columns:minmax(220px,40%) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto auto;grid-template-areas:"top view" "panel view" "tools view" "hint view" "msg view";column-gap:10px}
+  .dedit .dtop{grid-area:top}.dedit .dtools{grid-area:tools}.dedit .dpanel{grid-area:panel;max-height:none}.dedit .dhint{grid-area:hint}.dedit .dmsg{grid-area:msg}.dedit .dview{grid-area:view;min-height:0}
+}
 .dstage{position:relative;margin:0}
 .dcanvas{display:block;width:100%;height:auto}
 .dmarks{position:absolute;inset:0;pointer-events:none}

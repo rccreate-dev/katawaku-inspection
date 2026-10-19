@@ -141,8 +141,12 @@
       var save = h('button', { type: 'button', class: 'dtool wide primary', 'data-act': 'save' }, t('drawing.save'));
       var tools = h('div', { class: 'dtools' }, zoomBtns, rotateBtn, undoBtn, delBtn);
       var top = h('div', { class: 'dtop' }, cancel, h('b', null, t('drawing.title')), save);
-      var box = h('div', { class: 'dedit', role: 'dialog', 'aria-modal': 'true' }, top, h('div', { class: 'dsub' }, t('drawing.hint')), nums, itemBox, pointsBox, tools, hint, msg, view);
+      // 操作パネル(説明・番号・項目・実測値・倍率/回転/戻す/削除)は高さ上限つきで内部スクロール。図面(view)は常に40%以上を確保する
+      var panel = h('div', { class: 'dpanel' }, h('div', { class: 'dsub' }, t('drawing.hint')), nums, itemBox, pointsBox);
+      // 倍率・回転・ひとつ戻す・印を削除は常に見える位置に残す(パネルの外)
+      var box = h('div', { class: 'dedit', role: 'dialog', 'aria-modal': 'true' }, top, panel, tools, hint, msg, view);
       layer.appendChild(box);
+      if (KW.modal && KW.modal.fit) KW.modal.fit(box); // 実際に見えている高さ(visualViewport)に合わせる
 
       function findMark(itemId, k) { return markers.filter(function (m) { return m.itemId === itemId && m.k === k; })[0] || null; }
       function hasPoints(it) { return it.measure !== 'none' && (it.values || []).length > 0; }

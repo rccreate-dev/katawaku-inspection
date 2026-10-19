@@ -7,6 +7,22 @@
 
   var stack = [];
 
+  /* 全画面要素の高さを「いま実際に見えている高さ」に合わせる。
+   * 100vh はブラウザのバー・ソフトキーボードを除かないため、下部の操作が画面外に出る。CSS の dvh を基本とし、
+   * visualViewport が取れる端末では JS 計測値で上書きする。要素が外れたら自動で購読を解除する */
+  M.fit = function (el) {
+    var vv = root.visualViewport;
+    if (!vv) return;
+    function apply() {
+      if (!el.isConnected) { vv.removeEventListener('resize', apply); root.removeEventListener('orientationchange', apply); return; }
+      el.style.height = Math.round(vv.height) + 'px';
+      el.style.top = Math.round(vv.offsetTop) + 'px';
+    }
+    vv.addEventListener('resize', apply);
+    root.addEventListener('orientationchange', apply);
+    apply();
+  };
+
   /* 基本シート。build(close) が子要素配列を返す。戻り値 { close, el } */
   function sheet(build, o) {
     o = o || {};
@@ -31,6 +47,7 @@
       scrim.addEventListener('click', function (ev) { if (ev.target === scrim) api.close(); });
     }
     layer.appendChild(scrim);
+    M.fit(scrim);
     stack.push(api);
     var first = box.querySelector('input,textarea,select,button');
     if (first && !o.noFocus) { try { first.focus(); } catch (e) { /* 無視 */ } }
@@ -192,6 +209,7 @@
       var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, use);
       var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, bar);
       layer.appendChild(box);
+      M.fit(box);
 
       function finish(v) {
         if (done) return; done = true;
@@ -283,6 +301,7 @@
     var close = h('button', { type: 'button', class: 'cambtn' }, t('act.close'));
     var box = h('div', { class: 'photoview', role: 'dialog', 'aria-modal': 'true' }, img, stampP, note, close);
     layer.appendChild(box);
+    M.fit(box);
     close.addEventListener('click', function () { if (box.parentNode) box.parentNode.removeChild(box); });
     close.focus();
     if (p.local && p.blob) { img.src = C.blobUrl(p.blob); return; }
