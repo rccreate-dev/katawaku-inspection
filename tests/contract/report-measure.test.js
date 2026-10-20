@@ -185,7 +185,7 @@ describe('C-REP-01②(改訂)・C-REP-07: HTML方式の実測(harness: /__mock/l
     // NG 行は i6 だけ
     const ngRows = tb.rows.slice(1).filter((r) => m.hasNgBg(r)).map((r) => Number(r.cells[0].text));
     assert.deepEqual(ngRows, [no('i6')]);
-    // 結果サマリ(職長: 合/NG/該当なし、 管理者)
+    // 結果サマリ(職長: 合/NG/該当なし、管理者)
     const sum = m.parseTables(html).find((t) => JSON.stringify(m.headerTexts(t)) === JSON.stringify(['', '合', 'NG', '該当なし']));
     assert.ok(sum, '結果サマリの表');
     const nSelf = rec.items.filter((i) => i.def.audience !== 'qa').length;
