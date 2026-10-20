@@ -172,23 +172,16 @@ function buildPrePour(o) {
   assert.equal(sato('claimReview', { recordId: id, round: 1 }).ok, true);
   const qaSpec = {};
   if (o.long) qaSpec.i2 = { note: LONG };
+  // 管理者の実測(許容超の ok を含む)。版1.11.1: 許容超の ok は qaNote が非空なら通る(§5.3.1)
+  if (!o.onlyI8) {
+    qaSpec.i6 = { values: [2, 3], note: '図面で確認済み' };
+    qaSpec.i5 = { values: [7], note: '図面で確認済み' };
+  }
   fillAll(h, sato, id, 'qa', { patch: (i) => qaSpec[i.itemId] || null });
   defs.filter((d) => d.side === 'qa').forEach((d) => assert.equal(sato('uploadPhotoChunk', drawingParams(id, d)).ok, true));
   const v = sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' });
   assert.equal(v.ok, true, JSON.stringify(v));
   assert.equal(h.ctx.loadRecord_(id).status, 'qa_ok');
-  // 管理者の実測(許容超の ok を含む)。SPEC §12.3 C-REP-07 のデータは「管理者が許容超の値に ok を付けた」状態だが、
-  // 現在の submitVerdict は管理者側にも MEASURE_OVER_TOL_OK を適用して拒否する(SPEC §5.3.1・§10.2d-9 の記述と食い違う。報告済み)。
-  // PDF の表示だけを検証したいので、判定のあとで RecordItems の qaValues をシートに直接書く。
-  if (!o.onlyI8) {
-    const { Repo } = h.ctx;
-    Repo.resetCache();
-    [['i6', [2, 3]], ['i5', [7]]].forEach(([itemId, vals]) => {
-      const row = Repo.where('RecordItems', 'recordId', id).find((r) => r.itemId === itemId);
-      Repo.update('RecordItems', row, { qaValues: vals });
-    });
-    Repo.resetCache();
-  }
   return { id, N };
 }
 

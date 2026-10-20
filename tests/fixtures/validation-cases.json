@@ -1,5 +1,5 @@
 {
- "_comment": "契約テスト(C-STATE-05)とユニットテスト(U-VALID-01)の共用データ。各項目の既定: result=ok, photos=重点項目なら1/他は0, note=\"\", values=[]。items で上書き(photos=職長写真の枚数)。stage は記録の段階(省略=pre_pour。版1.9)。対象項目は段階ごとの有効項目(pre_pour=i1〜i16+i58〜i69、post_demold=i50〜i57。SPEC §2.6.1a)。pourPlannedAt=false は打設予定日時なし(post_demold では true でも保存されず、false でも POUR_PLAN_REQUIRED は出ない)。itemDefs はマスタ差し替え(mock-only)。expect は rule+itemId の集合と完全一致(空=提出成功)。",
+ "_comment": "契約テスト(C-STATE-05)とユニットテスト(U-VALID-01)の共用データ。各項目の既定: result=ok, photos=重点項目なら1/他は0, note=\"\", values=[]。items で上書き(photos=職長写真の枚数)。stage は記録の段階(省略=pre_pour。版1.9)。対象項目は段階ごとの有効項目(pre_pour=i1〜i16+i58〜i69、post_demold=i50〜i57。SPEC §2.6.1a)。pourPlannedAt=false は打設予定日時なし(post_demold では true でも保存されず、false でも POUR_PLAN_REQUIRED は出ない)。itemDefs はマスタ差し替え(mock-only)。expect は rule+itemId の集合と完全一致(空=提出成功)。 版1.11.1: qaCases は管理者側(submitVerdict / validateVerdict)のケース。items は qa 側の入力(result 既定=ok、values 既定=[]、note 既定=\"\"、severity 既定=null。職長側は全項目 ok の提出済み)。verdict 既定=ok、comment 既定=\"\"(総合コメント)。expect は rule+itemId の集合と完全一致(空=判定成功)。",
  "keyItems": [
   "i2",
   "i3",
@@ -544,6 +544,462 @@
      "rule": "POUR_PLAN_REQUIRED"
     }
    ]
+  }
+ ],
+ "qaCases": [
+  {
+   "id": "Q01",
+   "desc": "[版1.11.1 QA] i4(許容5)が値[6]でok・qaNote空 → QA_OVER_TOL_COMMENT_REQUIRED のみ(MEASURE_OVER_TOL_OK は出ない)",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q02",
+   "desc": "[QA] qaNote が半角空白のみ",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ],
+     "note": "   "
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q03",
+   "desc": "[QA] qaNote が全角空白のみ(\\u3000)",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ],
+     "note": "　　"
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q04",
+   "desc": "[QA] qaNote が改行のみ",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ],
+     "note": "\n"
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q05",
+   "desc": "[QA] qaNote に理由があれば通る(職長側なら MEASURE_OVER_TOL_OK になる値)",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ],
+     "note": "図面で確認済み"
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q06",
+   "desc": "[QA] 境界 i4 [5,-5] は許容内(対象外)",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      5,
+      -5
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q07",
+   "desc": "[QA] 許容なし(i8)で値[99]・ok → 対象外",
+   "items": {
+    "i8": {
+     "result": "ok",
+     "values": [
+      99
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q08",
+   "desc": "[QA] 小数は丸めない: i4 [-5.5] は対象",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      -5.5
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q09",
+   "desc": "[QA] 小数 [5.0] は許容内(対象外)",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      5.0
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q10",
+   "desc": "[QA] qaResult=na で値[6] → 対象外",
+   "items": {
+    "i4": {
+     "result": "na",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q11",
+   "desc": "[QA] qaResult=ng で値[6]・qaNote空・重さなし → NOTE_REQUIRED と SEVERITY_REQUIRED だけ(新ruleは重ねて出さない)。判定は minor+総合コメント",
+   "verdict": "minor",
+   "comment": "指摘あり",
+   "items": {
+    "i4": {
+     "result": "ng",
+     "severity": null,
+     "values": [
+      6
+     ],
+     "note": ""
+    }
+   },
+   "expect": [
+    {
+     "rule": "NOTE_REQUIRED",
+     "itemId": "i4"
+    },
+    {
+     "rule": "SEVERITY_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q12",
+   "desc": "[QA] 総合判定に依らない: 別項目 i9 がng(備考・minor)で minor 判定でも、i4 がok+[6]+qaNote空なら対象",
+   "verdict": "minor",
+   "comment": "指摘あり",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    },
+    "i9": {
+     "result": "ng",
+     "severity": "minor",
+     "note": "x"
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q13",
+   "desc": "[QA] 同じ状況で i4 に qaNote があれば通る(minor)",
+   "verdict": "minor",
+   "comment": "指摘あり",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ],
+     "note": "図面で確認済み"
+    },
+    "i9": {
+     "result": "ng",
+     "severity": "minor",
+     "note": "x"
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q14",
+   "desc": "[QA] 許容超のokが2項目(i4 [6]・i5 [7])でどちらもqaNote空 → 両方列挙",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    },
+    "i5": {
+     "result": "ok",
+     "values": [
+      7
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    },
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i5"
+    }
+   ]
+  },
+  {
+   "id": "Q15",
+   "desc": "[QA] 他の違反と同時に列挙: i1 未回答 + i4 [6] qaNote空",
+   "items": {
+    "i1": {
+     "result": null
+    },
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "ANSWER_MISSING",
+     "itemId": "i1"
+    },
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q16",
+   "desc": "[QA] 総合コメントでは代用できない(判定ok+comment あり・qaNote空)",
+   "comment": "全体として問題なし",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q17",
+   "desc": "[QA 版1.11.1] 判定okでNGが別項目にあっても、許容超のok(qaNote空)は検査される: VERDICT_OK_WITH_NG と併記",
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    },
+    "i9": {
+     "result": "ng",
+     "severity": "minor",
+     "note": "x"
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    },
+    {
+     "rule": "VERDICT_OK_WITH_NG"
+    }
+   ]
+  },
+  {
+   "id": "Q18",
+   "desc": "[QA] MEASURE_REQUIRED は従来どおり: i4 を measure=required(min2) にして qaValues [6] 1点・ok・qaNote空 → MEASURE_REQUIRED と QA_OVER",
+   "itemDefs": {
+    "i4": {
+     "measure": "required",
+     "minMeasures": 2
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "MEASURE_REQUIRED",
+     "itemId": "i4"
+    },
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i4"
+    }
+   ]
+  },
+  {
+   "id": "Q19",
+   "desc": "[QA mock-only] tol=0 の項目は対象外",
+   "itemDefs": {
+    "i4": {
+     "tol": 0
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q20",
+   "desc": "[QA mock-only] tol が負の項目は対象外",
+   "itemDefs": {
+    "i4": {
+     "tol": -1
+    }
+   },
+   "items": {
+    "i4": {
+     "result": "ok",
+     "values": [
+      6
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q21",
+   "desc": "[QA mock-only] audience=foreman のみの項目は管理者の検査対象外(i4 を差し替え。QA欄は無い)",
+   "itemDefs": {
+    "i4": {
+     "audience": "foreman"
+    }
+   },
+   "items": {},
+   "expect": []
+  },
+  {
+   "id": "Q22",
+   "desc": "[QA 出来形] i56(許容10)が値[11]でok・qaNote空 → 対象",
+   "stage": "post_demold",
+   "items": {
+    "i56": {
+     "result": "ok",
+     "values": [
+      11
+     ]
+    }
+   },
+   "expect": [
+    {
+     "rule": "QA_OVER_TOL_COMMENT_REQUIRED",
+     "itemId": "i56"
+    }
+   ]
+  },
+  {
+   "id": "Q23",
+   "desc": "[QA 出来形] i56 [10,-10] は許容内(対象外)",
+   "stage": "post_demold",
+   "items": {
+    "i56": {
+     "result": "ok",
+     "values": [
+      10,
+      -10
+     ]
+    }
+   },
+   "expect": []
+  },
+  {
+   "id": "Q24",
+   "desc": "[QA 出来形] i57(許容3)が値[4]でok・qaNote あり → 通る",
+   "stage": "post_demold",
+   "items": {
+    "i57": {
+     "result": "ok",
+     "values": [
+      4
+     ],
+     "note": "現場で再測定済み"
+    }
+   },
+   "expect": []
   }
  ]
 }

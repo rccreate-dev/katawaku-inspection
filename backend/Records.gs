@@ -229,9 +229,17 @@ function checkItems_(side, rows, photos) {
     if (snap.measure === 'required' && result !== 'na' && values.length < (snap.minMeasures || 0)) {
       v.push({ rule: 'MEASURE_REQUIRED', itemId: r.itemId });
     }
-    if (snap.tol !== null && snap.tol !== undefined && values.length && result === 'ok') {
-      var mx = Math.max.apply(null, values.map(Math.abs));
-      if (mx > snap.tol) v.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: r.itemId });
+    if (side === 'self') {
+      // 職長提出のみ: 許容超の ok は出せない(版1.11.1でも変更なし)
+      if (snap.tol !== null && snap.tol !== undefined && values.length && result === 'ok') {
+        var mx = Math.max.apply(null, values.map(Math.abs));
+        if (mx > snap.tol) v.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: r.itemId });
+      }
+    } else if (result === 'ok' && Util.blank(r.qaNote)) {
+      // 管理者側(版1.11.1): 許容超の ok は可。ただし qaNote が空なら拒否。
+      // 許容超の定義は §10.2d-1 と同じ(Report.gs の measureView_。tol>0・有効値・厳密に超過)。職長の値・コメントは見ない
+      var qv = measureView_(r, 'qa');
+      if (qv && qv.overCount > 0) v.push({ rule: 'QA_OVER_TOL_COMMENT_REQUIRED', itemId: r.itemId });
     }
   });
   return v;

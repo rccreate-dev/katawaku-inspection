@@ -186,7 +186,12 @@ module.exports = function install(C) {
       }
       if (res === 'ok' && sn.key && who !== 'qa' && photos < 1) v.push({ rule: 'PHOTO_REQUIRED', itemId: id });
       if (sn.measure === 'required' && res !== 'na' && values.length < sn.minMeasures) v.push({ rule: 'MEASURE_REQUIRED', itemId: id });
-      if (sn.tol != null && values.length && res === 'ok' && Math.max(...values.map(Math.abs)) > sn.tol) v.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: id });
+      // 職長側(self)は従来どおり。管理者側(qa)は版1.11.1 で MEASURE_OVER_TOL_OK を出さず、許容超の ok は qaNote(trim後)を必須にする(SPEC §5.3.1)
+      if (who === 'self') {
+        if (sn.tol != null && values.length && res === 'ok' && Math.max(...values.map(Math.abs)) > sn.tol) v.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: id });
+      } else if (res === 'ok' && Number.isFinite(sn.tol) && sn.tol > 0 && values.some((x) => Number.isFinite(x) && Math.abs(x) > sn.tol) && blank(note)) {
+        v.push({ rule: 'QA_OVER_TOL_COMMENT_REQUIRED', itemId: id });
+      }
     }
     return v;
   }
