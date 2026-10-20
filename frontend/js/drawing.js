@@ -43,15 +43,45 @@
     return c;
   }
 
-  /* 番号の文字だけを描く(枠・塗りは描かない。可読性のため細い白縁取りのみ)。markers: [{label,x,y}] */
+  /* 中心座標(px)を、文字(幅tw・高さth・縁取りpad)が画像(w×h)内に収まるようにクランプする。
+   * 収まる分は動かさない(最小量)。文字が画像より大きいときは中央。純関数 */
+  function clampCenter(cx, cy, w, h, tw, th, pad) {
+    var hx = tw / 2 + pad, hy = th / 2 + pad;
+    function one(v, size, half) {
+      if (half * 2 >= size) return size / 2;
+      return Math.min(size - half, Math.max(half, v));
+    }
+    return { x: one(cx, w, hx), y: one(cy, h, hy) };
+  }
+
+  var measureCtx = null;
+  /* 印の文字の幅(px)。fontPx の太字 sans-serif で実測する */
+  function textWidth(label, fontPx) {
+    measureCtx = measureCtx || KW.photo.canvasOf(1, 1).getContext('2d');
+    measureCtx.save(); measureCtx.font = 'bold ' + fontPx + 'px sans-serif';
+    var tw = measureCtx.measureText(label).width;
+    measureCtx.restore();
+    return tw;
+  }
+
+  /* 印1つの描画中心(正規化 0〜1)。画面オーバーレイ用(焼き込みと同じクランプ式で位置を揃える) */
+  function markCenter(m, w, h, fontPx) {
+    var pad = Math.max(2, fontPx * 0.1) / 2; // 縁取りの外側半分
+    var c = clampCenter(m.x * w, m.y * h, w, h, textWidth(m.label, fontPx), fontPx, pad);
+    return { x: c.x / w, y: c.y / h };
+  }
+
+  /* 番号の文字だけを描く(枠・塗りは描かない。可読性のため細い白縁取りのみ)。markers: [{label,x,y}]
+   * 図面の端に置いた印が画像の外で見切れないよう、中心を画像内にクランプして描く(保存する x,y は変えない) */
   function drawMarks(g, w, h, markers, side, fontPx) {
     g.save();
     g.font = 'bold ' + fontPx + 'px sans-serif';
     g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
     g.lineWidth = Math.max(2, fontPx * 0.1);
     markers.forEach(function (m) {
-      g.strokeStyle = '#fff'; g.strokeText(m.label, m.x * w, m.y * h);
-      g.fillStyle = COLORS[side] || COLORS.self; g.fillText(m.label, m.x * w, m.y * h);
+      var c = clampCenter(m.x * w, m.y * h, w, h, g.measureText(m.label).width, fontPx, g.lineWidth / 2);
+      g.strokeStyle = '#fff'; g.strokeText(m.label, c.x, c.y);
+      g.fillStyle = COLORS[side] || COLORS.self; g.fillText(m.label, c.x, c.y);
     });
     g.restore();
   }
@@ -165,7 +195,12 @@
         var dw = Math.round(vw * zoom);
         stage.style.width = dw + 'px';
         var fpx = markFontPx(src.width, src.height) * (dw / src.width);
-        marksEls.forEach(function (el) { el.style.fontSize = fpx + 'px'; });
+        marksEls.forEach(function (el) {
+          el.style.fontSize = fpx + 'px';
+          // 焼き込みと同じクランプ位置に表示する(原寸基準で計算した正規化中心)
+          var c = markCenter(el._m, src.width, src.height, markFontPx(src.width, src.height));
+          el.style.left = (c.x * 100) + '%'; el.style.top = (c.y * 100) + '%';
+        });
       }
       function renderMarks() {
         KW.clear(markLayer); marksEls = [];
@@ -174,7 +209,7 @@
             type: 'button', class: 'dmark dmark-' + o.side + (m === selected ? ' sel' : ''), 'data-testid': 'drawing-mark',
             'data-label': m.label, 'data-item': m.itemId, 'aria-label': t('drawing.mark', { label: m.label })
           }, m.label);
-          el.style.left = (m.x * 100) + '%'; el.style.top = (m.y * 100) + '%';
+          el._m = m;
           el.addEventListener('click', function (ev) {
             ev.stopPropagation();
             selected = (selected === m) ? null : m; refresh();
@@ -296,6 +331,6 @@
     });
   }
 
-  var api = { loadFile: loadFile, rotate90: rotate90, drawMarks: drawMarks, bake: bake, build: build, openEditor: openEditor, edit: edit, markFontPx: markFontPx, COLORS: COLORS };
+  var api = { loadFile: loadFile, rotate90: rotate90, drawMarks: drawMarks, bake: bake, build: build, openEditor: openEditor, edit: edit, markFontPx: markFontPx, clampCenter: clampCenter, markCenter: markCenter, COLORS: COLORS };
   KW.drawing = api;
 })(typeof window !== 'undefined' ? window : globalThis);
