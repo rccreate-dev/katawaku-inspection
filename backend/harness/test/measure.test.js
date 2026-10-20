@@ -264,7 +264,7 @@ test('C-REP-07 ①②③ 項目表の実測セル(文字列・マークアップ
   assert.equal((i6.match(/class="over"/g) || []).length, 5, 'i6: 許容超の値3つ+要約2つだけ');
   assert.equal((i5.match(/class="over"/g) || []).length, 2);
   assert.ok(!/class="over"/.test(i4), '許容内(境界を含む)の値は over の外');
-  assert.ok(i6.includes('+1、<span') && i6.includes('</span>、+2、'), '区切りの「、」は over の外');
+  assert.ok(i6.includes('+1、 <span') && i6.includes('</span>、 +2、 '), '区切りの「、 」(読点+半角スペース)は over の外');
   assert.ok(i5.includes('職長: </span>+1、 +2'), '許容内の +1・+2 は over の外');
   assert.ok(i6.includes('color:#555555') && i6.includes('color:#444444'), 'ラベル #555555・要約 #444444 のインライン style');
   // ③ 旧形式の廃止
