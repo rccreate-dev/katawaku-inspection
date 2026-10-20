@@ -194,10 +194,16 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     }
     const itemTable = d.tables.find((tb) => tb.cols === 7);
     assert.ok(itemTable, '項目表は7列');
-    [8, 62, 14, 18, 24, 30, 30].forEach((w, i) => near(itemTable.colWidths[i], mm(w * 184 / 186), 0.5, 'itemTable.colWidths[' + i + ']'));
+    // 版1.11.0(§10.5.4): 項目表の列幅 8/40/14/18/46/30/30mm(旧 8/62/14/18/24/30/30)。名目値 × 184/186
+    [8, 40, 14, 18, 46, 30, 30].forEach((w, i) => near(itemTable.colWidths[i], mm(w * 184 / 186), 0.5, 'itemTable.colWidths[' + i + ']'));
     assert.ok(d.tables.some((tb) => tb.cols === 4), '基本情報表は4列');
     assert.ok(d.tables.some((tb) => tb.cols === 3), 'サイン表は3列');
-    assert.ok(d.tables.some((tb) => tb.cols === 5), '図面の凡例表は5列');
+    assert.ok(!d.tables.some((tb) => tb.cols === 5), '図面の凡例表は5列ではなくなった(版1.11.0。旧 24/82/24/28/28)');
+    const legend = d.tables.find((tb) => tb.cols === 6);
+    assert.ok(legend, '図面の凡例表は6列(版1.11.0)');
+    [24, 76, 28, 24, 17, 17].forEach((w, i) => near(legend.colWidths[i], mm(w * 184 / 186), 0.5, 'legend.colWidths[' + i + ']'));
+    // 全ての表(基本情報・サイン・結果サマリ・項目・凡例・図面画像・写真ブロック)で列幅の合計 = 184mm = 521.57pt(±0.5)
+    d.tables.forEach((tb, ti) => near(tb.colWidths.reduce((a, b) => a + b, 0), 521.57, 0.5, 'tables[' + ti + '] の列幅の合計'));
     // 内容
     assert.ok(d.text.includes('管理者コメント全文テスト'), '管理者コメント全文');
     assert.ok(d.footerText.includes(recordId), 'フッタに記録ID');
