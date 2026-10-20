@@ -31,11 +31,158 @@ function reportView_(r) {
   };
 }
 
-function measureText_(row, side) {
-  var vals = side === 'self' ? row.selfValues : row.qaValues;
-  if (!vals || !vals.length) return '';
-  var snap = row.snapshot;
-  return vals.join(', ') + (snap.tol !== null && snap.tol !== undefined ? ' / 許容±' + snap.tol : '');
+/* ---------- 実測の表示規則(SPEC §10.2d。版1.11.0)。HTML方式・doc方式が同じ関数を呼ぶ ---------- */
+
+/** 実測の値の書式(§10.2d-2): 正は先頭に +、負は -、0 は 0 */
+function measureFmt_(v) { return v === 0 ? '0' : (v > 0 ? '+' : '') + String(v); }
+
+/** 許容。有限で 0 より大きい数のときだけ「許容あり」(その数を返す)。それ以外は null(§10.2d-1) */
+function measureTol_(tol) {
+  if (typeof tol !== 'number' && typeof tol !== 'string') return null;
+  var t = Number(tol);
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+/**
+ * 実測の単一の値。有効値(null・空文字・数値にできない・有限でない を除く。数字の文字列は数値にする)なら
+ * { v:Number, text:String(▲なし), over:Boolean } を返し、無効なら null(§10.2d-4)。
+ * over は |値| > 許容(厳密に大きい。境界は許容内)。許容なしなら常に false。純関数(Math/Number/String 以外に依存しない)
+ */
+function measureCell_(raw, tol) {
+  if (typeof raw !== 'number' && typeof raw !== 'string') return null;
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  var v = Number(raw);
+  if (!Number.isFinite(v)) return null;
+  if (v === 0) v = 0;   // -0 を 0 にする
+  var t = measureTol_(tol);
+  return { v: v, text: measureFmt_(v), over: t !== null && Math.abs(v) > t };
+}
+
+/**
+ * 1項目・1側(side='self'|'qa')の実測の見せ方(§10.2d-4)。有効値が0個なら null。
+ * 職長と管理者は別の系列で、混ぜない。row を変更しない純関数(Math/Number/String 以外に依存しない)
+ */
+function measureView_(row, side) {
+  var isSelf = side === 'self';
+  var raw = row ? (isSelf ? row.selfValues : row.qaValues) : null;
+  if (!raw || typeof raw === 'string' || typeof raw.length !== 'number') return null;
+  var snap = (row && row.snapshot) || {};
+  var tol = measureTol_(snap.tol);
+  var unit = (snap.unit === null || snap.unit === undefined || snap.unit === '') ? 'mm' : String(snap.unit);
+  var values = [], overCount = 0, min = 0, max = 0;
+  for (var i = 0; i < raw.length; i++) {
+    var c = measureCell_(raw[i], tol);
+    if (!c) continue;
+    values.push(c);
+    if (c.over) overCount++;
+    if (values.length === 1 || c.v < min) min = c.v;
+    if (values.length === 1 || c.v > max) max = c.v;
+  }
+  if (!values.length) return null;
+  var n = values.length, minText = measureFmt_(min), maxText = measureFmt_(max);
+  var parts = [];
+  if (n >= 2) parts.push('最小' + minText + '/最大' + maxText);
+  if (tol !== null) parts.push('許容±' + String(tol) + unit);
+  var summary = 'n=' + n + (parts.length ? ' ' + parts.join('/') : '');
+  if (overCount > 0) summary += ' ▲許容超' + overCount + '件';
+  return {
+    side: isSelf ? 'self' : 'qa', label: isSelf ? '職長' : '管理者', n: n, values: values, min: min, max: max, minText: minText, maxText: maxText,
+    tol: tol, unit: unit, overCount: overCount,
+    valuesText: values.map(function (x) { return (x.over ? '▲' : '') + x.text; }).join('、'),
+    summaryText: summary
+  };
+}
+
+/** 要約を「通常部分」と「末尾の ▲許容超n件(装飾する部分)」に分ける。▲許容超が無ければ over は '' */
+function measureSummaryParts_(view) {
+  var s = view.summaryText, i = s.indexOf(' ▲許容超');
+  return i < 0 ? { base: s, over: '' } : { base: s.slice(0, i + 1), over: s.slice(i + 1) };
+}
+
+/** §10.2d-8 の注記(項目表の直後。許容ありの実測が1つでもあるときだけ出す。HTML 8px / doc 6pt) */
+var REPORT_MEASURE_NOTE_ = '実測の ▲ は許容(±)を超えた値の目安です。合否は職長・管理者が判定した結果(合/NG)で、▲ だけでは決まりません。許容ちょうどは許容内として扱います。';
+function reportHasTolMeasure_(rows) {
+  return rows.some(function (r) {
+    return ['self', 'qa'].some(function (s) { var v = measureView_(r, s); return !!v && v.tol !== null; });
+  });
+}
+
+/** 実測の色(§10.2d-6)。HTML のインライン style と doc の setForegroundColor で同じ値 */
+var MEASURE_COLOR_ = { over: '#cc0000', label: '#555555', summary: '#444444' };
+
+/** HTML: 許容超を囲む span(class と同じ内容のインライン style の両方。GAS変換はクラスを無視することがあるため) */
+function measureOverSpan_(t) { return '<span class="over" style="font-weight:bold;color:#cc0000">' + esc_(t) + '</span>'; }
+
+/** HTML: 値の並び(許容超の値だけ over の span。区切りの「、」は span の外) */
+function measureValuesHtml_(view) {
+  return view.values.map(function (x) { return x.over ? measureOverSpan_('▲' + x.text) : esc_(x.text); }).join('、');
+}
+
+/** HTML: 要約(末尾の ▲許容超n件 だけ over の span) */
+function measureSummaryHtml_(view) {
+  var p = measureSummaryParts_(view);
+  return esc_(p.base) + (p.over ? measureOverSpan_(p.over) : '');
+}
+
+/**
+ * HTML: 1項目の実測(有効値のある側ごとに2つの <div>。職長→管理者の順)。prefix は '' / '実測'(ラベルは 職長: / 実測(職長): )。
+ * 両側とも実測なしなら ''
+ */
+function measureBlockHtml_(row, withKeyword) {
+  var o = [];
+  ['self', 'qa'].forEach(function (side) {
+    var v = measureView_(row, side);
+    if (!v) return;
+    var lab = (withKeyword ? '実測(' + v.label + '): ' : v.label + ': ');
+    o.push('<div><span style="color:' + MEASURE_COLOR_.label + '">' + esc_(lab) + '</span>' + measureValuesHtml_(v) + '</div>');
+    o.push('<div style="color:' + MEASURE_COLOR_.summary + '">' + measureSummaryHtml_(v) + '</div>');
+  });
+  return o.join('\n');
+}
+
+/**
+ * 確認箇所(図面)の凡例の行モデル(SPEC §10.2c-3。HTML方式・doc方式で共通)。項目ごとにグループ化する。
+ * 返り値: [{ type:'head'|'mark'|'single', no, itemNo, title, summary, value, over, row }]
+ *   head   = 項目の見出し行(N-k の印がある項目)。no='No.{N}'、title=★+項目文、summary=系列S全体の measureView_(無ければ null)
+ *   mark   = 番号行(印1個)。no=label、value=系列Sの k 番目(符号付き+単位。無効なら '')、over=許容超
+ *   single = N だけの項目の1行形式。no=label、title='No.{N} ★項目文'
+ * 系列S: 図面を書いた側(ph.side。qa=管理者、それ以外=職長)に有効値があればその側、無ければもう一方(要素ごとの補完はしない)
+ */
+function drawingLegendModel_(ph, rows, seq) {
+  var markers = Array.isArray(ph.markers) ? ph.markers : [];
+  var seen = {}, ents = [];
+  markers.forEach(function (m) {
+    if (!seq[m.itemId]) return;
+    var key = m.itemId + '|' + m.label;
+    if (seen[key]) return;
+    seen[key] = true;
+    var km = /-(\d+)$/.exec(String(m.label));
+    ents.push({ itemId: m.itemId, label: String(m.label), k: km ? Number(km[1]) : 0 });
+  });
+  ents.sort(function (a, b) { return (seq[a.itemId] - seq[b.itemId]) || (a.k - b.k); });
+  var out = [], i = 0;
+  while (i < ents.length) {
+    var itemId = ents[i].itemId, grp = [];
+    while (i < ents.length && ents[i].itemId === itemId) { grp.push(ents[i]); i++; }
+    var row = rows[seq[itemId] - 1], snap = row.snapshot;
+    var title = (snap.key ? '★' : '') + String(snap.textJa === null || snap.textJa === undefined ? '' : snap.textJa);
+    var unit = (snap.unit === null || snap.unit === undefined || snap.unit === '') ? 'mm' : String(snap.unit);
+    var branch = grp.some(function (e) { return e.k > 0; });
+    if (!branch) {
+      grp.forEach(function (e) { out.push({ type: 'single', no: e.label, itemNo: seq[itemId], title: 'No.' + seq[itemId] + ' ' + title, summary: null, value: '', over: false, row: row }); });
+      continue;
+    }
+    var pref = ph.side === 'qa' ? 'qa' : 'self', other = pref === 'qa' ? 'self' : 'qa';
+    var sv = measureView_(row, pref), sideS = pref;
+    if (!sv) { sv = measureView_(row, other); sideS = other; }
+    var seriesRaw = sv ? (sideS === 'self' ? row.selfValues : row.qaValues) : null;
+    out.push({ type: 'head', no: 'No.' + seq[itemId], itemNo: seq[itemId], title: title, summary: sv, value: '', over: false, row: row });
+    grp.forEach(function (e) {
+      var c = (e.k > 0 && seriesRaw) ? measureCell_(seriesRaw[e.k - 1], snap.tol) : null;
+      out.push({ type: 'mark', no: e.label, itemNo: seq[itemId], title: '', summary: null, value: c ? c.text + unit : '', over: !!(c && c.over), row: row });
+    });
+  }
+  return out;
 }
 
 /** 記録スナップショットのハッシュ(§10.2-8) */
@@ -88,31 +235,25 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
     o.push('<p>印の書き込みなし</p></div>');
     return o.join('\n');
   }
-  // 凡例は印の label ごとに1行(版1.6.4)。同じ label の重複は1行にまとめる。項目番号→枝番の昇順
-  var seen = {}, ents = [];
-  markers.forEach(function (m) {
-    if (!seq[m.itemId]) return;
-    var key = m.itemId + '|' + m.label;
-    if (seen[key]) return;
-    seen[key] = true;
-    var km = /-(\d+)$/.exec(String(m.label));
-    ents.push({ itemId: m.itemId, label: String(m.label), k: km ? Number(km[1]) : 0 });
-  });
-  ents.sort(function (a, b) { return (seq[a.itemId] - seq[b.itemId]) || (a.k - b.k); });
-  var cell = 'white-space:nowrap;overflow:hidden;height:6mm;line-height:6mm;padding:0 2px;vertical-align:middle';
-  o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:24mm"><col style="width:82mm"><col style="width:24mm"><col style="width:28mm"><col style="width:28mm"></colgroup>');
-  o.push('<tr><th style="' + cell + '">番号</th><th style="' + cell + '">項目</th><th style="' + cell + '">実測値</th><th style="' + cell + '">職長</th><th style="' + cell + '">管理者</th></tr>');
-  ents.forEach(function (e) {
-    var row = rows[seq[e.itemId] - 1], snap = row.snapshot;
-    var val = '';
-    if (e.k > 0) {
-      // 図面を書いた側の測定値を優先し、無ければもう一方
-      var a = ph.side === 'qa' ? row.qaValues : row.selfValues, b = ph.side === 'qa' ? row.selfValues : row.qaValues;
-      var v = (a && a[e.k - 1] !== undefined && a[e.k - 1] !== null) ? a[e.k - 1] : ((b && b[e.k - 1] !== undefined && b[e.k - 1] !== null) ? b[e.k - 1] : null);
-      if (v !== null && v !== '') val = (Number(v) > 0 ? '+' : '') + v + (snap.unit || 'mm');
+  // 凡例(版1.11.0 §10.2c-3): 項目ごとのグループ(見出し行+番号行)。6列 24/76/28/24/17/17mm・折り返しあり・最低高6mm
+  var cell = 'white-space:normal;word-break:break-all;overflow:visible;height:6mm;line-height:12px;padding:2px 3px;vertical-align:top';
+  var shade = ';background:#eeeeee';
+  var td = function (inner, extra) { return '<td style="' + cell + (extra || '') + '">' + inner + '</td>'; };
+  o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:24mm"><col style="width:76mm"><col style="width:28mm"><col style="width:24mm"><col style="width:17mm"><col style="width:17mm"></colgroup>');
+  var th = '<th style="' + cell + ';background:#eeeeee;font-weight:bold">';
+  o.push('<tr>' + th + '番号</th>' + th + '項目</th>' + th + '実測値</th>' + th + '許容超</th>' + th + '職長</th>' + th + '管理者</th></tr>');
+  drawingLegendModel_(ph, rows, seq).forEach(function (e) {
+    var row = e.row;
+    if (e.type === 'mark') {
+      o.push('<tr>' + td(esc_(e.no)) + td('') + td(e.over ? measureOverSpan_(e.value) : esc_(e.value)) + td(e.over ? measureOverSpan_('▲') : '') + td('') + td('') + '</tr>');
+      return;
     }
-    o.push('<tr><td style="' + cell + '">' + esc_(e.label) + '</td><td style="' + cell + '">No.' + seq[e.itemId] + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) +
-      '</td><td style="' + cell + '">' + esc_(val) + '</td><td style="' + cell + '">' + resChip(row.selfResult, row.selfSeverity) + '</td><td style="' + cell + '">' + resChip(row.qaResult, row.qaSeverity) + '</td></tr>');
+    var itemCell = e.type === 'head'
+      ? '<div><b>' + esc_(e.title) + '</b></div>' + (e.summary ? '\n<div style="color:' + MEASURE_COLOR_.summary + '">' + measureSummaryHtml_(e.summary) + '</div>' : '')
+      : esc_(e.title);
+    var x = e.type === 'head' ? shade : '';
+    o.push('<tr>' + td(esc_(e.no), x) + td(itemCell, x) + td('', x) + td('', x) +
+      td(resChip(row.selfResult, row.selfSeverity), x) + td(resChip(row.qaResult, row.qaSeverity), x) + '</tr>');
   });
   o.push('</table></div>');
   return o.join('\n');
@@ -130,9 +271,9 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('@page{size:A4;margin:12mm}body{font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN",sans-serif;font-size:10px;color:#111}');
   h.push('h1{font-size:16px;margin:0 0 6px}h2{font-size:12px;margin:12px 0 4px;border-bottom:1px solid #444}');
   h.push('table{border-collapse:collapse;width:100%}th,td{border:1px solid #666;padding:2px 4px;vertical-align:top}th{background:#eee}');
-  // 項目表(SPEC §10.2b-A): 固定レイアウト・折り返しなし・行高固定。職長コメント列だけ折り返し
-  h.push('table.items{table-layout:fixed;width:186mm}table.items th,table.items td{white-space:nowrap;overflow:hidden;height:6mm;line-height:6mm;padding:0 2px;vertical-align:middle}');
-  h.push('table.items td.wrap{white-space:normal;word-break:break-all;overflow:visible;line-height:12px;vertical-align:top;padding:2px}');
+  // 項目表(SPEC §10.2b-A 版1.11.0): 固定レイアウト・全列折り返し(nowrap/overflow:hidden は使わない)・行の高さは最低6mm。実測列だけ word-break:normal
+  h.push('table.items{table-layout:fixed;width:186mm}table.items th,table.items td{white-space:normal;overflow:visible;word-break:break-all;height:6mm;line-height:12px;padding:2px;vertical-align:top}');
+  h.push('table.items th.meas,table.items td.meas{word-break:normal}');
   h.push('.ng td{background:#fde8e8}.sign td{height:36px}');
   // 写真ブロック(SPEC §10.2b-B): 1枚1table・高さ固定・4枚ごとに改ページ
   h.push('table.pb{table-layout:fixed;width:186mm;height:62mm;margin:0 0 3mm 0;page-break-inside:avoid}table.pb td{overflow:hidden;height:62mm;vertical-align:top;padding:3px 5px}');
@@ -187,19 +328,19 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<tr><th>職長</th><td>' + cs.ok + '</td><td>' + cs.ng + '</td><td>' + cs.na + '</td></tr>');
   h.push('<tr><th>管理者</th><td>' + cq.ok + '</td><td>' + cq.ng + '</td><td>' + cq.na + '</td></tr></table>');
 
-  // 項目表(SPEC §10.2b-A)
-  h.push('<h2>項目表</h2><table class="items"><colgroup><col style="width:8mm"><col style="width:62mm"><col style="width:14mm"><col style="width:18mm"><col style="width:24mm"><col style="width:30mm"><col style="width:30mm"></colgroup>');
-  h.push('<tr><th>No.</th><th>項目</th><th>職長結果</th><th>管理者結果</th><th>実測</th><th>職長コメント</th><th>管理者コメント</th></tr>');
+  // 項目表(SPEC §10.2b-A・§10.2d。版1.11.0)
+  h.push('<h2>項目表</h2><table class="items"><colgroup><col style="width:8mm"><col style="width:40mm"><col style="width:14mm"><col style="width:18mm"><col style="width:46mm"><col style="width:30mm"><col style="width:30mm"></colgroup>');
+  h.push('<tr><th>No.</th><th>項目</th><th>職長結果</th><th>管理者結果</th><th class="meas">実測(設計値との差)</th><th>職長コメント</th><th>管理者コメント</th></tr>');
   rows.forEach(function (r, i) {
     var snap = r.snapshot;
-    var ng = r.selfResult === 'ng' || r.qaResult === 'ng';
-    var m = [measureText_(r, 'self'), measureText_(r, 'qa')].filter(function (x) { return x; }).join(' | ');
+    var ng = r.selfResult === 'ng' || r.qaResult === 'ng';   // 許容超(▲)は行の色に影響しない(判定は人。§10.2d-9)
     h.push('<tr' + (ng ? ' class="ng" style="background:#fde8e8"' : '') + '><td>' + (i + 1) + '</td><td>' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</td>' +
       '<td>' + esc_(RESULT_LABEL_[r.selfResult] || '') + '</td><td>' + esc_(RESULT_LABEL_[r.qaResult] || '') + (r.qaSeverity ? '(' + esc_(r.qaSeverity === 'major' ? '重大' : '軽微') + ')' : '') + '</td>' +
-      '<td>' + esc_(m) + '</td><td class="wrap">' + esc_(r.foremanNote) + '</td><td>' + esc_(r.qaNote) + '</td></tr>');
+      '<td class="meas">' + measureBlockHtml_(r, false) + '</td><td>' + esc_(r.foremanNote) + '</td><td>' + esc_(r.qaNote) + '</td></tr>');
   });
   h.push('</table>');
-  h.push('<p style="font-size:8px;color:#444">管理者コメントの全文は写真ページおよび電子記録で確認できます。</p>');
+  // §10.2d-8: 許容ありの実測が1つでもあるときだけ。旧注記「管理者コメントの全文は…」は廃止
+  if (reportHasTolMeasure_(rows)) h.push('<p style="font-size:8px;color:#444444">' + esc_(REPORT_MEASURE_NOTE_) + '</p>');
 
   // 確認箇所(図面)(SPEC §10.2c): 項目表の直後・NG・是正の経過の前。0枚なら見出しごと出さない
   if (drawings.length) {
@@ -247,12 +388,13 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
       var snap = row.snapshot;
       info += '<div><b>No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</b></div>';
       info += '<div><span class="lb">職長:</span> ' + resChip_(row.selfResult, row.selfSeverity) + ' / <span class="lb">管理者:</span> ' + resChip_(row.qaResult, row.qaSeverity) + '</div>';
-      var mt = [measureText_(row, 'self'), measureText_(row, 'qa')].filter(function (x) { return x; }).join(' | ');
-      if (mt) info += '<div><span class="lb">実測:</span> ' + esc_(mt) + '</div>';
+      var mt = measureBlockHtml_(row, true);   // §10.2b-B の3・§10.2d: 値の並び+要約の2行を側ごとに。実測なしなら行を作らない
+      if (mt) info += mt + '\n';
       info += '<div><span class="lb">職長コメント:</span> ' + esc_(row.foremanNote) + '</div>';
       info += '<div><span class="lb">管理者コメント:</span> ' + esc_(row.qaNote) + '</div>';
     }
     info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + who + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
+    info = info.replace(/<\/div><div/g, '</div>\n<div');   // 段落ごとに改行(HTMLの見た目は変わらない。タグを除いたテキストを行で読めるように)
     var brk = ((idx + 1) % 4 === 0 && idx < shown.length - 1) ? ' style="page-break-after:always"' : '';
     // 写真は引き伸ばさない: 縦横比を保つため、横長は幅、縦長は高さだけを指定する(width/height は元画像の寸法)
     var portrait = ph.width && ph.height && Number(ph.height) > Number(ph.width);

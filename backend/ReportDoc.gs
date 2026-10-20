@@ -3,7 +3,7 @@
  *
  * HTML方式(Report.gs)は @page を無視してレターサイズになるため、DocumentApp で用紙 A4 縦・余白12mm を
  * 明示した文書を組み立て、Drive 経由で PDF に変換する。HTML方式と共通の部品(reportSubject_ / STAGE_LABEL_ /
- * statusLabel_ / measureText_ / reportSnapshotHash_ / dtShort_ / RESULT_LABEL_ ほか)は Report.gs のものを呼ぶ。
+ * statusLabel_ / measureView_(版1.11.0。旧 measureText_ の置き換え) / drawingLegendModel_ / reportSnapshotHash_ / dtShort_ / RESULT_LABEL_ ほか)は Report.gs のものを呼ぶ。
  *
  * 失敗時のフォールバック(html に切り替えて PDF を必ず作る)は呼び出し側 act_generateReport(Report.gs)が行う。
  * ここでは「例外をそのまま投げる」「一時文書は finally で必ずゴミ箱へ」だけを守る。
@@ -162,7 +162,7 @@ function docHeadRow_(table, rowIdx) {
 /**
  * 文字だけの表(基本情報・結果サマリ・項目表・凡例・サイン欄)を作る。
  * rows: 行ごとのセル内容の配列。セル内容は lines(= runs の配列)。runs が文字列1つのときは [文字列] として扱う。
- * o: widths(mm) / headRows([行番号]) / labelCols([列番号]) / minHeight(pt) / ngRows({行番号:true}) / rowMin({行番号:pt}) / each(行ごとの確認)
+ * o: widths(mm) / headRows([行番号]。背景+太字) / shadeRows({行番号:true}。背景のみ=図面の凡例の項目見出し行) / labelCols([列番号]) / minHeight(pt) / ngRows({行番号:true}) / rowMin({行番号:pt})
  */
 function docTextTable_(body, rows, o, t0) {
   var t = docNewTable_(body, rows.length, o.widths, o);
@@ -177,6 +177,7 @@ function docTextTable_(body, rows, o, t0) {
       if (typeof lines === 'string') lines = [lines];
       marks = marks.concat(docCellLines_(cell, lines));
       if (o.ngRows && o.ngRows[r]) cell.setBackgroundColor(REPORT_DOC_COLOR.ngRow);
+      if (o.shadeRows && o.shadeRows[r]) cell.setBackgroundColor(REPORT_DOC_COLOR.head);
     });
     if (t0 && r % 20 === 19) docCheckTime_(t0);
   });
@@ -233,6 +234,30 @@ function docResRun_(res, sev) {
   return res === 'ng' ? { t: t, bold: true, color: REPORT_DOC_COLOR.ng } : { t: t };
 }
 
+/**
+ * 実測の runs(SPEC §10.2d-6。HTML方式の measureBlockHtml_ と同じ内容)。有効値のある側ごとに2行(値の並び→要約)。
+ * 許容超の値(▲を含む)と要約末尾の ▲許容超n件 だけ太字・赤。ラベルは #555555、要約は #444444。
+ * withKeyword=true なら『実測(職長): 』、false なら『職長: 』。返り値は lines(= runs の配列の配列)。実測なしなら []
+ */
+function docMeasureLines_(row, withKeyword) {
+  var lines = [];
+  ['self', 'qa'].forEach(function (side) {
+    var v = measureView_(row, side);
+    if (!v) return;
+    var runs = [{ t: (withKeyword ? '実測(' + v.label + '): ' : v.label + ': '), color: REPORT_DOC_COLOR.label }];
+    v.values.forEach(function (x, i) {
+      if (i > 0) runs.push({ t: '、' });
+      runs.push(x.over ? { t: '▲' + x.text, bold: true, color: REPORT_DOC_COLOR.ng } : { t: x.text });
+    });
+    lines.push(runs);
+    var sp = measureSummaryParts_(v);
+    var sruns = [{ t: sp.base, color: REPORT_DOC_COLOR.note }];
+    if (sp.over) sruns.push({ t: sp.over, bold: true, color: REPORT_DOC_COLOR.ng });
+    lines.push(sruns);
+  });
+  return lines;
+}
+
 /** 結果サマリの集計(HTML方式の cnt と同じ規則) */
 function docCount_(rows, side) {
   var c = { ok: 0, ng: 0, na: 0 };
@@ -271,32 +296,31 @@ function docDrawingPage_(body, ph, rows, seq, t0) {
     docBodyPara_(body, '印の書き込みなし', { before: 3 });
     return;
   }
-  // 凡例: 印の label ごとに1行。同じ項目の同じ label の重複は1行。項目番号→枝番の昇順(HTML方式 buildDrawingPageHtml_ と同じ)
-  var seen = {}, ents = [];
-  markers.forEach(function (m) {
-    if (!seq[m.itemId]) return;
-    var key = m.itemId + '|' + m.label;
-    if (seen[key]) return;
-    seen[key] = true;
-    var km = /-(\d+)$/.exec(String(m.label));
-    ents.push({ itemId: m.itemId, label: String(m.label), k: km ? Number(km[1]) : 0 });
-  });
-  ents.sort(function (a, b) { return (seq[a.itemId] - seq[b.itemId]) || (a.k - b.k); });
-  var trs = [['番号', '項目', '実測値', '職長', '管理者']];
-  ents.forEach(function (e) {
-    var row = rows[seq[e.itemId] - 1], snap = row.snapshot;
-    var val = '';
-    if (e.k > 0) {
-      // 図面を書いた側の測定値を優先し、無ければもう一方
-      var a = ph.side === 'qa' ? row.qaValues : row.selfValues, b = ph.side === 'qa' ? row.selfValues : row.qaValues;
-      var v = (a && a[e.k - 1] !== undefined && a[e.k - 1] !== null) ? a[e.k - 1] : ((b && b[e.k - 1] !== undefined && b[e.k - 1] !== null) ? b[e.k - 1] : null);
-      if (v !== null && v !== '') val = (Number(v) > 0 ? '+' : '') + v + (snap.unit || 'mm');
+  // 凡例(SPEC §10.5.4・§10.2c-3 版1.11.0): 項目ごとのグループ。6列 24/76/28/24/17/17mm。セル結合は使わず通常の6セルで作る
+  var trs = [['番号', '項目', '実測値', '許容超', '職長', '管理者']], shadeRows = {};
+  drawingLegendModel_(ph, rows, seq).forEach(function (e) {
+    var row = e.row;
+    if (e.type === 'mark') {
+      trs.push([e.no, '', e.over ? [[{ t: e.value, bold: true, color: REPORT_DOC_COLOR.ng }]] : e.value,
+        e.over ? [[{ t: '▲', bold: true, color: REPORT_DOC_COLOR.ng }]] : '', '', '']);
+      return;
     }
-    trs.push([e.label, 'No.' + seq[e.itemId] + ' ' + (snap.key ? '★' : '') + docStr_(snap.textJa), val,
-      [docResRun_(row.selfResult, row.selfSeverity)], [docResRun_(row.qaResult, row.qaSeverity)]]);
+    var itemCell;
+    if (e.type === 'head') {
+      itemCell = [[{ t: e.title, bold: true }]];
+      if (e.summary) {
+        var sp = measureSummaryParts_(e.summary), sruns = [{ t: sp.base, color: REPORT_DOC_COLOR.note }];
+        if (sp.over) sruns.push({ t: sp.over, bold: true, color: REPORT_DOC_COLOR.ng });
+        itemCell.push(sruns);
+      }
+      shadeRows[trs.length] = true;
+    } else {
+      itemCell = e.title;
+    }
+    trs.push([e.no, itemCell, '', '', [docResRun_(row.selfResult, row.selfSeverity)], [docResRun_(row.qaResult, row.qaSeverity)]]);
   });
   docBodyPara_(body, '', { size: 3 });
-  docTextTable_(body, trs, { widths: [24, 82, 24, 28, 28], headRows: [0], minHeight: REPORT_DOC_ROW_MIN_PT }, t0);
+  docTextTable_(body, trs, { widths: [24, 76, 28, 24, 17, 17], headRows: [0], shadeRows: shadeRows, minHeight: REPORT_DOC_ROW_MIN_PT }, t0);
 }
 
 /** 写真ページの1ブロック(SPEC §10.5.5)。2列×1行の表 */
@@ -330,8 +354,7 @@ function docPhotoBlock_(body, ph, rowOf, seq) {
     var snap = row.snapshot;
     lines.push([{ t: 'No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + docStr_(snap.textJa), bold: true }]);
     lines.push([lb('職長:'), { t: ' ' }, docResRun_(row.selfResult, row.selfSeverity), { t: ' / ' }, lb('管理者:'), { t: ' ' }, docResRun_(row.qaResult, row.qaSeverity)]);
-    var mt = [measureText_(row, 'self'), measureText_(row, 'qa')].filter(function (x) { return x; }).join(' | ');
-    if (mt) lines.push([lb('実測:'), { t: ' ' + mt }]);
+    docMeasureLines_(row, true).forEach(function (l) { lines.push(l); });   // 実測(職長): 値 / 要約 / 実測(管理者): … (§10.2d。なければ行なし)
     lines.push([lb('職長コメント:'), { t: ' ' + docStr_(row.foremanNote) }]);
     lines.push([lb('管理者コメント:'), { t: ' ' + docStr_(row.qaNote) }]);
   }
@@ -401,21 +424,21 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   docTextTable_(body, [['', '合', 'NG', '該当なし'], ['職長', String(cs.ok), String(cs.ng), String(cs.na)], ['管理者', String(cq.ok), String(cq.ng), String(cq.na)]],
     { widths: [30, 52, 52, 52], headRows: [0], labelCols: [0] }, t0);
 
-  // 7. 項目表(7列 8/62/14/18/24/30/30。全列で折り返しうる。文字は切り詰めない)
+  // 7. 項目表(7列 8/40/14/18/46/30/30。全列で折り返しうる。文字は切り詰めない。実測は §10.2d の書式)
   docBodyPara_(body, '項目表', h2);
-  var items = [['No.', '項目', '職長結果', '管理者結果', '実測', '職長コメント', '管理者コメント']], ngRows = {};
+  var items = [['No.', '項目', '職長結果', '管理者結果', '実測(設計値との差)', '職長コメント', '管理者コメント']], ngRows = {};
   rows.forEach(function (r, i) {
     var snap = r.snapshot;
-    var m = [measureText_(r, 'self'), measureText_(r, 'qa')].filter(function (x) { return x; }).join(' | ');
-    if (r.selfResult === 'ng' || r.qaResult === 'ng') ngRows[i + 1] = true;
+    var ml = docMeasureLines_(r, false);
+    if (r.selfResult === 'ng' || r.qaResult === 'ng') ngRows[i + 1] = true;   // 許容超(▲)は行の背景に影響しない(判定は人。§10.2d-9)
     items.push([String(i + 1), (snap.key ? '★' : '') + docStr_(snap.textJa), RESULT_LABEL_[r.selfResult] || '',
       (RESULT_LABEL_[r.qaResult] || '') + (r.qaSeverity ? '(' + (r.qaSeverity === 'major' ? '重大' : '軽微') + ')' : ''),
-      m, docStr_(r.foremanNote), docStr_(r.qaNote)]);
+      ml.length ? ml : '', docStr_(r.foremanNote), docStr_(r.qaNote)]);
   });
-  docTextTable_(body, items, { widths: [8, 62, 14, 18, 24, 30, 30], headRows: [0], minHeight: REPORT_DOC_ROW_MIN_PT, ngRows: ngRows }, t0);
+  docTextTable_(body, items, { widths: [8, 40, 14, 18, 46, 30, 30], headRows: [0], minHeight: REPORT_DOC_ROW_MIN_PT, ngRows: ngRows }, t0);
 
-  // 8. 注記
-  docBodyPara_(body, '管理者コメントの全文は写真ページおよび電子記録で確認できます。', { size: REPORT_DOC_SIZE.note, color: REPORT_DOC_COLOR.note, before: 2 });
+  // 8. 注記(§10.2d-8。許容ありの実測が1つでもあるときだけ。旧注記「管理者コメントの全文は…」は廃止)
+  if (reportHasTolMeasure_(rows)) docBodyPara_(body, REPORT_MEASURE_NOTE_, { size: REPORT_DOC_SIZE.note, color: REPORT_DOC_COLOR.note, before: 2 });
 
   // 9. 確認箇所(図面)。0枚なら出さない。図面ごとに改ページ
   if (drawings.length) {

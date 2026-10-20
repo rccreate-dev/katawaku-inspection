@@ -294,12 +294,13 @@ test('C-PERM-08/10 班スコープと無効な担当', () => {
   assert.equal(tanaka('listRecords', { siteId: 's_a' }).error.code, 'FORBIDDEN_SITE');
 });
 
-test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表nowrap・写真ブロック(4枚ごと改ページ)', () => {
+test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表(全列折り返し・8/40/14/18/46/30/30mm)・写真ブロック(4枚ごと改ページ)', () => {
   const id = newRecord(tanaka, 's_a', '1F', { lot: 'F9' });
   fillAll(h, tanaka, id, 'self');
   assert.equal(tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' }).ok, true);
   assert.equal(sato('claimReview', { recordId: id, round: 1 }).ok, true);
-  fillAll(h, sato, id, 'qa');
+  const longNote = Array.from({ length: 200 }, (_, i) => 'あいうえおかきくけこ'[i % 10]).join('');
+  fillAll(h, sato, id, 'qa', { patch: (i) => (i.itemId === 'i9' ? { note: longNote } : null) });
   assert.equal(sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' }).ok, true);
   const g = sato('generateReport', { recordId: id });
   assert.equal(g.ok, true, JSON.stringify(g));
@@ -307,11 +308,24 @@ test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表nowra
   assert.ok(html && html.length > 500, 'HTMLが取得できる');
   const title = /<title>(.*?)<\/title>/.exec(html)[1];
   assert.match(title, /^\S+ 1F F9$/, '件名=現場名 階 打設箇所: ' + title);
-  assert.ok(/table class="items"/.test(html) && /table-layout:fixed/.test(html) && /white-space:nowrap/.test(html), '項目表は固定レイアウト・nowrap');
+  assert.ok(/table class="items"/.test(html) && /table-layout:fixed/.test(html), '項目表は固定レイアウト');
   const itemsTbl = /<table class="items">[\s\S]*?<\/table>/.exec(html)[0];
   const itemRows = (itemsTbl.match(/<tr/g) || []).length - 1; // 見出し行を除く
   assert.ok(itemRows > 0);
-  assert.equal((itemsTbl.match(/<td class="wrap">/g) || []).length, itemRows, '折り返しは職長コメント列のみ(行ごとに1つ)');
+  // 版1.11.0: 全列が折り返し可。nowrap / overflow:hidden を項目表(表本体とそれを指定するCSS)に使わない
+  assert.ok(!/white-space:\s*nowrap|overflow:\s*hidden|text-overflow/.test(itemsTbl), '項目表のマークアップに nowrap/overflow:hidden がない');
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+  const itemRules = css.split('}').filter((r) => /table\.items/.test(r));
+  assert.ok(itemRules.length >= 2);
+  itemRules.forEach((r) => assert.ok(!/nowrap|overflow:\s*hidden|text-overflow/.test(r), 'CSS(table.items): ' + r));
+  assert.ok(/table\.items th,table\.items td\{[^}]*white-space:normal[^}]*overflow:visible[^}]*height:6mm/.test(css), '行の高さは最低6mm・折り返し');
+  assert.ok(!/<td class="wrap">/.test(itemsTbl), '旧: 職長コメント列だけ折り返す指定は廃止');
+  const cols = (itemsTbl.match(/<col style="width:(\d+)mm">/g) || []).map((c) => Number(/(\d+)mm/.exec(c)[1]));
+  assert.deepEqual(cols, [8, 40, 14, 18, 46, 30, 30]);
+  assert.equal(cols.reduce((a, b) => a + b, 0), 186);
+  assert.ok(itemsTbl.includes('<th class="meas">実測(設計値との差)</th>'));
+  assert.ok(itemsTbl.includes(longNote), '管理者コメントの長文(200文字)が項目表に全文入る(…で切り詰めない)');
+  assert.ok(!html.includes('管理者コメントの全文は'), '旧注記は廃止');
   assert.ok(!/display:\s*(flex|grid)|calc\(/.test(html), 'flex/grid/calc を使わない');
   assert.ok(!/max-height:58mm/.test(html) && (html.match(/<img style="(width:80mm|height:58mm)"/g) || []).length >= 1, '写真は縦横比を保つ(幅か高さの片方だけ指定)');
   const blocks = html.match(/<table class="pb"[^>]*>/g) || [];

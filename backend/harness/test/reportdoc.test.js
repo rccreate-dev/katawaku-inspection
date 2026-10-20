@@ -209,7 +209,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
     assert.equal(t.borderWidth, 0.75);
   });
   const items = d.tables.find((t) => t.cols === 7);
-  [8, 62, 14, 18, 24, 30, 30].forEach((mm, i) => near(items.colWidths[i], MMK(mm), 0.5, '項目表の列' + i));
+  [8, 40, 14, 18, 46, 30, 30].forEach((mm, i) => near(items.colWidths[i], MMK(mm), 0.5, '項目表の列' + i)); // 版1.11.0(旧 8/62/14/18/24/30/30)
   near(items.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5);
   // 全ての表の列幅合計が実効幅(184mm)で揃う(右端が本文右余白からはみ出さない)
   d.tables.forEach((t, i) => near(t.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5, '表' + i + 'の列幅合計'));
@@ -223,7 +223,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
     assert.equal(kw(hd).length, 1, 'h2は1つ: ' + hd); assert.equal(kw(hd)[0].keepWithNext, true, 'paragraphs keepWithNext: ' + hd);
   });
   assert.equal(kw('提出回数: 1')[0].keepWithNext, false);
-  assert.equal(kw('管理者コメントの全文は写真ページおよび電子記録で確認できます。')[0].keepWithNext, false);
+  assert.equal(d.paragraphs.filter((p) => p.text.startsWith('管理者コメントの全文は')).length, 0, '旧注記は廃止(版1.11.0)');
   assert.equal(d.paragraphs[0].keepWithNext, false, 'h1 は false');
   assert.deepEqual(d.paragraphs.filter((p) => p.keepWithNext).map((p) => p.text).sort(), d.keepWithNextTexts.slice().sort());
   assert.equal(d.paragraphs.length, model.body.children.filter((c) => c.kind === 'p').length, '表のセル内の段落は含めない');
@@ -234,9 +234,9 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   [30, 63, 30, 63].forEach((mm, i) => near(info.colWidths[i], MMK(mm), 0.5));
   const sign = d.tables.find((t) => t.cols === 3 && t.rows === 2);
   assert.ok(sign); near(sign.minRowHeights[1], 36, 0.01);
-  const legend = d.tables.find((t) => t.cols === 5);
-  assert.ok(legend, '図面の凡例表');
-  [24, 82, 24, 28, 28].forEach((mm, i) => near(legend.colWidths[i], MMK(mm), 0.5));
+  const legend = d.tables.find((t) => t.cols === 6);
+  assert.ok(legend, '図面の凡例表(版1.11.0: 6列)');
+  [24, 76, 28, 24, 17, 17].forEach((mm, i) => near(legend.colWidths[i], MMK(mm), 0.5));
   const sum = d.tables.find((t) => t.cols === 4 && t.rows === 3);
   assert.ok(sum); [30, 52, 52, 52].forEach((mm, i) => near(sum.colWidths[i], MMK(mm), 0.5));
   // ⑥ 内容
@@ -248,7 +248,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   const cells = model.cellTexts(itemsIdx);
   const ngRow = cells.findIndex((r) => r[5] === '職長の備考TEXT');
   assert.ok(ngRow > 0 && cells[ngRow][6] === '管理者の備考TEXT', '職長コメントと管理者コメントは別の列');
-  assert.equal(cells[0].join('|'), 'No.|項目|職長結果|管理者結果|実測|職長コメント|管理者コメント');
+  assert.equal(cells[0].join('|'), 'No.|項目|職長結果|管理者結果|実測(設計値との差)|職長コメント|管理者コメント');
   items.cellBackgrounds.forEach((row, r) => {
     row.forEach((bg) => assert.equal(bg, r === ngRow ? '#FDE8E8' : (r === 0 ? '#EEEEEE' : null), `行${r}の背景`));
   });
@@ -311,7 +311,7 @@ test('C-REP-03 図面の枠と凡例: 横長は幅186mm、縦長は高さ170mm�
   gen(none);
   let d = docShim().lastDoc;
   assert.ok(!d.text.includes('確認箇所(図面)'));
-  assert.equal(d.tables.filter((t) => t.cols === 5).length, 0);
+  assert.equal(d.tables.filter((t) => t.cols === 6).length, 0);
 
   const id = makeQaOk({ photos: 2, drawings: [{ side: 'self', w: 600, h: 900 }, { side: 'self', w: 800, h: 100, markers: [] }] });
   h.control('docShim', { reset: true });
@@ -323,7 +323,7 @@ test('C-REP-03 図面の枠と凡例: 横長は幅186mm、縦長は高さ170mm�
   near(tall.h, MMK(170), 0.5); assert.ok(tall.w <= MMK(186));
   near(wide.w, MMK(186), 0.5); assert.ok(wide.h <= MMK(170));
   assert.ok(d.text.includes('印の書き込みなし'));
-  assert.equal(d.tables.filter((t) => t.cols === 5).length, 1, '印のある図面だけ凡例表');
+  assert.equal(d.tables.filter((t) => t.cols === 6).length, 1, '印のある図面だけ凡例表');
   assert.equal((d.text.match(/確認箇所\(図面\)/g) || []).length, 2);
 });
 

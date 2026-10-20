@@ -217,20 +217,57 @@ function createDocShim(state, hooks) {
           rows: t.rows.length, cols: t.rows[0].cells.length, colWidths: t.colWidths.slice(),
           minRowHeights: t.rows.map((r) => r.minHeight), borderWidth: t.borderWidth,
           cellBackgrounds: t.rows.map((r) => r.cells.map((cell) => cell.bg)),
+          // SPEC §11.4(版1.11.0): 行×列のセル文字列(複数段落は \n 連結。空セルは "")
+          cellTexts: t.rows.map((r) => r.cells.map((cell) => cell.getText())),
         })),
+        // SPEC §11.4(版1.11.0): 文字色ごとの文字列 / 太字にした文字列(本文・表のセル内)
+        coloredTexts: this.coloredTextsByColor(), boldTexts: this.boldTexts(),
         footerText: this.footer ? this.footer.getText() : '', trashed: !!(this.file && this.file.trashed),
       };
     }
-    /** テスト用(プロセス内のみ。HTTP には出さない): 色付きにした文字列の一覧と、表のセル文字列 */
-    coloredTexts(color) {
+    /** 段落の中身(本文直下の段落・表のセル内の段落を文書順に。フッタは含めない) */
+    allParagraphs() {
       const out = [];
-      const scan = (p) => p.styles.forEach((s) => { if (s.attr === 'foregroundColor' && s.val === color && s.e < p.text.length) { const t = p.text.slice(s.s, s.e + 1); if (t) out.push(t); } });
       this.body.children.forEach((c) => {
-        if (c.kind === 'p') scan(c);
-        else if (c.kind === 't') c.rows.forEach((r) => r.cells.forEach((cell) => cell.paras.forEach(scan)));
+        if (c.kind === 'p') out.push(c);
+        else if (c.kind === 't') c.rows.forEach((r) => r.cells.forEach((cell) => cell.paras.forEach((p) => out.push(p))));
       });
       return out;
     }
+    /**
+     * attr が pred を満たす連続した文字列の一覧(段落の境界をまたがない)。書式は記録順に上書きして
+     * 1文字ごとに最終値を決める(実GASと同じく、後から付けた書式が勝つ。例: 表全体を太字なしにしてから範囲を太字に)。
+     */
+    styledTexts(attr, pred) {
+      const out = [];
+      this.allParagraphs().forEach((p) => {
+        const n = p.text.length;
+        const val = new Array(n).fill(undefined);
+        p.styles.forEach((s) => {
+          if (s.attr !== attr) return;
+          for (let i = Math.max(0, s.s); i <= Math.min(n - 1, s.e === undefined ? n - 1 : s.e); i++) val[i] = s.val;
+        });
+        let cur = '';
+        for (let i = 0; i < n; i++) {
+          if (pred(val[i])) cur += p.text[i];
+          else { if (cur) out.push(cur); cur = ''; }
+        }
+        if (cur) out.push(cur);
+      });
+      return out;
+    }
+    /** テスト用(プロセス内): 指定色にした文字列の一覧 */
+    coloredTexts(color) { return this.styledTexts('foregroundColor', (v) => v === color); }
+    /** 文字色ごとの文字列(SPEC §11.4 lastDoc.coloredTexts)。色が付いた範囲だけ(本文・表のセル内) */
+    coloredTextsByColor() {
+      const colors = new Set();
+      this.allParagraphs().forEach((p) => p.styles.forEach((s) => { if (s.attr === 'foregroundColor' && s.val) colors.add(s.val); }));
+      const o = {};
+      colors.forEach((c) => { o[c] = this.coloredTexts(c); });
+      return o;
+    }
+    /** 太字にした文字列(SPEC §11.4 lastDoc.boldTexts)。段落全体を太字にしたものは段落の文字列全体 */
+    boldTexts() { return this.styledTexts('bold', (v) => v === true); }
     cellTexts(tableIndex) { return this.bodyTables()[tableIndex].rows.map((r) => r.cells.map((cell) => cell.getText())); }
   }
 
