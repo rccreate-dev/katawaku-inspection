@@ -19,6 +19,13 @@
     return m;
   }
 
+  /* 許容超か(SPEC §5.3.1・§9.2b): tol が有限の数で 0 より大きく、有効値(有限の数)に |値|>tol がある。小数は丸めない */
+  function overTol(def, values) {
+    var tol = def && def.tol;
+    if (typeof tol !== 'number' || !isFinite(tol) || !(tol > 0)) return false;
+    return arr(values).some(function (v) { return typeof v === 'number' && isFinite(v) && Math.abs(v) > tol; });
+  }
+
   /* side: 'self' | 'qa'。audience が対象外の項目はスキップ */
   function itemViolations(items, side) {
     var out = [];
@@ -43,7 +50,12 @@
       if (def.measure === 'required' && result !== 'na' && values.length < (def.minMeasures || 0)) {
         out.push({ rule: 'MEASURE_REQUIRED', itemId: id });
       }
-      if (def.tol != null && values.length && maxAbs(values) > def.tol && result === 'ok') {
+      if (side === 'qa') {
+        // 版1.11.1: 管理者は許容超にも ok を付けられる。ただし管理者コメント(qa.note)が trim 後に空なら不可
+        if (result === 'ok' && overTol(def, values) && !String(e.note || '').trim()) {
+          out.push({ rule: 'QA_OVER_TOL_COMMENT_REQUIRED', itemId: id });
+        }
+      } else if (def.tol != null && values.length && maxAbs(values) > def.tol && result === 'ok') {
         out.push({ rule: 'MEASURE_OVER_TOL_OK', itemId: id });
       }
     });
@@ -104,7 +116,7 @@
     return m;
   }
 
-  var api = { itemViolations: itemViolations, validateSubmit: validateSubmit, validateVerdict: validateVerdict, suggestVerdict: suggestVerdict, groupByItem: groupByItem, maxAbs: maxAbs };
+  var api = { itemViolations: itemViolations, validateSubmit: validateSubmit, validateVerdict: validateVerdict, suggestVerdict: suggestVerdict, overTol: overTol, groupByItem: groupByItem, maxAbs: maxAbs };
   root.KW = root.KW || {};
   root.KW.validate = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

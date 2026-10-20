@@ -116,6 +116,7 @@ h3{font-size:15px;margin:20px 0 8px;color:var(--muted);letter-spacing:.04em;over
 /* 項目 */
 .grp{font-size:14px;font-weight:700;color:var(--accent);margin:22px 0 6px;padding-bottom:4px;border-bottom:2px solid var(--accent-soft);overflow-wrap:anywhere}
 .item{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;min-width:0}
+textarea[aria-invalid="true"]{border-color:var(--bad);box-shadow:0 0 0 2px var(--bad-soft)}
 .item.err{border-color:var(--bad);box-shadow:0 0 0 2px var(--bad-soft)}
 .q{display:flex;gap:10px;margin-bottom:10px;min-width:0}
 .q>div{min-width:0;overflow-wrap:anywhere}

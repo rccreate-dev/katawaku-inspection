@@ -79,7 +79,7 @@
         wrap.appendChild(chips); wrap.appendChild(h('div', { class: 'mrow' }, C.signToggle(inp, false), inp, add));
         wrap.appendChild(h('span', { class: 'sub' }, t('scr.S06.measure_help')));
         if (def.tol != null) wrap.appendChild(h('span', { class: 'sub' }, t('lbl.tol') + ' ±' + def.tol + (def.unit || 'mm')));
-        if (def.tol != null && KW.validate.maxAbs(x.values) > def.tol) wrap.appendChild(h('span', { class: 'flag' }, t('lbl.over_tol')));
+        if (KW.validate.overTol(def, x.values)) wrap.appendChild(h('span', { class: 'flag' }, t('lbl.over_tol')));
         return wrap;
       }
 
@@ -110,9 +110,17 @@
           }
           if (def.measure !== 'none' || def.tol != null) box.appendChild(measureField(it, x));
           if (x.result || x.note) {
-            var ta = h('textarea', { maxlength: '1000', disabled: !ed, 'aria-label': t('lbl.manager_note'), placeholder: t('scr.S10.note_ph') });
+            // 版1.11.1(§9.2b): 許容超の OK は管理者コメント必須。ヒントはコメント欄の直上
+            var overOk = x.result === 'ok' && KW.validate.overTol(def, x.values);
+            if (overOk) box.appendChild(C.msg('warn', t('scr.S10.over_tol_hint')));
+            var ta = h('textarea', { maxlength: '1000', disabled: !ed, 'aria-label': t('lbl.manager_note'), placeholder: overOk ? t('scr.S10.over_tol_note_ph') : t('scr.S10.note_ph') });
             ta.value = x.note || '';
-            ta.addEventListener('input', function () { x.note = ta.value; touch(it.itemId); });
+            if (overOk && !String(ta.value).trim()) ta.setAttribute('aria-invalid', 'true');
+            ta.addEventListener('input', function () {
+              x.note = ta.value;
+              if (overOk) { if (String(ta.value).trim()) ta.removeAttribute('aria-invalid'); else ta.setAttribute('aria-invalid', 'true'); }
+              touch(it.itemId);
+            });
             box.appendChild(ta);
           }
           if (x.result && x.result !== 'na') {
