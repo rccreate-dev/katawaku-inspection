@@ -50,7 +50,7 @@ const POST = (engine) => ({ lot: 'RPD-' + engine, variant: 'post', engine });
 describe('C-REP-07/08・C-DRAW-07 テストデータ(全対象)', () => {
   before(() => h.reset());
 
-  it('実測つきの記録(打設前・出来形・図面つき・i8のみ)が qa_ok になり generateReport が成功する(職長の許容超は ng。管理者は許容超でも ok で判定できる)', async () => {
+  it('実測つきの記録(打設前・出来形・図面つき・i8のみ)が qa_ok になり generateReport が成功する(職長の許容超は ng。管理者は許容超でも qaNote つきの ok で判定できる=版1.11.1)', async () => {
     await m.setEngine('html');
     const specs = [
       { lot: 'RT1', variant: 'full', drawings: [{ side: 'self', markers: markersA(NO_PRE) }] },
@@ -66,7 +66,8 @@ describe('C-REP-07/08・C-DRAW-07 テストデータ(全対象)', () => {
         assert.deepEqual(i6.self.values, [1, -3, 2, -2.5]); assert.equal(i6.self.result, 'ng');
         assert.deepEqual(i6.qa.values, [2, 3]);
         const i5 = rec.rec.items.find((i) => i.itemId === 'i5');
-        assert.deepEqual(i5.qa.values, [7]); assert.equal(i5.qa.result, m.QA_OVER_RESULT); assert.equal(i5.self.result, 'ok');
+        assert.deepEqual(i5.qa.values, [7]); assert.equal(i5.qa.result, 'ok'); assert.equal(i5.qa.note, m.QA_OVER_NOTE); assert.equal(i5.self.result, 'ok');
+        assert.equal(i6.qa.result, 'ok'); assert.equal(i6.qa.note, m.QA_OVER_NOTE);
         assert.equal(rec.rec.drawings.length, s.drawings.length);
       }
       const g = await rec.qa.call('generateReport', { recordId: rec.recordId });
@@ -190,8 +191,7 @@ describe('C-REP-01②(改訂)・C-REP-07: HTML方式の実測(harness: /__mock/l
     const nSelf = rec.items.filter((i) => i.def.audience !== 'qa').length;
     const nQa = rec.items.filter((i) => i.def.audience !== 'foreman').length;
     assert.deepEqual(sum.rows[1].cells.map((c) => c.text), ['職長', String(nSelf - 1), '1', '0']);
-    const nQaOver = 2; // i5・i6 の管理者の結果(QA_OVER_RESULT)
-    const qaCount = m.QA_OVER_RESULT === 'ok' ? [nQa, 0, 0] : [nQa - nQaOver, 0, nQaOver];
+    const qaCount = [nQa, 0, 0]; // 管理者は全項目 ok(i5・i6 の許容超も ok。版1.11.1)
     assert.deepEqual(sum.rows[2].cells.map((c) => c.text), ['管理者', ...qaCount.map(String)]);
     // 実測セル・注記に「不合格」「不適合」がない
     for (const r of tb.rows.slice(1)) assert.ok(!/不合格|不適合/.test(r.cells[4].text), `No.${r.cells[0].text} の実測セル`);

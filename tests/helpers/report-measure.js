@@ -52,22 +52,21 @@ function harnessDoc(it, name, fn) {
 // ---------------------------------------------------------------------------
 // テストデータ
 const LONG_QA_NOTE = 'あいうえお'.repeat(40); // 管理者コメント200文字(全文が項目表に入ること。C-REP-01②・C-REP-08④)
-// 注意(SPEC の食い違い。報告済み): §12.3 C-REP-07 は「管理者の i5 [7]・i6 [2,3] を結果 ok」とするが、§5.3.1(QA判定の検査)は
-//   「測定・許容超過は職長側と同じルール(qaValues で判定)」で、mock・backend とも submitVerdict(ok) が MEASURE_OVER_TOL_OK で拒否する
-//   (§10.2d-9 は「管理者側の ok には同じ検査がない」と書く)。SPEC が決まるまで、許容超の管理者値の結果は na にして qa_ok に進める
-//   (行が NG で赤くならない・▲ が出る、の検査には支障がない)。SPEC/実装を「ok を許す」に直したら 'ok' に戻す。
-const QA_OVER_RESULT = 'na';
+// 版1.11.1(SPEC §5.3.1・§12.3 C-REP-07): 管理者は許容超の実測値にも ok を付けられる。ただし qaNote(trim後)が必須(QA_OVER_TOL_COMMENT_REQUIRED)。
+//   管理者の値が許容超の i5 [7]・i6 [2,3] は結果 ok にして、qaNote に QA_OVER_NOTE を入れる(入れないと submitVerdict が拒否される)。
+const QA_OVER_RESULT = 'ok';
+const QA_OVER_NOTE = '図面で確認済み';
 const QA_OVER_LABEL = { ok: '合', na: '該当なし' }[QA_OVER_RESULT];
 const CIRCLED = ['⓪', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳'];
 
 /**
  * 実測つきの qa_ok 記録を作る。
- *   variant 'full'  : pre_pour。i4 職長[-5,-5,-2,-5,3,-1,5,-5] / i6(許容2)職長[1,-3,2,-2.5](結果 ng・備考・minor・写真)・管理者[2,3] /
- *                     i5 職長[1,2]・管理者[7](職長・管理者とも ok) / i8(許容なし)職長[2,-1,0](写真) / i7 値なし(管理者コメント200文字)。管理者の結果は全 ok
+ *   variant 'full'  : pre_pour。i4 職長[-5,-5,-2,-5,3,-1,5,-5] / i6(許容2)職長[1,-3,2,-2.5](結果 ng・備考・minor・写真)・管理者[2,3](結果 ok・qaNote あり) /
+ *                     i5 職長[1,2]・管理者[7](職長・管理者とも ok。管理者は qaNote 必須=版1.11.1) / i8(許容なし)職長[2,-1,0](写真) / i7 値なし(管理者コメント200文字)。管理者の結果は全 ok
  *   variant 'i8only': pre_pour。i8 職長[2,-1,0] だけ(許容ありの実測が1つも無い記録=注記が出ない)
  *   variant 'post'  : post_demold。i56(許容10)職長[-10,11,4](結果 ng・備考・minor・写真) / i57(許容3)職長[3,-3]
  *   drawings: [{ side:'self'|'qa', markers:[{ item:'i4', label:'④-1' }…] }…](self は提出前、qa は claim 後に登録。x,y は適当)
- * 許容超の ok は職長の提出で MEASURE_OVER_TOL_OK になるため、職長の許容超は結果を ng にする(SPEC §12.3)。
+ * 職長の許容超の ok は提出で MEASURE_OVER_TOL_OK になる(職長側は不変)ため、職長の許容超は結果を ng にする。管理者の許容超 ok は qaNote つきで通る(版1.11.1)。
  */
 async function makeMeasureRecord({ lot, variant = 'full', drawings = [] } = {}) {
   const t = await h.login('u_tanaka');
@@ -86,7 +85,7 @@ async function makeMeasureRecord({ lot, variant = 'full', drawings = [] } = {}) 
       i6: { result: 'ng', severity: 'minor', note: '開口の建入れ不良', values: [1, -3, 2, -2.5] },
       i8: { values: [2, -1, 0] },
     };
-    qaOver = { i5: { result: QA_OVER_RESULT, values: [7] }, i6: { result: QA_OVER_RESULT, values: [2, 3] }, i7: { note: LONG_QA_NOTE } };
+    qaOver = { i5: { result: QA_OVER_RESULT, values: [7], note: QA_OVER_NOTE }, i6: { result: QA_OVER_RESULT, values: [2, 3], note: QA_OVER_NOTE }, i7: { note: LONG_QA_NOTE } };
     ngPhotoItems = ['i6', 'i8'];
   } else if (variant === 'i8only') {
     selfOver = { i8: { values: [2, -1, 0] } };
@@ -226,7 +225,7 @@ function colWidthsMm(tb) {
 
 module.exports = {
   h, setEngine, docShim, isHarness, lastHtml, harnessHtml, harnessDoc,
-  LONG_QA_NOTE, QA_OVER_RESULT, QA_OVER_LABEL, CIRCLED, makeMeasureRecord, markersOf,
+  LONG_QA_NOTE, QA_OVER_RESULT, QA_OVER_NOTE, QA_OVER_LABEL, CIRCLED, makeMeasureRecord, markersOf,
   CELL, CELL_POST, NOTE_TEXT, OLD_NOTE_TEXT, RED,
   textOf, linesOf, parseTables, headerTexts, ITEM_HEAD, LEGEND_HEAD, itemsTable, legendTables, itemRow, overSpans, photoBlocks, itemsCssRules, hasGrayBg, hasNgBg, colWidthsMm,
 };
