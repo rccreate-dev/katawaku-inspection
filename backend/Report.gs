@@ -88,7 +88,7 @@ function measureView_(row, side) {
   return {
     side: isSelf ? 'self' : 'qa', label: isSelf ? '職長' : '管理者', n: n, values: values, min: min, max: max, minText: minText, maxText: maxText,
     tol: tol, unit: unit, overCount: overCount,
-    valuesText: values.map(function (x) { return (x.over ? '▲' : '') + x.text; }).join('、'),
+    valuesText: values.map(function (x) { return (x.over ? '▲' : '') + x.text; }).join('、 '),
     summaryText: summary
   };
 }
@@ -113,9 +113,9 @@ var MEASURE_COLOR_ = { over: '#cc0000', label: '#555555', summary: '#444444' };
 /** HTML: 許容超を囲む span(class と同じ内容のインライン style の両方。GAS変換はクラスを無視することがあるため) */
 function measureOverSpan_(t) { return '<span class="over" style="font-weight:bold;color:#cc0000">' + esc_(t) + '</span>'; }
 
-/** HTML: 値の並び(許容超の値だけ over の span。区切りの「、」は span の外) */
+/** HTML: 値の並び(許容超の値だけ over の span。区切りの「、 」(読点+半角スペース)は span の外) */
 function measureValuesHtml_(view) {
-  return view.values.map(function (x) { return x.over ? measureOverSpan_('▲' + x.text) : esc_(x.text); }).join('、');
+  return view.values.map(function (x) { return x.over ? measureOverSpan_('▲' + x.text) : esc_(x.text); }).join('、 ');
 }
 
 /** HTML: 要約(末尾の ▲許容超n件 だけ over の span) */

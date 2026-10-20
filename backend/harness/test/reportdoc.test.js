@@ -213,19 +213,13 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   near(items.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5);
   // 全ての表の列幅合計が実効幅(184mm)で揃う(右端が本文右余白からはみ出さない)
   d.tables.forEach((t, i) => near(t.colWidths.reduce((a, b) => a + b, 0), MM(184), 0.5, '表' + i + 'の列幅合計'));
-  // h2 見出しは次の段落と同じページに置く(孤立防止)
-  ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((h) => assert.ok(d.keepWithNextTexts.includes(h), 'keepWithNext: ' + h));
-  assert.ok(!d.keepWithNextTexts.includes('提出回数: 1'));
-  // SPEC §11.4 lastDoc.paragraphs: 本文直下の段落のみ(表のセル内を含めない)。h2 は true、h1・注記・本文は false
-  assert.ok(Array.isArray(d.paragraphs) && d.paragraphs.every((p) => typeof p.text === 'string' && typeof p.keepWithNext === 'boolean'));
-  const kw = (t) => d.paragraphs.filter((p) => p.text === t);
+  // 版1.11.2: 実GASの Paragraph に setKeepWithNext は無い。keepWithNext は使わず、観測にも出さない
+  assert.equal(d.keepWithNextTexts, undefined);
+  assert.ok(Array.isArray(d.paragraphs) && d.paragraphs.every((p) => typeof p.text === 'string' && !('keepWithNext' in p)));
   ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((hd) => {
-    assert.equal(kw(hd).length, 1, 'h2は1つ: ' + hd); assert.equal(kw(hd)[0].keepWithNext, true, 'paragraphs keepWithNext: ' + hd);
+    assert.equal(d.paragraphs.filter((p) => p.text === hd).length, 1, 'h2は1つ: ' + hd);
   });
-  assert.equal(kw('提出回数: 1')[0].keepWithNext, false);
   assert.equal(d.paragraphs.filter((p) => p.text.startsWith('管理者コメントの全文は')).length, 0, '旧注記は廃止(版1.11.0)');
-  assert.equal(d.paragraphs[0].keepWithNext, false, 'h1 は false');
-  assert.deepEqual(d.paragraphs.filter((p) => p.keepWithNext).map((p) => p.text).sort(), d.keepWithNextTexts.slice().sort());
   assert.equal(d.paragraphs.length, model.body.children.filter((c) => c.kind === 'p').length, '表のセル内の段落は含めない');
   assert.ok(!d.paragraphs.some((p) => p.text.indexOf('撮影') === 0), '写真ブロックのセル内の段落は含めない');
   items.minRowHeights.slice(1).forEach((v) => near(v, 17.0, 0.1));

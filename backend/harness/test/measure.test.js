@@ -42,25 +42,25 @@ test('U-MEAS-01 measureView_: 書式・要約・許容超(境界は許容内)', 
     return v;
   };
   // ① 境界の ±5 は許容内
-  chk(rowOf([-5, -5, -2, -5, 3, -1, 5, -5], 5), '-5、-5、-2、-5、+3、-1、+5、-5', 'n=8 最小-5/最大+5/許容±5mm', 0, 8);
+  chk(rowOf([-5, -5, -2, -5, 3, -1, 5, -5], 5), '-5、 -5、 -2、 -5、 +3、 -1、 +5、 -5', 'n=8 最小-5/最大+5/許容±5mm', 0, 8);
   // ②
-  chk(rowOf([-6, 0, 5.5, 2], 5), '▲-6、0、▲+5.5、+2', 'n=4 最小-6/最大+5.5/許容±5mm ▲許容超2件', 2, 4);
+  chk(rowOf([-6, 0, 5.5, 2], 5), '▲-6、 0、 ▲+5.5、 +2', 'n=4 最小-6/最大+5.5/許容±5mm ▲許容超2件', 2, 4);
   // ③
-  chk(rowOf([-3, 1], 3), '-3、+1', 'n=2 最小-3/最大+1/許容±3mm', 0, 2);
+  chk(rowOf([-3, 1], 3), '-3、 +1', 'n=2 最小-3/最大+1/許容±3mm', 0, 2);
   // ④ n=1 は最小/最大を出さない
   chk(rowOf([4], 3), '▲+4', 'n=1 許容±3mm ▲許容超1件', 1, 1);
   // ⑤ 許容なし
-  const v5 = chk(rowOf([2, -1, 0], null), '+2、-1、0', 'n=3 最小-1/最大+2', 0, 3);
+  const v5 = chk(rowOf([2, -1, 0], null), '+2、 -1、 0', 'n=3 最小-1/最大+2', 0, 3);
   assert.equal(v5.tol, null);
   assert.ok(!/▲|許容/.test(v5.valuesText + v5.summaryText));
   chk(rowOf([2], null), '+2', 'n=1', 0, 1);
   // ⑥ 許容が 0・''・-1・'abc'・欠落 は許容なし
-  [0, '', -1, 'abc'].forEach((t) => chk(rowOf([2, -1, 0], t), '+2、-1、0', 'n=3 最小-1/最大+2', 0, 3));
-  chk({ selfValues: [2, -1, 0], snapshot: {} }, '+2、-1、0', 'n=3 最小-1/最大+2', 0, 3);
-  chk(rowOf([2, -1, 0], undefined), '+2、-1、0', 'n=3 最小-1/最大+2', 0, 3);
-  chk(rowOf([2.5, 2.6], 2.5), '+2.5、▲+2.6', 'n=2 最小+2.5/最大+2.6/許容±2.5mm ▲許容超1件', 1, 2);
+  [0, '', -1, 'abc'].forEach((t) => chk(rowOf([2, -1, 0], t), '+2、 -1、 0', 'n=3 最小-1/最大+2', 0, 3));
+  chk({ selfValues: [2, -1, 0], snapshot: {} }, '+2、 -1、 0', 'n=3 最小-1/最大+2', 0, 3);
+  chk(rowOf([2, -1, 0], undefined), '+2、 -1、 0', 'n=3 最小-1/最大+2', 0, 3);
+  chk(rowOf([2.5, 2.6], 2.5), '+2.5、 ▲+2.6', 'n=2 最小+2.5/最大+2.6/許容±2.5mm ▲許容超1件', 1, 2);
   // ⑦ 数字の文字列の許容
-  chk(rowOf([5, 6], '5'), '+5、▲+6', 'n=2 最小+5/最大+6/許容±5mm ▲許容超1件', 1, 2);
+  chk(rowOf([5, 6], '5'), '+5、 ▲+6', 'n=2 最小+5/最大+6/許容±5mm ▲許容超1件', 1, 2);
   // ⑧ 有効値なし → null
   [[], null, undefined, [null, ''], [NaN]].forEach((vals) => {
     const row = { selfValues: vals, qaValues: vals, snapshot: { tol: 5, unit: 'mm' } };
@@ -69,19 +69,19 @@ test('U-MEAS-01 measureView_: 書式・要約・許容超(境界は許容内)', 
   });
   assert.equal(unit.measureView_({ snapshot: {} }, 'self'), null, '値の欠落');
   // ⑨ 数字の文字列は数値に。無効な要素は数えない
-  chk(rowOf(['3', '-2.5'], null), '+3、-2.5', 'n=2 最小-2.5/最大+3', 0, 2);
+  chk(rowOf(['3', '-2.5'], null), '+3、 -2.5', 'n=2 最小-2.5/最大+3', 0, 2);
   chk(rowOf(['x', 2], null), '+2', 'n=1', 0, 1);
   // ⑩ -0
-  chk(rowOf([-0, 0], null), '0、0', 'n=2 最小0/最大0', 0, 2);
+  chk(rowOf([-0, 0], null), '0、 0', 'n=2 最小0/最大0', 0, 2);
   // ⑪ 単位
-  chk({ selfValues: [1, 2], snapshot: { tol: 5, unit: '' } }, '+1、+2', 'n=2 最小+1/最大+2/許容±5mm', 0, 2);
-  chk({ selfValues: [1, 2], snapshot: { tol: 5 } }, '+1、+2', 'n=2 最小+1/最大+2/許容±5mm', 0, 2);
-  chk({ selfValues: [1, 2], snapshot: { tol: 5, unit: 'cm' } }, '+1、+2', 'n=2 最小+1/最大+2/許容±5cm', 0, 2);
+  chk({ selfValues: [1, 2], snapshot: { tol: 5, unit: '' } }, '+1、 +2', 'n=2 最小+1/最大+2/許容±5mm', 0, 2);
+  chk({ selfValues: [1, 2], snapshot: { tol: 5 } }, '+1、 +2', 'n=2 最小+1/最大+2/許容±5mm', 0, 2);
+  chk({ selfValues: [1, 2], snapshot: { tol: 5, unit: 'cm' } }, '+1、 +2', 'n=2 最小+1/最大+2/許容±5cm', 0, 2);
   assert.equal(mv({ selfValues: [1], snapshot: { tol: 5, unit: 'cm' } }).unit, 'cm');
   // ⑫ side: 職長と管理者は別の系列
   const row = { selfValues: [1, 9], qaValues: [-2], snapshot: { tol: 5, unit: 'mm' } };
   const s = mv(row, 'self'), q = mv(row, 'qa');
-  assert.equal(s.label, '職長'); assert.equal(s.side, 'self'); assert.equal(s.valuesText, '+1、▲+9');
+  assert.equal(s.label, '職長'); assert.equal(s.side, 'self'); assert.equal(s.valuesText, '+1、 ▲+9');
   assert.equal(q.label, '管理者'); assert.equal(q.side, 'qa'); assert.equal(q.valuesText, '-2'); assert.equal(q.summaryText, 'n=1 許容±5mm');
   // ⑬ 入力順(並べ替えない)・戻り値の形
   const v = mv(rowOf([3, -1, 2], null));
@@ -249,10 +249,10 @@ test('C-REP-07 ①②③ 項目表の実測セル(文字列・マークアップ
   const html = h.state.lastHtml;
   const r = htmlItemRows(html);
   const lines = (n) => r[String(n)].text.split('\n');
-  assert.deepEqual(lines(N.i4), ['職長: -5、-5、-2、-5、+3、-1、+5、-5', 'n=8 最小-5/最大+5/許容±5mm'], '境界の ±5 は許容内(▲なし)');
-  assert.deepEqual(lines(N.i6), ['職長: +1、▲-3、+2、▲-2.5', 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件', '管理者: +2、▲+3', 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件'], '職長の2行→管理者の2行。混ぜた要約がない');
-  assert.deepEqual(lines(N.i5), ['職長: +1、+2', 'n=2 最小+1/最大+2/許容±5mm', '管理者: ▲+7', 'n=1 許容±5mm ▲許容超1件']);
-  assert.deepEqual(lines(N.i8), ['職長: +2、-1、0', 'n=3 最小-1/最大+2'], '許容なし');
+  assert.deepEqual(lines(N.i4), ['職長: -5、 -5、 -2、 -5、 +3、 -1、 +5、 -5', 'n=8 最小-5/最大+5/許容±5mm'], '境界の ±5 は許容内(▲なし)');
+  assert.deepEqual(lines(N.i6), ['職長: +1、 ▲-3、 +2、 ▲-2.5', 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件', '管理者: +2、 ▲+3', 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件'], '職長の2行→管理者の2行。混ぜた要約がない');
+  assert.deepEqual(lines(N.i5), ['職長: +1、 +2', 'n=2 最小+1/最大+2/許容±5mm', '管理者: ▲+7', 'n=1 許容±5mm ▲許容超1件']);
+  assert.deepEqual(lines(N.i8), ['職長: +2、 -1、 0', 'n=3 最小-1/最大+2'], '許容なし');
   assert.ok(!/許容|▲/.test(r[String(N.i8)].text));
   assert.equal(r[String(N.i7)].text, '', '値なしは空欄');
   assert.equal(r[String(N.i7)].meas.replace(/<[^>]+>/g, ''), '');
@@ -265,7 +265,7 @@ test('C-REP-07 ①②③ 項目表の実測セル(文字列・マークアップ
   assert.equal((i5.match(/class="over"/g) || []).length, 2);
   assert.ok(!/class="over"/.test(i4), '許容内(境界を含む)の値は over の外');
   assert.ok(i6.includes('+1、<span') && i6.includes('</span>、+2、'), '区切りの「、」は over の外');
-  assert.ok(i5.includes('職長: </span>+1、+2'), '許容内の +1・+2 は over の外');
+  assert.ok(i5.includes('職長: </span>+1、 +2'), '許容内の +1・+2 は over の外');
   assert.ok(i6.includes('color:#555555') && i6.includes('color:#444444'), 'ラベル #555555・要約 #444444 のインライン style');
   // ③ 旧形式の廃止
   assert.ok(!html.includes(' / 許容±') && !strip(r[String(N.i4)].meas).includes(' | '), '旧: 値, 値 / 許容±N と | 連結が出ない');
@@ -315,14 +315,14 @@ test('C-REP-07 ⑥ 写真ブロック: 実測(職長)/(管理者) を同じ書�
   const b6 = of(N.i6);
   assert.ok(b6.length >= 1);
   const t6 = strip(b6[0]).split('\n');
-  const i = t6.indexOf('実測(職長): +1、▲-3、+2、▲-2.5');
+  const i = t6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
   assert.ok(i >= 0, t6.join(' / '));
   assert.equal(t6[i + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件');
-  assert.equal(t6[i + 2], '実測(管理者): +2、▲+3');
+  assert.equal(t6[i + 2], '実測(管理者): +2、 ▲+3');
   assert.equal(t6[i + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
   assert.ok(b6[0].includes(OVER('▲-3')) && b6[0].includes(OVER('▲許容超2件')));
   const t8 = strip(of(N.i8)[0]).split('\n');
-  const j = t8.indexOf('実測(職長): +2、-1、0');
+  const j = t8.indexOf('実測(職長): +2、 -1、 0');
   assert.ok(j >= 0 && t8[j + 1] === 'n=3 最小-1/最大+2', t8.join(' / '));
   assert.ok(!t8.some((l) => l.startsWith('実測(管理者)')), '管理者の値がない側は出さない');
   blocks.forEach((b) => assert.ok(!/(^|\n)実測: /.test(strip(b)), '旧形式 実測: で始まる行がない'));
@@ -336,8 +336,8 @@ test('C-REP-07 ⑦ 出来形(post_demold)にも同じ規則(i56 許容10・i57 �
   const { id, N } = buildPostDemold();
   gen(id);
   const r = htmlItemRows(h.state.lastHtml);
-  assert.deepEqual(r[String(N.i56)].text.split('\n'), ['職長: -10、▲+11、+4', 'n=3 最小-10/最大+11/許容±10mm ▲許容超1件']);
-  assert.deepEqual(r[String(N.i57)].text.split('\n'), ['職長: +3、-3', 'n=2 最小-3/最大+3/許容±3mm']);
+  assert.deepEqual(r[String(N.i56)].text.split('\n'), ['職長: -10、 ▲+11、 +4', 'n=3 最小-10/最大+11/許容±10mm ▲許容超1件']);
+  assert.deepEqual(r[String(N.i57)].text.split('\n'), ['職長: +3、 -3', 'n=2 最小-3/最大+3/許容±3mm']);
   assert.ok(h.state.lastHtml.includes('実測の ▲ は許容(±)を超えた値の目安です'));
 });
 
@@ -364,7 +364,7 @@ test('C-REP-08 ①〜⑦ doc方式の実測: 項目表の文字列・色/太字�
   // ① html と同じ文字列(段落の区切りは \n)。i7 は ""
   Object.keys(htmlRows).forEach((n) => assert.equal(cell(n), htmlRows[n].text, '項目' + n + ' の実測'));
   assert.equal(cell(N.i7), '');
-  assert.equal(cell(N.i4), '職長: -5、-5、-2、-5、+3、-1、+5、-5\nn=8 最小-5/最大+5/許容±5mm');
+  assert.equal(cell(N.i4), '職長: -5、 -5、 -2、 -5、 +3、 -1、 +5、 -5\nn=8 最小-5/最大+5/許容±5mm');
   // ② 色・太字
   const red = d.coloredTexts['#CC0000'];
   ['▲-3', '▲-2.5', '▲+3', '▲+7', '▲許容超2件', '▲許容超1件'].forEach((t) => assert.ok(red.includes(t), '赤: ' + t + ' / ' + JSON.stringify(red)));
@@ -384,9 +384,9 @@ test('C-REP-08 ①〜⑦ doc方式の実測: 項目表の文字列・色/太字�
   // ⑤ 写真ブロック右セル
   const blocks = d.tables.filter((t) => t.cols === 2).map((t) => t.cellTexts[0][1]);
   const b6 = blocks.find((b) => b.includes('No.' + N.i6 + ' '));
-  assert.ok(b6.includes('実測(職長): +1、▲-3、+2、▲-2.5\nn=4 最小-3/最大+2/許容±2mm ▲許容超2件\n実測(管理者): +2、▲+3\nn=2 最小+2/最大+3/許容±2mm ▲許容超1件'), b6);
+  assert.ok(b6.includes('実測(職長): +1、 ▲-3、 +2、 ▲-2.5\nn=4 最小-3/最大+2/許容±2mm ▲許容超2件\n実測(管理者): +2、 ▲+3\nn=2 最小+2/最大+3/許容±2mm ▲許容超1件'), b6);
   const b8 = blocks.find((b) => b.includes('No.' + N.i8 + ' '));
-  assert.ok(b8.includes('実測(職長): +2、-1、0\nn=3 最小-1/最大+2') && !b8.includes('実測(管理者)'), b8);
+  assert.ok(b8.includes('実測(職長): +2、 -1、 0\nn=3 最小-1/最大+2') && !b8.includes('実測(管理者)'), b8);
   blocks.filter((b) => b.includes('実測')).forEach((b) => assert.ok(!/(^|\n)実測: /.test(b)));
   // ⑦ 背景: i5 の行(▲+7・ok)は null、i6(職長NG)は赤、見出し行は #EEEEEE
   const bg = (n) => items.cellBackgrounds[Number(n)];
@@ -412,8 +412,8 @@ test('C-REP-08 ⑥ 出来形(doc)でも同じ文字列', () => {
   gen(id);
   const d = docShim().lastDoc;
   const items = d.tables.find((t) => t.cols === 7);
-  assert.equal(items.cellTexts[N.i56][4], '職長: -10、▲+11、+4\nn=3 最小-10/最大+11/許容±10mm ▲許容超1件');
-  assert.equal(items.cellTexts[N.i57][4], '職長: +3、-3\nn=2 最小-3/最大+3/許容±3mm');
+  assert.equal(items.cellTexts[N.i56][4], '職長: -10、 ▲+11、 +4\nn=3 最小-10/最大+11/許容±10mm ▲許容超1件');
+  assert.equal(items.cellTexts[N.i57][4], '職長: +3、 -3\nn=2 最小-3/最大+3/許容±3mm');
   assert.ok(d.coloredTexts['#CC0000'].includes('▲+11'));
 });
 

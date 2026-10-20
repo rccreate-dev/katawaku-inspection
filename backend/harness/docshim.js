@@ -76,7 +76,6 @@ function createDocShim(state, hooks) {
     setSpacingBefore(v) { this._ck(); this.spacing.before = v; return this; }
     setSpacingAfter(v) { this._ck(); this.spacing.after = v; return this; }
     setLineSpacing(v) { this._ck(); this.lineSpacing = v; return this; }
-    setKeepWithNext(v) { this._ck(); this.keepWithNext = !!v; return this; }
     appendInlineImage(blob) {
       this._ck();
       if (ds.failMode === 'image') throw new Error('Service error: Document (注入された画像挿入の失敗)');
@@ -184,6 +183,7 @@ function createDocShim(state, hooks) {
     getId() { return this.id; }
     getName() { return this.title; }
     getBody() { this._ck(); return this.body; }
+    getFooter() { this._ck(); return this.footer; }
     addFooter() { this._ck(); need(!this.footer, 'フッタは追加済みです'); this.footer = new Footer(this); return this.footer; }
     saveAndClose() { this.closed = true; }
     bodyTables() { return this.body.children.filter((c) => c.kind === 't'); }
@@ -210,9 +210,7 @@ function createDocShim(state, hooks) {
         title: this.title, pageWidth: b.pageWidth, pageHeight: b.pageHeight, margins: Object.assign({}, b.margins),
         fontFamily: b.fontFamily, text: this.fullText(), pageBreaks: b.pageBreaks, images,
         // SPEC §11.4(版1.10.2): 本文直下の段落ごとの観測(表のセル内は含めない)
-        paragraphs: b.children.filter((c) => c.kind === 'p').map((c) => ({ text: c.text, keepWithNext: !!c.keepWithNext })),
-        // 後方互換(旧テスト用)
-        keepWithNextTexts: b.children.filter((c) => c.kind === 'p' && c.keepWithNext).map((c) => c.text),
+        paragraphs: b.children.filter((c) => c.kind === 'p').map((c) => ({ text: c.text })),
         tables: tables.map((t) => ({
           rows: t.rows.length, cols: t.rows[0].cells.length, colWidths: t.colWidths.slice(),
           minRowHeights: t.rows.map((r) => r.minHeight), borderWidth: t.borderWidth,

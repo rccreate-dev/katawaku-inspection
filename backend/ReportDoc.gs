@@ -20,7 +20,7 @@ var REPORT_DOC_FONT = 'Noto Sans JP';
 var REPORT_DOC_SIZE = { body: 7.5, table: 7.5, note: 6, foot: 6, h1: 12, h2: 9 };
 var REPORT_DOC_COLOR = { text: '#111111', label: '#555555', ng: '#CC0000', note: '#444444', border: '#666666', head: '#EEEEEE', ngRow: '#FDE8E8' };
 var REPORT_DOC_BORDER_PT = 0.75;
-var REPORT_DOC_H2 = { size: REPORT_DOC_SIZE.h2, bold: true, before: 9, after: 3, keepNext: true };   // 見出し(h2)の共通書式
+var REPORT_DOC_H2 = { size: REPORT_DOC_SIZE.h2, bold: true, before: 9, after: 3 };   // 見出し(h2)の共通書式
 var REPORT_DOC_PAD = { v: 2, h: 3, photoV: 3 };   // セル余白(上下・左右・写真ブロックの上下)
 var REPORT_DOC_ROW_MIN_PT = 17.0;                  // 項目表・凡例表の最低行高(6mm)
 var REPORT_DOC_SIGN_MIN_PT = 36;                   // サイン欄本文行の最低高
@@ -86,7 +86,7 @@ function docRuns_(p, runs) {
   });
 }
 
-/** 本文の段落を1つ作る(見出し・注記・通常文)。opts: size / bold / color / before / after / first(最初の空段落を再利用) / keepNext(次の段落と同じページに置く。見出し用) */
+/** 本文の段落を1つ作る(見出し・注記・通常文)。opts: size / bold / color / before / after / first(最初の空段落を再利用) */
 function docBodyPara_(body, runs, opts) {
   opts = opts || {};
   var p = opts.first ? body.getParagraphs()[0] : body.appendParagraph('');
@@ -97,7 +97,6 @@ function docBodyPara_(body, runs, opts) {
   p.setForegroundColor(opts.color || REPORT_DOC_COLOR.text);
   p.setSpacingBefore(opts.before || 0);
   p.setSpacingAfter(opts.after || 0);
-  if (opts.keepNext) p.setKeepWithNext(true);   // 見出しだけがページ末に孤立しないよう次の段落と同じページに置く
   marks.forEach(function (f) { f(); });
   return p;
 }
@@ -146,17 +145,26 @@ function docCellLines_(cell, lines) {
 
 /** 表全体の基準書式(文字サイズ・色・太字なし)。内容を入れた後、範囲装飾の前に呼ぶ */
 function docTableBase_(table) {
-  var tx = table.editAsText();
-  tx.setFontSize(REPORT_DOC_SIZE.table);
-  tx.setForegroundColor(REPORT_DOC_COLOR.text);
-  tx.setBold(false);
+  var fmt = function (tx) {
+    tx.setFontSize(REPORT_DOC_SIZE.table);
+    tx.setForegroundColor(REPORT_DOC_COLOR.text);
+    tx.setBold(false);
+  };
+  try { fmt(table.editAsText()); } catch (e) {   // Table.editAsText が使えない場合はセルごと(要確認の保険)
+    for (var r = 0; r < table.getNumRows(); r++) {
+      var row = table.getRow(r);
+      for (var c = 0; c < row.getNumCells(); c++) fmt(row.getCell(c).editAsText());
+    }
+  }
 }
 
 /** 見出し行(背景・太字) */
 function docHeadRow_(table, rowIdx) {
   var row = table.getRow(rowIdx);
   for (var c = 0; c < row.getNumCells(); c++) row.getCell(c).setBackgroundColor(REPORT_DOC_COLOR.head);
-  row.editAsText().setBold(true);
+  try { row.editAsText().setBold(true); } catch (e) {   // TableRow.editAsText が使えない場合はセルごと(要確認の保険)
+    for (var k = 0; k < row.getNumCells(); k++) row.getCell(k).editAsText().setBold(true);
+  }
 }
 
 /**
@@ -170,7 +178,7 @@ function docTextTable_(body, rows, o, t0) {
   rows.forEach(function (cellsOfRow, r) {
     var row = t.getRow(r);
     var min = (o.rowMin && o.rowMin[r]) || o.minHeight;
-    if (min) row.setMinimumHeight(min);
+    if (min) row.setMinimumHeight(Math.round(min));   // 実GASの引数は Integer
     cellsOfRow.forEach(function (lines, c) {
       var cell = row.getCell(c);
       docCellPad_(cell);
@@ -207,8 +215,8 @@ function docFitImage_(img, ph, boxWmm, boxHmm) {
   if (!(rw > 0 && rh > 0)) { rw = Number(img.getWidth()); rh = Number(img.getHeight()); }
   if (!(rw > 0 && rh > 0)) return false;
   var s = Math.min(docMm_(boxWmm) / rw, docMm_(boxHmm) / rh);
-  img.setWidth(rw * s);
-  img.setHeight(rh * s);
+  img.setWidth(Math.round(rw * s));   // 実GASの引数は Integer
+  img.setHeight(Math.round(rh * s));
   return true;
 }
 
@@ -246,7 +254,7 @@ function docMeasureLines_(row, withKeyword) {
     if (!v) return;
     var runs = [{ t: (withKeyword ? '実測(' + v.label + '): ' : v.label + ': '), color: REPORT_DOC_COLOR.label }];
     v.values.forEach(function (x, i) {
-      if (i > 0) runs.push({ t: '、' });
+      if (i > 0) runs.push({ t: '、 ' });   // 読点+半角スペース(「、」直後の「-」で折り返せずセルからはみ出したため)
       runs.push(x.over ? { t: '▲' + x.text, bold: true, color: REPORT_DOC_COLOR.ng } : { t: x.text });
     });
     lines.push(runs);
@@ -326,7 +334,7 @@ function docDrawingPage_(body, ph, rows, seq, t0) {
 /** 写真ページの1ブロック(SPEC §10.5.5)。2列×1行の表 */
 function docPhotoBlock_(body, ph, rowOf, seq) {
   var t = docNewTable_(body, 1, REPORT_DOC_PHOTO_COLS_MM, {});
-  t.getRow(0).setMinimumHeight(docMm_(REPORT_DOC_PHOTO_ROW_MM));
+  t.getRow(0).setMinimumHeight(Math.round(docMm_(REPORT_DOC_PHOTO_ROW_MM)));   // 実GASの引数は Integer
   var left = t.getCell(0, 0), right = t.getCell(0, 1);
   docCellPad_(left, REPORT_DOC_PAD.photoV);
   docCellPad_(right, REPORT_DOC_PAD.photoV);
@@ -482,7 +490,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   if (photos.length > shown.length) docBodyPara_(body, '他' + (photos.length - shown.length) + '枚は電子記録で閲覧可');
 
   // 12. フッタ(全ページ。記録IDとハッシュ。ページ番号は出さない)と全体のフォント
-  var footer = doc.addFooter();
+  var footer = doc.getFooter() || doc.addFooter();   // 新規文書は通常フッタ無し。既にあれば再利用(addFooter は二重追加で例外)
   var fp = footer.getParagraphs()[0] || footer.appendParagraph('');
   fp.setText('記録ID: ' + rec.recordId + ' / 電子記録ハッシュ(SHA-256): ' + hash);
   fp.setFontSize(REPORT_DOC_SIZE.foot);
