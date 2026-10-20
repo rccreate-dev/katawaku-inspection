@@ -38,16 +38,16 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
 
   it('①許容5・[-5,-5,-2,-5,3,-1,5,-5] → 境界(±5)は許容内で ▲ なし', () => {
     expectView(row([-5, -5, -2, -5, 3, -1, 5, -5], 5),
-      { valuesText: '-5、-5、-2、-5、+3、-1、+5、-5', summaryText: 'n=8 最小-5/最大+5/許容±5mm', overCount: 0, n: 8 }, '①');
+      { valuesText: '-5、 -5、 -2、 -5、 +3、 -1、 +5、 -5', summaryText: 'n=8 最小-5/最大+5/許容±5mm', overCount: 0, n: 8 }, '①');
   });
 
   it('②許容5・[-6,0,5.5,2] → 許容超2件', () => {
     expectView(row([-6, 0, 5.5, 2], 5),
-      { valuesText: '▲-6、0、▲+5.5、+2', summaryText: 'n=4 最小-6/最大+5.5/許容±5mm ▲許容超2件', overCount: 2, n: 4 }, '②');
+      { valuesText: '▲-6、 0、 ▲+5.5、 +2', summaryText: 'n=4 最小-6/最大+5.5/許容±5mm ▲許容超2件', overCount: 2, n: 4 }, '②');
   });
 
   it('③許容3・[-3,1] → 許容内(境界)', () => {
-    expectView(row([-3, 1], 3), { valuesText: '-3、+1', summaryText: 'n=2 最小-3/最大+1/許容±3mm', overCount: 0, n: 2 }, '③');
+    expectView(row([-3, 1], 3), { valuesText: '-3、 +1', summaryText: 'n=2 最小-3/最大+1/許容±3mm', overCount: 0, n: 2 }, '③');
   });
 
   it('④許容3・[4] → n=1 は最小/最大を出さない', () => {
@@ -56,7 +56,7 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
   });
 
   it('⑤tol:null・[2,-1,0] → 許容なし(▲・許容を含まない)', () => {
-    const v = expectView(row([2, -1, 0], null), { valuesText: '+2、-1、0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑤');
+    const v = expectView(row([2, -1, 0], null), { valuesText: '+2、 -1、 0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑤');
     assert.ok(!/▲|許容/.test(v.valuesText + v.summaryText));
     assert.equal(v.tol, null);
   });
@@ -64,18 +64,18 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
   it('⑥tol が 0・\'\'・-1・\'abc\'・欠落 → 許容なし(⑤と同じ)。tol:2.5・[2.5,2.6]', () => {
     for (const tol of [0, '', -1, 'abc', undefined, NaN, Infinity]) {
       const r = row([2, -1, 0], tol);
-      const v = expectView(r, { valuesText: '+2、-1、0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑥tol=' + String(tol));
+      const v = expectView(r, { valuesText: '+2、 -1、 0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑥tol=' + String(tol));
       assert.equal(v.tol, null, 'tol=' + String(tol));
     }
     // tol キー自体が無い(snapshot:{})
-    expectView({ selfValues: [2, -1, 0], snapshot: {} }, { valuesText: '+2、-1、0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑥欠落');
+    expectView({ selfValues: [2, -1, 0], snapshot: {} }, { valuesText: '+2、 -1、 0', summaryText: 'n=3 最小-1/最大+2', overCount: 0, n: 3 }, '⑥欠落');
     const v = expectView(row([2.5, 2.6], 2.5),
-      { valuesText: '+2.5、▲+2.6', summaryText: 'n=2 最小+2.5/最大+2.6/許容±2.5mm ▲許容超1件', overCount: 1, n: 2 }, '⑥2.5');
+      { valuesText: '+2.5、 ▲+2.6', summaryText: 'n=2 最小+2.5/最大+2.6/許容±2.5mm ▲許容超1件', overCount: 1, n: 2 }, '⑥2.5');
     assert.equal(v.tol, 2.5);
   });
 
   it('⑦tol:\'5\'(数字の文字列)は許容5', () => {
-    const v = expectView(row([-6, 5], '5'), { valuesText: '▲-6、+5', summaryText: 'n=2 最小-6/最大+5/許容±5mm ▲許容超1件', overCount: 1, n: 2 }, '⑦');
+    const v = expectView(row([-6, 5], '5'), { valuesText: '▲-6、 +5', summaryText: 'n=2 最小-6/最大+5/許容±5mm ▲許容超1件', overCount: 1, n: 2 }, '⑦');
     assert.equal(v.tol, 5); assert.equal(typeof v.tol, 'number');
   });
 
@@ -89,14 +89,14 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
   });
 
   it('⑨数字の文字列は数値にする。数にできない要素は数えない', () => {
-    expectView(row(['3', '-2.5'], null), { valuesText: '+3、-2.5', summaryText: 'n=2 最小-2.5/最大+3', overCount: 0, n: 2 }, '⑨文字列');
+    expectView(row(['3', '-2.5'], null), { valuesText: '+3、 -2.5', summaryText: 'n=2 最小-2.5/最大+3', overCount: 0, n: 2 }, '⑨文字列');
     expectView(row(['x', 2], null), { valuesText: '+2', summaryText: 'n=1', overCount: 0, n: 1 }, '⑨無効要素');
     // 無効要素が混ざっても有効値は入力順のまま
-    expectView(row([1, null, 'x', '', 2], null), { valuesText: '+1、+2', summaryText: 'n=2 最小+1/最大+2', overCount: 0, n: 2 }, '⑨混在');
+    expectView(row([1, null, 'x', '', 2], null), { valuesText: '+1、 +2', summaryText: 'n=2 最小+1/最大+2', overCount: 0, n: 2 }, '⑨混在');
   });
 
   it('⑩[-0,0] → 0 と表記(-0 を出さない)', () => {
-    expectView(row([-0, 0], null), { valuesText: '0、0', summaryText: 'n=2 最小0/最大0', overCount: 0, n: 2 }, '⑩');
+    expectView(row([-0, 0], null), { valuesText: '0、 0', summaryText: 'n=2 最小0/最大0', overCount: 0, n: 2 }, '⑩');
     const v = view(row([-0, 0], null));
     assert.ok(!v.valuesText.includes('-'));
   });
@@ -115,7 +115,7 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
   it('⑫side: self は selfValues・ラベル職長、qa は qaValues・ラベル管理者(互いに影響しない)', () => {
     const r = { selfValues: [1, -3], qaValues: [7], snapshot: { tol: 5 } };
     const s = plain(ctx.measureView_(r, 'self')), q = plain(ctx.measureView_(r, 'qa'));
-    assert.equal(s.side, 'self'); assert.equal(s.label, '職長'); assert.equal(s.valuesText, '+1、-3'); assert.equal(s.summaryText, 'n=2 最小-3/最大+1/許容±5mm');
+    assert.equal(s.side, 'self'); assert.equal(s.label, '職長'); assert.equal(s.valuesText, '+1、 -3'); assert.equal(s.summaryText, 'n=2 最小-3/最大+1/許容±5mm');
     assert.equal(q.side, 'qa'); assert.equal(q.label, '管理者'); assert.equal(q.valuesText, '▲+7'); assert.equal(q.summaryText, 'n=1 許容±5mm ▲許容超1件');
     // 混ぜた系列は作らない
     assert.equal(q.n, 1); assert.equal(s.n, 2);
@@ -129,8 +129,8 @@ describe('U-MEAS-01 measureView_(§10.2d-4)', () => {
     assert.deepEqual(v.values.map((x) => x.text), ['+3', '-6', '+1', '+5.5', '-5']);
     assert.equal(v.min, -6); assert.equal(v.max, 5.5); assert.equal(v.minText, '-6'); assert.equal(v.maxText, '+5.5');
     for (const k of ['side', 'label', 'n', 'values', 'min', 'max', 'minText', 'maxText', 'tol', 'unit', 'overCount', 'valuesText', 'summaryText']) assert.ok(k in v, '返却に ' + k);
-    // valuesText = (over?'▲':'')+text を「、」で連結
-    assert.equal(v.valuesText, v.values.map((x) => (x.over ? '▲' : '') + x.text).join('、'));
+    // valuesText = (over?'▲':'')+text を「、 」で連結
+    assert.equal(v.valuesText, v.values.map((x) => (x.over ? '▲' : '') + x.text).join('、 '));
   });
 
   it('⑭副作用がない(row を変更しない。凍結した row でも同じ結果)', () => {

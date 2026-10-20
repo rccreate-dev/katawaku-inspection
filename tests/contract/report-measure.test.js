@@ -185,7 +185,7 @@ describe('C-REP-01②(改訂)・C-REP-07: HTML方式の実測(harness: /__mock/l
     // NG 行は i6 だけ
     const ngRows = tb.rows.slice(1).filter((r) => m.hasNgBg(r)).map((r) => Number(r.cells[0].text));
     assert.deepEqual(ngRows, [no('i6')]);
-    // 結果サマリ(職長: 合/NG/該当なし、管理者)
+    // 結果サマリ(職長: 合/NG/該当なし、 管理者)
     const sum = m.parseTables(html).find((t) => JSON.stringify(m.headerTexts(t)) === JSON.stringify(['', '合', 'NG', '該当なし']));
     assert.ok(sum, '結果サマリの表');
     const nSelf = rec.items.filter((i) => i.def.audience !== 'qa').length;
@@ -207,16 +207,16 @@ describe('C-REP-01②(改訂)・C-REP-07: HTML方式の実測(harness: /__mock/l
     const of = (id) => blocks.filter((b) => b.text.includes(`No.${no(id)} `));
     const b6 = of('i6'); assert.equal(b6.length, 1, 'i6 の写真は1枚');
     const l6 = nl(b6[0].text);
-    const at = l6.indexOf('実測(職長): +1、▲-3、+2、▲-2.5');
+    const at = l6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
     assert.ok(at >= 0, 'i6 職長の実測行: ' + JSON.stringify(l6));
     assert.equal(l6[at + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件', '職長の要約が実測行の次');
-    assert.equal(l6[at + 2], '実測(管理者): +2、▲+3');
+    assert.equal(l6[at + 2], '実測(管理者): +2、 ▲+3');
     assert.equal(l6[at + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
     assert.deepEqual(m.overSpans(b6[0].html).map((s) => s.text), ['▲-3', '▲-2.5', '▲許容超2件', '▲+3', '▲許容超1件'], '許容超の装飾');
     assert.ok(m.overSpans(b6[0].html).every((s) => s.styled));
     const b8 = of('i8'); assert.equal(b8.length, 1);
     const l8 = nl(b8[0].text);
-    const at8 = l8.indexOf('実測(職長): +2、-1、0');
+    const at8 = l8.indexOf('実測(職長): +2、 -1、 0');
     assert.ok(at8 >= 0, 'i8: ' + JSON.stringify(l8));
     assert.equal(l8[at8 + 1], 'n=3 最小-1/最大+2');
     assert.ok(!l8.some((x) => x.startsWith('実測(管理者)')), 'i8 は管理者の値なし');
@@ -380,13 +380,13 @@ describe('C-REP-08・C-DRAW-07: doc 方式の実測・図面の凡例(harness: /
     const text = (tb) => tb.cellTexts.map((r) => r.join('\n')).join('\n');
     const b6 = pt.filter((tb) => text(tb).includes(`No.${no('i6')} `)); assert.equal(b6.length, 1);
     const l6 = nl(text(b6[0]));
-    const at = l6.indexOf('実測(職長): +1、▲-3、+2、▲-2.5');
+    const at = l6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
     assert.ok(at >= 0, JSON.stringify(l6));
     assert.equal(l6[at + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件');
-    assert.equal(l6[at + 2], '実測(管理者): +2、▲+3');
+    assert.equal(l6[at + 2], '実測(管理者): +2、 ▲+3');
     assert.equal(l6[at + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
     const b8 = pt.filter((tb) => text(tb).includes(`No.${no('i8')} `)); assert.equal(b8.length, 1);
-    const l8 = nl(text(b8[0])); const at8 = l8.indexOf('実測(職長): +2、-1、0');
+    const l8 = nl(text(b8[0])); const at8 = l8.indexOf('実測(職長): +2、 -1、 0');
     assert.ok(at8 >= 0, JSON.stringify(l8)); assert.equal(l8[at8 + 1], 'n=3 最小-1/最大+2');
     assert.ok(!l8.some((x) => x.startsWith('実測(管理者)')));
     for (const tb of pt) for (const line of nl(text(tb))) assert.ok(!line.startsWith('実測: '), '旧形式がない');

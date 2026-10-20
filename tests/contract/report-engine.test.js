@@ -204,6 +204,10 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     [24, 76, 28, 24, 17, 17].forEach((w, i) => near(legend.colWidths[i], mm(w * 184 / 186), 0.5, 'legend.colWidths[' + i + ']'));
     // 全ての表(基本情報・サイン・結果サマリ・項目・凡例・図面画像・写真ブロック)で列幅の合計 = 184mm = 521.57pt(±0.5)
     d.tables.forEach((tb, ti) => near(tb.colWidths.reduce((a, b) => a + b, 0), 521.57, 0.5, 'tables[' + ti + '] の列幅の合計'));
+    // keepWithNext(版1.11.2 で撤回。§10.5.3): 観測の paragraphs に keepWithNext の項目がない。shim の Paragraph に setKeepWithNext が無く
+    // (本番 DocumentApp と同じ。呼ぶと is not a function)、それでも doc 方式が fallbackFrom なしで最後まで通る(下の detail 検査)
+    assert.ok(Array.isArray(d.paragraphs) && d.paragraphs.length > 0, 'paragraphs の観測');
+    for (const p of d.paragraphs) assert.ok(!('keepWithNext' in p), 'paragraphs に keepWithNext の項目がない: ' + JSON.stringify(p));
     // 内容
     assert.ok(d.text.includes('管理者コメント全文テスト'), '管理者コメント全文');
     assert.ok(d.footerText.includes(recordId), 'フッタに記録ID');
@@ -220,7 +224,8 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     const ev = (await h.eventsOf(recordId)).filter((e) => e.kind === 'report_generated').pop();
     assert.ok(ev, 'report_generated');
     const detail = typeof ev.detail === 'string' ? JSON.parse(ev.detail) : ev.detail;
-    assert.equal(detail.engine, 'doc'); assert.ok(!('fallbackFrom' in detail));
+    assert.equal(detail.engine, 'doc'); assert.ok(!('fallbackFrom' in detail), 'fallbackFrom なし(setKeepWithNext が無くても doc 方式が最後まで通る): ' + JSON.stringify(detail));
+    assert.ok(!('fallbackReason' in detail) || !/is not a function/.test(String(detail.fallbackReason)), 'is not a function が出ていない')
     assert.equal(rep.report.version, 1);
   });
 
