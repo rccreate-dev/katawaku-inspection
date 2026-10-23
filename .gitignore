@@ -1,3 +1,6 @@
 node_modules/
 .mock-state.json
 *.log
+
+# 実名・実際の現場名を含む初期名簿(C:\Claude\_inbox\kensa-private に保管。Gitに入れない)
+docs/seed-roster.gs.txt
