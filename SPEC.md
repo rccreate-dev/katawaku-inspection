@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.11.2 / 作成日: 2026-10-07(最終改訂 2026-10-20) / 作成: 設計担当
+- 版: 1.12.0 / 作成日: 2026-10-07(最終改訂 2026-11-04) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -11,7 +11,7 @@
 ## 0. 共通規約(全担当が従う)
 
 ### 0.1 確定している変更不可の決定(CLAUDE.md §2 の再掲。ここから逸脱しない)
-参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は QA「合格」「打設可」(出来形では「出来形確認済」)と職長「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長コメントと管理者コメントは別フィールド・上書き禁止 / 提出後は職長編集不可(差し戻し時のみ可) / 重大不適合=打設不可・3者サインが揃うまで打設可にならない(段階が出来形の記録では、最終状態の表示が「出来形確認済」になり、打設を止める操作は無い。§6.8) / 役割はサーバー名簿で決まる / 合否は人が決める。
+参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は 承認者の「合格」「打設可」(出来形では「出来形確認済」)と1次検査者の「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長(1次検査者)コメントと管理者(承認者)コメントは別フィールド・上書き禁止 / 提出後は1次検査者(職長・管理者・責任者)も編集不可(差し戻し時のみ可) / **1次検査者は自分の記録を承認できない(責任者だけ例外)。管理者・責任者が1次検査をした記録は責任者だけが承認・元請提出する(版1.12.0。§6.9)** / 重大不適合=打設不可・3者サインが揃うまで打設可にならない(段階が出来形の記録では、最終状態の表示が「出来形確認済」になり、打設を止める操作は無い。§6.8) / 役割はサーバー名簿で決まる / 合否は人が決める。
 
 ### 0.2 列挙値(これ以外を作らない)
 
@@ -474,8 +474,8 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | status | enum(draft,submitted,fix,qa_ok,approved) | 必 | `none`は保存しない |
 | round | int | 必 | 提出ラウンド。作成時1、`fix→submitted` の再提出で+1 |
 | reinspectOf | id | | 再検査の元記録(`approved`だった記録)。通常は空 |
-| ownerUserId | id | 必 | 作成した職長 |
-| team | str | | 作成時の作成者の班(Assignments.team)。空可 |
+| ownerUserId | id | 必 | **1次検査者**(記録を作成した人。職長・管理者・責任者のいずれか。版1.12.0。役割は `ownerRole`) |
+| team | str | | 作成時の作成者の班(Assignments.team)。空可。**1次検査者が管理者・責任者の記録では常に空**(版1.12.0) |
 | pourPlannedAt | dt | | 打設予定日時(提出時必須。P-06)。**`stage=pre_pour` のみ**。`post_demold` では使わず常に空(§6.8) |
 | firstSubmittedAt | dt | | 最初の提出時刻(期限遅れ判定用) |
 | submittedBy | id | | 直近の提出者 |
@@ -497,6 +497,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | createdAt / updatedAt | dt | 必 | |
 | version | int | 必 | 更新ごとに+1(UIの更新検知用。楽観ロックには使わない) |
 | ownerCompany | str | | **作成時の作成者の会社名の写し**(版1.8。`createRecord` 時に `Users.company` を写す。後で名簿が変わっても過去の記録は変わらない。**列は末尾に追加**(§2.9a)。この列が空の既存記録は、表示・PDFとも作成者の現在の `Users.company` で代用する) |
+| ownerRole | enum(foreman,qa,lead) | | **1次検査者の役割の写し**(版1.12.0。`createRecord` 時に作成者の `Users.role` を写す。後で名簿が変わっても変わらない。**列は `ownerCompany` の後ろ=末尾に追加**(§2.9a と同じ扱い)。**空の既存記録は `foreman` とみなす**(データの書き換えは不要)。承認できる人の決め方に使う=§6.9) |
 
 一意制約: 同一 `(siteId,floor,zone,lot,stage)` に対し `reinspectOf` が空の記録は1件まで。2件目の作成は `ALREADY_EXISTS`。`approved` 済みスロットを再検査するときだけ `reinspectOf=その記録` で追加作成でき、その記録は元記録が `approved` であること(P-31)。**一意性は段階を含む**ので、同じ現場・階・工区・ロットでも `pre_pour` と `post_demold` は別の記録として1件ずつ作れる(版1.9。既存の実装のまま)。`reinspectOf` の元記録は同じ現場・階・工区・ロット・**段階**であること(違えば `VALIDATION_FAILED`(`FIELD_INVALID`、path=`reinspectOf`))。
 
@@ -782,22 +783,22 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | registerDevice | 公 | 公 | 公 | §3.6 |
 | me / setLang / changePin / logoutDevice | ○ | ○ | ○ | 本人のみ。`changePin` は現PIN必須 |
 | getBootstrap | ○ | ○ | ○ | 自分に見える現場・項目のみ |
-| listRecords / getRecord | ○ | ○ | ○ | 職長=有効な担当(foreman/subforeman)がある現場のみ、詳細は **自班(同team)または自分の記録のみ**。他班は `masked`(要約のみ)。QA=有効な `qa_main`/`qa_sub` の現場のみ。責任者=全現場 |
-| createRecord | ○ | × | × | 職長の担当現場。`Sites.status=active` |
-| saveDraft | ○ | × | × | 自班/自分の記録。status∈{draft,fix}。`qa*` 列は書けない |
-| submitRecord | ○ | × | × | 同上。**PIN必須** |
-| claimReview | × | ○ | ○ | 担当QA(有効な qa_main/qa_sub)または責任者(最終代行)。status=submitted かつ未claim |
+| listRecords / getRecord | ○ | ○ | ○ | 職長=有効な担当(foreman/subforeman)がある現場のみ、詳細は **自班(同team)または自分の記録のみ**。他班は `masked`(要約のみ)。**ただし1次検査者が管理者・責任者の記録(`ownerRole`∈{qa,lead})は、同じ現場の職長なら班を問わず詳細まで見られる(読むだけ。版1.12.0。§6.9)**。QA=有効な `qa_main`/`qa_sub` の現場のみ。責任者=全現場 |
+| createRecord | ○ | ○ | ○ | 職長・QA=担当現場、責任者=全現場。`Sites.status=active`。作成者が1次検査者になる(`ownerRole`=作成者の役割。版1.12.0) |
+| saveDraft | ○ | ○ | ○ | 職長=自班/自分の記録。**QA・責任者=自分が1次検査者の記録のみ**(版1.12.0)。status∈{draft,fix}。`qa*` 列は書けない |
+| submitRecord | ○ | ○ | ○ | 同上。**PIN必須** |
+| claimReview | × | ○ | ○ | **承認できる人**(§6.9: 1次検査者が職長なら担当QA(有効な qa_main/qa_sub)または責任者(最終代行)、管理者・責任者なら責任者のみ)。status=submitted かつ未claim |
 | releaseClaim | × | ○ | ○ | claim者本人、または責任者 |
-| takeoverReview | × | ○ | ○ | 責任者はいつでも。担当QAは claim 者の無操作が `claimTakeoverMin` 以上、または claim 者が不在登録中 |
+| takeoverReview | × | ○ | ○ | 承認できる人のみ(§6.9)。責任者はいつでも。担当QAは claim 者の無操作が `claimTakeoverMin` 以上、または claim 者が不在登録中 |
 | saveQaDraft | × | ○ | ○ | claim者本人のみ。status=submitted |
 | submitVerdict | × | ○ | ○ | claim者本人のみ。status=submitted。`ok` は **PIN必須** |
-| recordPrimeSign | × | ○ | ○ | 担当QAまたは責任者。status=qa_ok。**PIN必須** |
+| recordPrimeSign | × | ○ | ○ | 承認できる人(§6.9。1次検査者が職長なら担当QAまたは責任者、管理者・責任者なら責任者のみ)。status=qa_ok。**PIN必須** |
 | stopPour | ○ | ○ | ○ | **その現場に有効な担当(職長は班を問わず)** または責任者。status∈{submitted,qa_ok,approved}。異常時は誰でも止められる。**他班(`masked`)の記録からも実行できる**(理由必須。内容は引き続きマスクのまま。応答・`actions` も masked 形)。**`stage=pre_pour` の記録のみ**(版1.9。`post_demold` の記録では `STATE_CONFLICT`、`actions` にも入らない。§6.8) |
-| addNote | ○ | ○ | ○ | 職長=編集可能な自班記録(status∈{draft,fix})に `kind=foreman`。QA/責任者=担当現場の記録に `kind=manager`(status不問) |
-| uploadPhotoChunk | ○ | ○ | ○ | `side=self`: 編集可能な職長。`side=qa`: claim者(status=submitted)。`side=prime`: 担当QA/責任者(status=qa_ok) |
+| addNote | ○ | ○ | ○ | 職長=編集可能な自班記録(status∈{draft,fix})に `kind=foreman`。QA/責任者=担当現場の記録に `kind=manager`(status不問)。**版1.12.0: QA・責任者が自分の1次検査の記録に書くときは、status∈{draft,fix} なら `kind=foreman`(1次検査側のコメント)。QA が自分の1次検査の記録に書けるのは draft/fix のときだけ(それ以外は `RECORD_LOCKED`)。責任者は自分の記録でも submitted/qa_ok/approved なら `kind=manager`(承認者として)**(§6.9) |
+| uploadPhotoChunk | ○ | ○ | ○ | `side=self`: 編集可能な1次検査側(職長=自班/自分、QA・責任者=自分の1次検査の記録。status∈{draft,fix})。`side=qa`: claim者(status=submitted)。`side=prime`: 承認できる人(§6.9)(status=qa_ok) |
 | deletePhoto | ○ | ○ | ○ | 撮影者本人、かつ同一ラウンド、かつその side が編集可能な状態。削除済みの写真は `NOT_FOUND` |
 | getPhotoThumbs / getPhoto | ○ | ○ | ○ | その写真の記録を `getRecord`(詳細)できる人 |
-| generateReport / listReports | × | ○ | ○ | 担当QA/責任者。status∈{qa_ok,approved} |
+| generateReport / listReports | × | ○ | ○ | `generateReport`=承認できる人(§6.9)。`listReports`=担当QA/責任者(従来どおり)。status∈{qa_ok,approved} |
 | requestJoin | ○ | × | × | `joinKey` 一致、`Sites.status=active` |
 | listJoinRequests | ○ | ○ | ○ | 職長=自分の申請のみ。QA=自分が担当の現場。責任者=全て |
 | decideJoin | × | ○ | ○ | `qa_main`。`qa_sub` は主担当が不在登録中のみ。責任者は常に可 |
@@ -809,9 +810,10 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 重要な不変条件(テスト対象 §12):
 - 職長は **他現場**の記録を一覧・詳細・写真・PDFで見られない。他班の記録は `masked`(詳細・写真・コメントは見えない)。**唯一の例外として、同じ現場に有効な担当がある職長は、`masked` の打設前(`pre_pour`)の記録に対して `stopPour` だけ実行できる**(`actions` に `stopPour` が入る。それ以外の action は不可。出来形の `masked` 記録の `actions` は常に空)。
 - QAは **担当外現場**の記録を claim/判定/元請サイン記録/PDF生成できない。
-- 職長は提出後(status∈{submitted,qa_ok,approved})に編集・写真追加・コメント追加ができない。`fix` のときだけ可。
+- **1次検査者は自分の記録を claim/引き継ぎ/判定/元請サイン記録/PDF生成できない(責任者だけ例外)。QA は、1次検査者が管理者・責任者の記録を(担当現場でも)claim/引き継ぎ/元請サイン記録/PDF生成できない(版1.12.0。§6.9)**。
+- 職長は提出後(status∈{submitted,qa_ok,approved})に編集・写真追加・コメント追加ができない。`fix` のときだけ可。**QA・責任者が1次検査者の記録も同じ**(1次検査側の編集・写真(`side=self`)・`kind=foreman` のコメントは draft/fix のときだけ)。
 - `foremanNote`/`selfResult` 等の職長列は QA/責任者のいかなる action でも書き換えられない。QAのコメントは `qaNote`/`qaComment`/Notes(kind=manager)にのみ書かれる。Notes の行は更新・削除されない。
-- 職長とQAは兼任不可(1ユーザー1役割 + Assignments の役割整合 §2.3)。
+- 職長とQAは兼任不可(1ユーザー1役割 + Assignments の役割整合 §2.3)。QA・責任者が1次検査をしても役割は変わらない(1次検査者かどうかは記録ごとの `ownerUserId`・`ownerRole` で決まる)。
 
 ### 4.2 権限判定関数(backendの1関数に集約)
 
@@ -831,15 +833,18 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 4. 現場スコープ(`siteId` を持つactionのみ): `siteAccess(actor, siteId)` が無い → `FORBIDDEN_SITE`。
    - `lead` → 常に有り。`qa` → 有効Assignment(`qa_main`/`qa_sub`)がある。`foreman` → 有効Assignment(`foreman`/`subforeman`)がある。
    - 有効Assignment = §2.3 の定義(active・期間内・役割整合)。
-5. 班スコープ(職長×記録。4と合わせて「範囲」): `record.ownerUserId == actor.userId` または(`actor` の当該現場の `team` が空でなく `record.team` と一致)でなければ `FORBIDDEN_TEAM`。ただし `stopPour`・`requestJoin` は班スコープを適用しない。
+5. 班スコープ(職長×記録。4と合わせて「範囲」): `record.ownerUserId == actor.userId` または(`actor` の当該現場の `team` が空でなく `record.team` と一致)でなければ `FORBIDDEN_TEAM`。ただし `stopPour`・`requestJoin` は班スコープを適用しない。**版1.12.0**: ①1次検査者が管理者・責任者の記録(`ownerRole`∈{qa,lead}。`team` は空)は、職長の `getRecord`(詳細の閲覧)と写真の閲覧には班スコープを適用しない(同じ現場なら見られる)。書き込み(`saveDraft`・`submitRecord`・`uploadPhotoChunk`・`deletePhoto`・`addNote`)は従来の規則のまま=本人の記録でも同じ班でもないので `FORBIDDEN_TEAM`。②**本人スコープ**(QA・責任者×1次検査側の書き込み): QA・責任者の `saveDraft`・`submitRecord`・`uploadPhotoChunk(side=self)` は `record.ownerUserId == actor.userId` でなければ `FORBIDDEN_TEAM`(職長の記録や他の管理者の1次検査を、承認者が1次検査側として書き換えない)。
 6. 状態条件: §6 の遷移表の「from」に合わない → 編集系は `RECORD_LOCKED`、遷移系は `STATE_CONFLICT`(`error.data={status,round}`)。`stopPour` の段階条件(`stage=pre_pour` のみ。版1.9)もここで評価し、満たさなければ `STATE_CONFLICT`。`params.round` を取るactionは現在の `round` と不一致でも `STATE_CONFLICT`。
-7. 個別条件: claim済み→`ALREADY_CLAIMED` / claim者でない→`NOT_CLAIMER`(未claimなら `NOT_CLAIMED`)/ 引き継ぎ不可→`TAKEOVER_NOT_ALLOWED` / `decideJoin` の不在条件 / `deletePhoto` の条件(他人の写真→`FORBIDDEN_TEAM`、別ラウンド・編集不可の状態→`RECORD_LOCKED`)。
+7. 個別条件: **承認者の条件(版1.12.0)**: `claimReview`・`takeoverReview`・`recordPrimeSign`・`generateReport`・`uploadPhotoChunk(side=prime)` で `canApprove(actor, record)` が偽 →`APPROVER_NOT_ALLOWED`(この段の最初に評価する。claim の状態より前)/ claim済み→`ALREADY_CLAIMED` / claim者でない→`NOT_CLAIMER`(未claimなら `NOT_CLAIMED`)/ 引き継ぎ不可→`TAKEOVER_NOT_ALLOWED` / `decideJoin` の不在条件 / `deletePhoto` の条件(他人の写真→`FORBIDDEN_TEAM`、別ラウンド・編集不可の状態→`RECORD_LOCKED`)。
 
 補助関数(同ファイルに置き、モックも同名で実装):
 - `isAbsent(userId, date)`: 有効な(`cancelledAt`空)Absencesに `dateFrom<=date<=dateTo` がある。
 - `effectiveQaMain(siteId)`: `qa_main` が不在なら有効な `qa_sub`(不在でない者)を「代行中」として扱う(表示と `decideJoin` の許可に使う)。
-- `canEditRecord(actor, record)`: 職長で `FORBIDDEN_TEAM` でなく status∈{draft,fix}。
-- `allowedActions(actor, record) -> string[]`: 記録に対して `authorize` が ok になる action 名の配列。対象は `saveDraft, submitRecord, claimReview, releaseClaim, takeoverReview, saveQaDraft, submitVerdict, recordPrimeSign, stopPour, addNote, uploadPhotoChunk, generateReport`。**`RecordSummary.actions` と `RecordDetail.actions` にそのまま返す**。PIN・入力検証など入力に依存する条件は含めない(権限と状態だけ)。`stopPour` は `stage=pre_pour` の記録でだけ含める(版1.9。`post_demold` では、誰に対しても・どの status でも含めない)。`masked` の記録の `actions` は `stopPour` だけ(§5.1)。
+- `canEditRecord(actor, record)`: 1次検査側として編集できるか。職長で `FORBIDDEN_TEAM` でなく status∈{draft,fix}。**版1.12.0: QA・責任者は `record.ownerUserId == actor.userId` かつ status∈{draft,fix}**。
+- `ownerRoleOf(record)`(版1.12.0): `record.ownerRole` が空なら `foreman`、それ以外はその値。
+- `canApprove(actor, record)`(版1.12.0。§6.9): `ownerRoleOf(record)=foreman` → actor が責任者、または当該現場に有効な `qa_main`/`qa_sub` を持つQA(従来どおり)。`qa` または `lead` → actor が責任者(`lead`)のときだけ真(1次検査者本人が責任者でも真)。
+- `canViewDetail(actor, record)`: 責任者=常に真。QA=当該現場に有効な担当がある。職長=当該現場に有効な担当があり、かつ(自班/自分の記録、**または `ownerRoleOf(record)`∈{qa,lead}**(版1.12.0))。
+- `allowedActions(actor, record) -> string[]`: 記録に対して `authorize` が ok になる action 名の配列。対象は `saveDraft, submitRecord, claimReview, releaseClaim, takeoverReview, saveQaDraft, submitVerdict, recordPrimeSign, stopPour, addNote, uploadPhotoChunk, generateReport`(版1.12.0: 承認者の条件 `APPROVER_NOT_ALLOWED` も「権限」として含める。例: 自分の1次検査の `submitted` 記録では、QA の `actions` に `claimReview` が入らない)。**`RecordSummary.actions` と `RecordDetail.actions` にそのまま返す**。PIN・入力検証など入力に依存する条件は含めない(権限と状態だけ)。`stopPour` は `stage=pre_pour` の記録でだけ含める(版1.9。`post_demold` では、誰に対しても・どの status でも含めない)。`masked` の記録の `actions` は `stopPour` だけ(§5.1)。
 - `escLevel(record, now)`(§6.4)、`computeTiming(record)`(§6.5)。
 
 ---
@@ -870,7 +875,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 ```json
 { "recordId":"r_8k2m4n6p8q0s2u4w", "siteId":"s_a", "floor":"2F", "zone":"", "lot":"L1", "stage":"pre_pour",
   "status":"submitted", "round":1, "reinspectOf":null,
-  "ownerUserId":"u_tanaka", "ownerName":"田中", "ownerCompany":"山田工業株式会社", "team":"田中班",
+  "ownerUserId":"u_tanaka", "ownerName":"田中", "ownerCompany":"山田工業株式会社", "ownerRole":"foreman", "team":"田中班",
   "pourPlannedAt":"2026-10-08T09:00:00+09:00",
   "submittedAt":"2026-10-07T10:00:00+09:00",
   "claimedBy":null, "claimedByName":null, "claimedAt":null,
@@ -881,6 +886,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
   "masked":false, "actions":["claimReview","stopPour","addNote"] }
 ```
 - `counts` は職長入力(`audience` が both/foreman の項目)、`qaCounts` はQA入力(both/qa)。`total` は対象項目数。
+- **`ownerRole`(版1.12.0)**: 1次検査者の役割 `foreman|qa|lead`(`Records.ownerRole`。空の既存記録は `foreman` を返す。常に返す)。`ownerUserId`/`ownerName`/`ownerCompany` は1次検査者を表す(キー名は互換のため変えない)。`counts` と `items[].self` も1次検査側(1次検査者が管理者・責任者でも `self` に入る)、`qaCounts` と `items[].qa` は承認側を表す。masked 形には含めない(masked になるのは職長の記録だけ)。
 - **masked 形**(職長が他班の記録を一覧したとき): `{recordId,siteId,floor,zone,lot,stage,status,team,updatedAt,version,"masked":true,"actions":[]}` のみ。それ以外のキーは含めない。**`actions` は `stopPour` が許される(同現場の有効な担当、かつ `stage=pre_pour`、かつ `status∈{submitted,qa_ok,approved}`)ときだけ `["stopPour"]`、それ以外は `[]`**(出来形の記録は常に `[]`)(他のaction名は入れない)。`stopPour` の応答の `record` も、呼出者が他班の職長ならこの masked 形で返す。
 
 **ItemEntry**(`RecordDetail.items[]`)
@@ -890,7 +896,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
   "self": { "result":"ng", "severity":null, "values":[], "note":"控えが1箇所不足", "updatedAt":"…", "photos":[ <PhotoMeta> ] },
   "qa":   { "result":null, "severity":null, "values":[], "note":"", "updatedAt":null, "photos":[] } }
 ```
-`result`/`severity` 未入力は `null`、`note` 未入力は `""`、`values` 未入力は `[]`。**職長に対しては、status が `draft`/`submitted` のとき `qa` を `null` で返す**(QAの下書きを見せない)。`fix`/`qa_ok`/`approved` では `qa` を返す(是正指示の確認用)。
+`result`/`severity` 未入力は `null`、`note` 未入力は `""`、`values` 未入力は `[]`。**職長に対しては、status が `draft`/`submitted` のとき `qa` を `null` で返す**(QAの下書きを見せない)。`fix`/`qa_ok`/`approved` では `qa` を返す(是正指示の確認用)。**版1.12.0: 同じ規則を「その記録を承認できない人」(`canApprove` が偽。1次検査者のQA、同じ現場の他のQA、職長)にも適用する**(承認者の下書きは、承認できる人にだけ見せる)。責任者が自分の1次検査を承認する場合は、責任者は承認できる人なので `qa` を返す。
 
 **PhotoMeta** `{ "photoId","itemId":"i9|null","side":"self|qa|prime","round":1,"takenBy":"u_tanaka","takenByName":"田中","takenAt":"…","width":1280,"height":960,"bytes":214532,"stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58","kind":"photo|drawing","markers":null }`(削除済みは含めない。**版1.6**: `kind` は常に返す(旧行は `photo`)。`markers` は `kind=drawing` のとき `[{ "itemId":"i9","label":"④-1","x":0.231,"y":0.412 }]`、`photo` では `null`。`x`,`y` は画像の左上を(0,0)・右下を(1,1)とした割合)
 
@@ -908,8 +914,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
     "prime":   { "recordedBy","recordedByName","signerName","method","at" } },
   "timing": { "selfDeadlineAt":"…|null","qaOpenAt":"…|null","qaDeadlineAt":"…|null","selfLate":false,"qaLate":false } }
 ```
-- **`drawings`(版1.6)**: `kind=drawing` の未削除の行(`takenAt` 昇順、両side)。`items[].self.photos`・`items[].qa.photos`・`primePhotos` には **含めない**(`kind=photo` のみ)。**職長に対しては status が `draft`/`submitted` のとき `side=qa` の図面を含めない**(`qa` の下書き非表示と同じ)。無ければ `[]`。
-- `notes` と `events` は時刻昇順。`events` は直近100件。`stopInfo`/`signatures.*` は無ければ `null`。`signatures.foreman`=直近の提出、`signatures.qa`=`qaVerdict=ok` のときのみ、`signatures.prime`=元請サイン記録済みのときのみ。`qaComment` は職長にも `fix`/`qa_ok`/`approved` では返す(`draft`/`submitted` では `""`)。
+- **`drawings`(版1.6)**: `kind=drawing` の未削除の行(`takenAt` 昇順、両side)。`items[].self.photos`・`items[].qa.photos`・`primePhotos` には **含めない**(`kind=photo` のみ)。**職長に対しては status が `draft`/`submitted` のとき `side=qa` の図面を含めない**(`qa` の下書き非表示と同じ。版1.12.0: 承認できない人すべてに同じ規則)。無ければ `[]`。
+- `notes` と `events` は時刻昇順。`events` は直近100件。`stopInfo`/`signatures.*` は無ければ `null`。`signatures.foreman`=直近の提出(**版1.12.0: 1次検査者の提出。キー名は互換のため `foreman` のまま**)、`signatures.qa`=`qaVerdict=ok` のときのみ(承認者。キー名は互換のため `qa` のまま)、`signatures.prime`=元請サイン記録済みのときのみ。`qaComment` は職長にも `fix`/`qa_ok`/`approved` では返す(`draft`/`submitted` では `""`。版1.12.0: 承認できない人すべてに同じ規則)。
 - 項目は `def.seq` 昇順。`audience=qa` の項目は職長には返さない(`self` 入力不要)。
 
 **Membership** `{ "membershipId","siteId","siteName","userId","userName","userCompany":"str","status","requestedAt","decidedBy":"str|null","decidedByName":"str|null","decidedAt":"dt|null","assignRole":"str|null","team":"str|null","note":"str|null","canDecide":false }`
@@ -920,7 +926,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **Report** `{ "reportId","recordId","version":1,"recordStatus":"qa_ok|approved","url":"https://drive.google.com/file/d/…/view","sha256":"…","generatedBy","generatedByName","generatedAt" }`
 
-**ItemPatch**(`saveDraft`/`saveQaDraft` の `items[]`): `{ "itemId":"i4", "result":"ok|ng|na|null", "severity":"minor|major|null", "values":[2,-1], "note":"…" }`。`itemId` 以外は任意で、**指定したキーだけ更新**(`null` で消去、`values:[]` で消去)。未知のキー・未知の `itemId`・範囲外(`values` は有限数・最大10件、`note` ≤1000文字)は `VALIDATION_FAILED`(`FIELD_INVALID`)。職長は `audience=qa` の項目、QAは `audience=foreman` の項目を書けない。
+**ItemPatch**(`saveDraft`/`saveQaDraft` の `items[]`): `{ "itemId":"i4", "result":"ok|ng|na|null", "severity":"minor|major|null", "values":[2,-1], "note":"…" }`。`itemId` 以外は任意で、**指定したキーだけ更新**(`null` で消去、`values:[]` で消去)。未知のキー・未知の `itemId`・範囲外(`values` は有限数・最大10件、`note` ≤1000文字)は `VALIDATION_FAILED`(`FIELD_INVALID`)。職長は `audience=qa` の項目、QAは `audience=foreman` の項目を書けない(**版1.12.0: 役割ではなく側で決める**。`saveDraft`(1次検査側。1次検査者が QA・責任者でも)は `audience=qa` の項目を書けず、`saveQaDraft`(承認側)は `audience=foreman` の項目を書けない)。
 
 ### 5.1a 書き込み応答の更新後の記録 `data.record` とバージョン規則(版1.10。ユーザー決定 2026-10-17)
 
@@ -1008,6 +1014,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | ALREADY_MEMBER | 既に参加済み | × | |
 | JOIN_PENDING | 申請中 | × | `{membershipId}` |
 | REPORT_NOT_ALLOWED | PDF生成不可の状態 | × | `{status}` |
+| APPROVER_NOT_ALLOWED | その記録を承認(確認開始・引き継ぎ・元請サイン記録・PDF生成・元請サイン証跡写真)できない人。1次検査者本人(責任者を除く)、または1次検査者が管理者・責任者の記録に対するQA(版1.12.0。§6.9) | × | `{ownerRole}` |
 | IDEMPOTENCY_CONFLICT | 同一clientIdで内容違い | × | |
 | LOCK_TIMEOUT | ロック待ちタイムアウト | ○(バックオフ) | |
 | DRIVE_ERROR | Drive書込失敗 | ○ | |
@@ -1108,9 +1115,10 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **getRecord** `{ "recordId" }` → `{ "record":<RecordDetail> }`。エラー: `NOT_FOUND` / `FORBIDDEN_SITE` / `FORBIDDEN_TEAM`(masked対象の詳細要求)。
 
-**createRecord** ★ Q `{ "recordId", "siteId", "floor", "zone"?:"", "lot", "stage":"pre_pour|post_demold", "pourPlannedAt"?:"dt", "reinspectOf"?:"r_…" }` → `{ "record":<RecordDetail> }`(status=draft, round=1, `ownerUserId`=自分, `team`=自分の当該現場の班。項目行を作成時点の `active` かつ `stage` 一致の項目で生成)
+**createRecord** ★ Q `{ "recordId", "siteId", "floor", "zone"?:"", "lot", "stage":"pre_pour|post_demold", "pourPlannedAt"?:"dt", "reinspectOf"?:"r_…" }` → `{ "record":<RecordDetail> }`(status=draft, round=1, `ownerUserId`=自分, `ownerRole`=自分の役割(版1.12.0), `team`=自分の当該現場の班(QA・責任者は空)。項目行を作成時点の `active` かつ `stage` 一致の項目で生成)
 エラー: `FORBIDDEN_SITE` / `SITE_CLOSED` / `STAGE_NOT_ENABLED` / `VALIDATION_FAILED`(`FIELD_INVALID`:floor/zone/lot/recordId形式) / `ALREADY_EXISTS`(`{recordId,mine}`。同一 `recordId` を同一ユーザーが再送した場合は冪等成功として扱う)/ **`STATE_CONFLICT`(`reinspectOf` を指定したが元記録の `status` が `approved` でない。`error.data={status,round}` は元記録の値。P-31)**。Events `record_created`。
 - **`stage`(版1.9)**: §0.2 の値。`Config.enabledStages` に無い値(`during_pour` 等・列挙外を含む)、またはその段階の `active` 項目が0件のときは `STAGE_NOT_ENABLED`(項目0件の記録を作らせない)。`pre_pour` と `post_demold` は、同じ現場・階・工区・ロットでも別の記録として1件ずつ作れる(§2.7。`ALREADY_EXISTS` は同じ段階の2件目だけ)。
+- **作成できる人(版1.12.0)**: 職長(担当現場)・QA(有効な `qa_main`/`qa_sub` の現場)・責任者(全現場)。作成した人がその記録の1次検査者になり、以後の `saveDraft`・`submitRecord`・`side=self` の写真は本人(職長は従来どおり同じ班も)だけ。スロットの一意性(§2.7)は1次検査者の役割に関係なく共通(同じスロットを職長と管理者が別々に作れない。2件目は `ALREADY_EXISTS`)。
 - **`pourPlannedAt`**: `stage=pre_pour` のときだけ保存する。`post_demold` で指定されても **エラーにせず保存しない**(空のまま。オフライン再送の古い内容を落とさないため)。`saveDraft` の `header.pourPlannedAt` も同じ。
 例:
 ```json
@@ -1136,17 +1144,17 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **submitRecord** ★ PIN `{ "recordId", "round" }` → `{ "record":<RecordDetail>, "warnings":["SELF_LATE"?] }`
 - status∈{draft,fix} かつ `round` 一致 → §5.3.1 の提出検査を **全て満たす**こと。成功: draft→submitted(初回)/ fix→submitted(再提出。`round+1`、`qa*` 列とQA判定列(`qaVerdict,qaVerdictBy,qaVerdictAt,qaComment,major`)・`claim*`・`stopped*`・`prime*` を空にし `escNotified=0`)。`submittedBy/At`=自分/今。初回は `firstSubmittedAt`。
-- 職長の項目コメント(空でないもの)を Notes に `kind=foreman, source=submit` で追記(提出ごと)。Events `submitted`/`resubmitted`(detail に項目結果。`late`)。
+- 1次検査者の項目コメント(空でないもの)を Notes に `kind=foreman, source=submit` で追記(提出ごと。版1.12.0: 1次検査者が管理者・責任者でも `kind=foreman`=1次検査側のコメント。`authorRole` で役割が分かる)。Events `submitted`/`resubmitted`(detail に項目結果。`late`)。
 - `warnings`: `SELF_LATE`(§6.5 の職長期限超過。提出は拒否しない。`stage=pre_pour` のみ。出来形では出ない)。
 - エラー: `NOT_FOUND`/`FORBIDDEN_SITE`/`FORBIDDEN_TEAM`/`STATE_CONFLICT`/`VALIDATION_FAILED`(violations全列挙)/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 - クライアントは提出前に、その記録のoutboxが空(全て送信済み)であることを確認する(§8.6)。
 
 **claimReview** ★ `{ "recordId", "round" }` → `{ "record":<RecordDetail> }`(「確認中」にする。status は `submitted` のまま。`claimedBy/At`=自分/今、`qaDraftAt`=今。先着のみ成功)
-- エラー: `FORBIDDEN_SITE` / `STATE_CONFLICT`(submittedでない・round不一致)/ **`ALREADY_CLAIMED`**(`{claimedBy,claimedByName,claimedAt}`)。Events `claimed`。
+- エラー: `FORBIDDEN_SITE` / `STATE_CONFLICT`(submittedでない・round不一致)/ **`APPROVER_NOT_ALLOWED`**(承認できない人。版1.12.0。§6.9)/ **`ALREADY_CLAIMED`**(`{claimedBy,claimedByName,claimedAt}`)。Events `claimed`。
 
 **releaseClaim** ★ `{ "recordId" }` → `{ "record":<RecordSummary> }`(claim解除。QA下書きは残る)。claim者本人か責任者。エラー: `NOT_CLAIMED` / `NOT_CLAIMER` / `STATE_CONFLICT`。Events `claim_released`。
 
-**takeoverReview** ★ `{ "recordId", "round" }` → `{ "record":<RecordDetail> }`(claimを自分に移す。QA下書きは残る)。条件は §4.1。エラー: `NOT_CLAIMED` / `TAKEOVER_NOT_ALLOWED`(`{availableAt}`)/ `STATE_CONFLICT`。Events `claim_taken_over`(detail `{from}`)。
+**takeoverReview** ★ `{ "recordId", "round" }` → `{ "record":<RecordDetail> }`(claimを自分に移す。QA下書きは残る)。条件は §4.1。エラー: `NOT_CLAIMED` / `TAKEOVER_NOT_ALLOWED`(`{availableAt}`)/ `STATE_CONFLICT` / `APPROVER_NOT_ALLOWED`(版1.12.0)。Events `claim_taken_over`(detail `{from}`)。
 
 **saveQaDraft** ★ Q `{ "recordId", "items"?:[<ItemPatch>], "comment"?:"str" }` → `{ "record":<RecordSummary> }`(status=submitted かつ claim者本人。`qa*` 列と `Records.qaComment` を更新。`qaDraftAt`=今。版1.11.1: 許容超の `ok` でコメントが空でも保存できる=`QA_OVER_TOL_COMMENT_REQUIRED` は `submitVerdict` だけで検査する)。エラー: `NOT_CLAIMER` / `NOT_CLAIMED` / `RECORD_LOCKED`(submittedでない)/ `VALIDATION_FAILED`。
 
@@ -1160,8 +1168,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - エラー: `NOT_CLAIMER`/`NOT_CLAIMED`/`STATE_CONFLICT`/`VALIDATION_FAILED`/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 
 **recordPrimeSign** ★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordDetail> }`
-- status=`qa_ok` のみ。**3者サイン検査**: 職長提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**。出来形の記録では **出来形確認済**。状態の値はどちらも `approved`。§6.8)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
-- エラー: `STATE_CONFLICT` / `VALIDATION_FAILED` / `PIN_*` / `FORBIDDEN_SITE`。
+- status=`qa_ok` のみ。承認できる人のみ(§6.9。違えば `APPROVER_NOT_ALLOWED`)。**3者サイン検査**: 1次検査者の提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**。出来形の記録では **出来形確認済**。状態の値はどちらも `approved`。§6.8)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
+- エラー: `STATE_CONFLICT` / `VALIDATION_FAILED` / `PIN_*` / `FORBIDDEN_SITE` / `APPROVER_NOT_ALLOWED`(版1.12.0)。
 
 **stopPour** ★ Q(高優先) `{ "recordId", "reason":"≤200文字" }` → `{ "record":<RecordDetail> }`
 - **対象の段階(版1.9)**: `stage=pre_pour` の記録のみ。`post_demold`(出来形)の記録に送ると `STATE_CONFLICT`(`error.data={status,round}`。状態・Events・通知は何も変えない)。出来形は打設の後の検査で、打設を止める意味がないため。
@@ -1170,7 +1178,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 - Events `stopped`(detail `{reason,previousStatus}`)。責任者・担当QAへ通知(§6.6)。再開は職長が是正→再提出→再度QA/元請の手順(§6.2 T8)。
 - エラー: `STATE_CONFLICT` / `VALIDATION_FAILED`(`REASON_REQUIRED`)/ `FORBIDDEN_SITE`。
 
-**addNote** ★ Q `{ "recordId", "itemId"?:"i9", "text":"1〜2000文字" }` → `{ "note":<Note>, "record":<RecordDetail> }`(職長なら `kind=foreman`、QA/責任者なら `kind=manager` をサーバーが役割から決める。**クライアントは kind を送れない**)。Notes に追記(更新・削除不可)、Events `note_added`。職長は status∈{draft,fix} の自班記録のみ(`RECORD_LOCKED`)。エラー: `NOT_FOUND` / `FORBIDDEN_*` / `RECORD_LOCKED` / `VALIDATION_FAILED`。
+**addNote** ★ Q `{ "recordId", "itemId"?:"i9", "text":"1〜2000文字" }` → `{ "note":<Note>, "record":<RecordDetail> }`(職長なら `kind=foreman`、QA/責任者なら `kind=manager` をサーバーが役割から決める。**版1.12.0: QA・責任者が自分の1次検査の記録(`ownerUserId`=自分)に status∈{draft,fix} で書くときは `kind=foreman`。QA が自分の1次検査の記録に submitted/qa_ok/approved で書くと `RECORD_LOCKED`。責任者は同じ状態なら `kind=manager`**(§4.1)。**クライアントは kind を送れない**)。Notes に追記(更新・削除不可)、Events `note_added`。職長は status∈{draft,fix} の自班記録のみ(`RECORD_LOCKED`)。エラー: `NOT_FOUND` / `FORBIDDEN_*` / `RECORD_LOCKED` / `VALIDATION_FAILED`。
 
 #### 5.4.4 写真(詳細は §7)
 
@@ -1222,7 +1230,7 @@ params:
 
 #### 5.4.5 元請向けPDF(詳細は §10)
 
-**generateReport** ★ `{ "recordId" }` → `{ "report":<Report> }`(最大120秒。status∈{qa_ok,approved}。エラー: `REPORT_NOT_ALLOWED`(`{status}`)/ `DRIVE_ERROR` / `FORBIDDEN_SITE`)。Events `report_generated`(`detail` は `{reportId,version,engine}`。doc 方式から html に切り替えたときは `fallbackFrom`・`fallbackReason` も入る=§10.5.8。**請求・応答の形は変更なし**。生成方式は Config `reportEngine`=§10.5)。
+**generateReport** ★ `{ "recordId" }` → `{ "report":<Report> }`(最大120秒。status∈{qa_ok,approved}。エラー: `REPORT_NOT_ALLOWED`(`{status}`)/ `DRIVE_ERROR` / `FORBIDDEN_SITE` / `APPROVER_NOT_ALLOWED`(承認できない人。版1.12.0。§6.9))。Events `report_generated`(`detail` は `{reportId,version,engine}`。doc 方式から html に切り替えたときは `fallbackFrom`・`fallbackReason` も入る=§10.5.8。**請求・応答の形は変更なし**。生成方式は Config `reportEngine`=§10.5)。
 **listReports** `{ "recordId" }` → `{ "reports":[<Report>] }`(`version` 降順)
 
 #### 5.4.6 参加(QR)
@@ -1275,18 +1283,18 @@ PDF: `generateReport` `listReports`
 
 | # | from | to | action | 実行者 | 条件 | PIN | 主な副作用 |
 |---|---|---|---|---|---|---|---|
-| T1 | none | draft | createRecord | 職長(担当現場) | 現場active、スロット(現場・階・工区・ロット・段階)未使用、段階が有効(`enabledStages` に含まれ、有効項目が1件以上) | 不要 | Records+RecordItems生成、Events `record_created` |
-| T2 | draft / fix | 同じ | saveDraft | 職長(自班/自分) | 形式検査のみ | 不要 | `updatedAt`・`version`更新 |
-| T3 | draft | submitted | submitRecord | 職長(自班/自分) | §5.3.1 提出検査を全て満たす、`round`一致 | **要** | `firstSubmittedAt`/`submittedAt/By`、Notes追記(職長コメント)、Events `submitted` |
-| T4 | submitted | submitted | claimReview | 担当QA / 責任者 | 未claim、`round`一致。**先着のみ** | 不要 | `claimedBy/At`、Events `claimed` |
+| T1 | none | draft | createRecord | 職長・QA(担当現場)/ 責任者(版1.12.0。作成者が1次検査者) | 現場active、スロット(現場・階・工区・ロット・段階)未使用、段階が有効(`enabledStages` に含まれ、有効項目が1件以上) | 不要 | Records+RecordItems生成、Events `record_created` |
+| T2 | draft / fix | 同じ | saveDraft | 1次検査者(職長は自班/自分。QA・責任者は本人のみ) | 形式検査のみ | 不要 | `updatedAt`・`version`更新 |
+| T3 | draft | submitted | submitRecord | 1次検査者(T2と同じ) | §5.3.1 提出検査を全て満たす、`round`一致 | **要** | `firstSubmittedAt`/`submittedAt/By`、Notes追記(職長コメント)、Events `submitted` |
+| T4 | submitted | submitted | claimReview | 承認できる人(§6.9。1次検査者が職長なら担当QA / 責任者、管理者・責任者なら責任者のみ) | 未claim、`round`一致。**先着のみ** | 不要 | `claimedBy/At`、Events `claimed` |
 | T5 | submitted | qa_ok | submitVerdict(ok) | claim者 | 判定検査 OK、`round`一致 | **要** | `qaVerdict=ok`、Notes追記(管理者コメント)、Events `verdict_ok` |
 | T6 | submitted | fix | submitVerdict(minor/major) | claim者 | 判定検査 OK、`round`一致 | 不要 | `major`(majorのみTRUE)、`claim*`を空に、Notes追記、Events `verdict_*`、majorは責任者へ即時通知 |
-| T8 | fix | submitted | submitRecord | 職長(自班/自分) | T3と同じ検査 | **要** | `round+1`、QA列・判定列・`claim*`・`stopped*`・`prime*` を空に、`escNotified=0`、Events `resubmitted` |
-| T9 | qa_ok | approved | recordPrimeSign | 担当QA / 責任者 | 3者サイン検査(職長提出・QA合格・元請担当者名) | **要** | `prime*`記録、Events `prime_signed` |
+| T8 | fix | submitted | submitRecord | 1次検査者(T2と同じ) | T3と同じ検査 | **要** | `round+1`、QA列・判定列・`claim*`・`stopped*`・`prime*` を空に、`escNotified=0`、Events `resubmitted` |
+| T9 | qa_ok | approved | recordPrimeSign | 承認できる人(T4と同じ) | 3者サイン検査(1次検査者の提出・承認者の合格・元請担当者名) | **要** | `prime*`記録、Events `prime_signed` |
 | T10 | submitted / qa_ok / approved | fix | stopPour | その現場の担当者(職長は班不問) / 責任者 | 理由必須。**`stage=pre_pour` の記録のみ**(出来形は不可。§6.8) | 不要 | `stopped=TRUE`、署名無効化(`prime*`・判定列・`claim*`を空に)、Events `stopped`、責任者・担当QAへ通知 |
 
 - `approved` は終端。`approved→fix` は T10(停止)のみ。`submitted→draft`(取り下げ)・`qa_ok→submitted` などは存在しない(提出後の職長編集不可を守るため。P-05と同系)。
-- **3者サイン** = ①職長の提出(T3/T8のPIN)、②QAの合格(T5のPIN)、③元請サイン記録(T9のPIN、元請担当者名+方法)。T9は①②③の充足をサーバーが検査する。重大(`major`)・`minor`判定は `fix` に落ちるため打設可にならない。
+- **3者サイン** = ①1次検査者(職長・管理者・責任者)の提出(T3/T8のPIN)、②承認者(QA・責任者)の合格(T5のPIN)、③元請サイン記録(T9のPIN、元請担当者名+方法)。T9は①②③の充足をサーバーが検査する。重大(`major`)・`minor`判定は `fix` に落ちるため打設可にならない。
 - 重大不適合=打設不可: `qaVerdict=major` の記録は `fix`。是正→再提出→再度の合格→元請サインを経ないと `approved` にならない。`stopped=TRUE` も同様(T8で解除)。
 - T10 で `fix` に戻した記録の再提出時は、停止中だった事実を Notes/Events(`stopped`)が保持する。
 - 再検査(別レコード): `approved` になった記録について、打設延期等で再度検査が必要なとき、職長が `createRecord` で `reinspectOf=元recordId` を指定して新規レコードを作る(`round=1`から。P-31)。**元記録が `approved` でない(`draft`/`submitted`/`fix`/`qa_ok`)場合は `STATE_CONFLICT`**(是正は同一レコードの `round+1` で行う)。`fix` の是正再提出は **同一レコードの `round+1`**(別レコードにしない)。
@@ -1294,7 +1302,7 @@ PDF: `generateReport` `listReports`
 
 ### 6.3 ステータスごとの編集可否まとめ
 
-| status | 職長の編集(saveDraft/写真/コメント) | QAの入力 | 備考 |
+| status | 1次検査者の編集(saveDraft/写真/コメント。版1.12.0: 職長・管理者・責任者) | 承認者(QA・責任者)の入力 | 備考 |
 |---|---|---|---|
 | draft | 可 | 不可 | |
 | submitted | **不可** | claim者のみ(`saveQaDraft`・QA写真) | |
@@ -1310,7 +1318,7 @@ PDF: `generateReport` `listReports`
   - claim された時点で段階が **凍結**される(以後増えない)。claim後の無操作は §6.5 の引き継ぎルールで扱う。
 - `RecordSummary.escLevel` は読み取り時にサーバーが計算して返す(クライアントは再計算せず表示のみ)。
 - 通知送信: 時間トリガー `escalationTick`(5分ごと)が `submitted` 未claimの記録を走査。`escLevel > escNotified` なら、未送信の段階を **小さい順に全て**(例 0→2 なら30分分と60分分)実行して `escNotified = escLevel` に更新(重複送信しない)。Events `escalate_30` / `escalate_60`(detail `{to,mailed}`)。
-  - 段階1(30分): その現場の `qa_sub`(不在でない者)へ。有効な `qa_sub` が全員不在なら責任者へ。
+  - 段階1(30分): その現場の `qa_sub`(不在でない者)へ。有効な `qa_sub` が全員不在なら責任者へ。**版1.12.0: 1次検査者が管理者・責任者の記録(承認できるのは責任者だけ)は、段階1も全ての `lead`(`status=active`。1次検査者本人を除く)へ送る**。
   - 段階2(60分): 全ての `lead`(`status=active`)へ。
 - 不在登録: 主担当QAが不在登録中でも、記録は先着の担当QA(代行者を含む)が claim できる(両者とも常時 claim 可)。不在は「通知先の選び方」と `decideJoin` の許可(§4.1)、画面の「代行中」表示にのみ使う。
 
@@ -1337,8 +1345,8 @@ PDF: `generateReport` `listReports`
 
 | 契機 | 種別(件名の `{種別}`) | 宛先 |
 |---|---|---|
-| submitRecord(初回・再提出とも) | `提出` | 主担当QA(不在なら有効な代行者)。責任者には送らない |
-| escalate_30 | `30分経過` | 代行者 |
+| submitRecord(初回・再提出とも) | `提出` | 1次検査者が職長: 主担当QA(不在なら有効な代行者)。責任者には送らない。**1次検査者が管理者・責任者(版1.12.0): 責任者全員(実行者除く)**。QAには送らない |
+| escalate_30 | `30分経過` | 代行者(1次検査者が管理者・責任者の記録は責任者全員。§6.4) |
 | escalate_60 | `60分経過` | 責任者 |
 | verdict=major | `重大な不適合` | 責任者全員+その現場の担当QA(実行者除く) |
 | stopPour | `打設停止` | 責任者全員+その現場の担当QA(実行者除く)。打設前の記録のみ(出来形では起きない。§6.8) |
@@ -1389,6 +1397,42 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 - 出来形の `approved` を取り消す操作は無い(`stopPour` が使えないため)。誤って承認した場合は `reinspectOf` で再検査の記録を作る(P-31)。取消が要るかは §14.2 の13。
 - 出来形の作成条件に、同じスロットの打設前の状態は含めない(順序を縛らない)。
 - `during_pour`(打設中・管理項目表⑯)は保留。列挙値は残すが `enabledStages` に入れず、項目も作らない。
+
+### 6.9 1次検査者と承認者(版1.12.0。ユーザー決定 2026-11-04。REQUIREMENTS §20)
+本節は、各節(§2.7・§4・§5・§6.2〜6.6・§9・§10・§12)に散らした変更のまとめ。食い違ったら各節ではなく本節を正とし、各節を直す。
+
+**1. 用語**
+- **1次検査者**: 記録を作成し、項目の入力・写真・提出をする人(`Records.ownerUserId`、役割は `ownerRole`)。職長・管理者(QA)・責任者のいずれか。従来の「職長」の側(`self*` 列・`side=self`・`kind=foreman`・`signatures.foreman`)は、全て「1次検査側」と読み替える。**列名・キー名・action名は変えない**(互換のため)。
+- **承認者**: 確認開始(claim)・全項目の確認と入力・判定・元請サインの記録・PDF生成をする人。QA または責任者。従来の「QA」の側(`qa*` 列・`side=qa`/`prime`・`kind=manager`・`signatures.qa`)を表す。
+- **承認できる人** `canApprove(actor, record)`(§4.2):
+
+| 1次検査者(`ownerRole`) | 確認開始・引き継ぎ・判定 | 元請サイン記録・PDF生成・元請サイン証跡写真 |
+|---|---|---|
+| `foreman`(空の既存記録を含む) | 担当QA(有効な `qa_main`/`qa_sub`)・責任者(従来どおり) | 担当QA・責任者(従来どおり) |
+| `qa` | **責任者だけ**(1次検査者本人のQAも、同じ現場の他のQAも不可) | **責任者だけ** |
+| `lead` | **責任者だけ**(**1次検査者本人の責任者でもよい**=自己承認の例外) | **責任者だけ** |
+
+**2. 規則**
+- 承認できない人が `claimReview`・`takeoverReview`・`recordPrimeSign`・`generateReport`・`uploadPhotoChunk(side=prime)` を送ると `APPROVER_NOT_ALLOWED`(`error.data={ownerRole}`)。評価は §4.2 の7の先頭(役割・範囲・状態の後)。`saveQaDraft`・`submitVerdict`・`uploadPhotoChunk(side=qa)`・`releaseClaim` は claim 者の条件で守られる(claim できるのは承認できる人だけ)。画面の非表示だけに頼らない(CLAUDE.md §4)。
+- 承認者は **全項目を自分で確認・入力する**(P-12 と同じ。1次検査の結果を承認側へ写さない)。判定検査(§5.3.1)は1次検査者の役割に関係なく同じ。
+- 1次検査者は役割に関係なく、提出後(submitted/qa_ok/approved)は1次検査側を編集できない(差し戻し `fix` のときだけ)。PIN 再入力は1次検査者の「提出」、承認者の「合格」、元請サイン記録(従来どおり)。
+- 状態(`status`)・遷移(§6.2)・action 数(43)・Events の `kind` は変えない。
+- 1次検査者の役割は記録ごとに作成時に固定(`ownerRole` の写し)。名簿の役割が後で変わっても、承認できる人の決め方は変わらない。
+- 職長と管理者の兼任なし(§0.1)は変えない。管理者・責任者が1次検査をしても、その人の役割はそのまま。
+
+**3. 見え方**
+- 1次検査者が管理者・責任者の記録は、**同じ現場の職長(有効な foreman/subforeman の担当)が詳細まで見られる**(項目・写真・コメント・図面・履歴。読むだけ。`masked` にしない)。書き込みはできない(`FORBIDDEN_TEAM`)。`stopPour` は従来どおり(現場の担当者なら誰でも。打設前のみ)。
+- 承認者の下書き(`items[].qa`・`side=qa` の図面・`qaComment`)は、status が `draft`/`submitted` のあいだ **承認できる人にだけ** 返す(§5.1。職長に対する従来の規則を「承認できない人」全員に広げる)。
+- 同じ現場の他のQAは、管理者・責任者の1次検査の記録を一覧・詳細で見られる(従来どおり)が、承認はできない(`actions` に承認系が入らない)。
+
+**4. 通知**(§6.4・§6.6)
+- 1次検査者が管理者・責任者の記録の提出メール(`提出`)と30分経過の通知は、**責任者全員(実行者・1次検査者本人を除く)**へ送る(承認できるのが責任者だけのため)。60分経過は従来どおり責任者全員。重大な不適合・打設停止は従来どおり。
+
+**5. 既存の記録・移行**
+- `ownerRole` が空の既存記録は `foreman` として扱う(書き換えない)。列の追加は `setupSheets` の不足列追記で行う(既存の列追加と同じ手順。§2.9a)。
+- フロントは `ownerRole` が応答に無い(古いサーバー)ときは `foreman` とみなす。
+
+**6. 対象外(保留)**: 責任者がスマホで現場・人・担当・検査項目・設定を管理する機能(REQUIREMENTS §20 の保留。第2・第3段階)、他社に使わせる方式。
 
 ---
 
@@ -1711,9 +1755,9 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | S02 | `#/locked` | ロック中 | `me`(60秒ごと) | 「ロックされています。責任者に解除を依頼してください」 | 解除されたら自動で復帰。「この端末をログアウト」(`logoutDevice`) |
 | S03 | `#/`(職長) | 職長 | `getBootstrap`,`listRecords`,`listJoinRequests` | 担当現場カード(現場名、未着手/是正中/確認待ちの階数。**版1.9: `enabledStages` が複数のときは段階ごとの行にする**(`打設前 未着手 a / 是正中 b / 確認待ち c` と `出来形 …`。階数は段階ごとに数える)。有効な段階が1つだけのときは従来どおり段階名なしの1行)、申請中の現場(`承認待ち`)、「QRで現場に参加」 | カード→S04。参加ボタン→S13。担当現場が0なら案内文 |
 | S04 | `#/site/:siteId` | 全員 | `listRecords`(siteId) | 現場名固定。**階ごと**に記録スロット(ロット・工区・段階・ステータス・作成者名)。**版1.9: 階のカードは段階ごとに分ける**(見出し=段階名 `stage.*` と、その段階の代表ステータスのチップ。代表ステータスは従来の階ごとの規則を、その段階の記録だけに適用する。記録の無い段階は「未着手」)。1つの階の「打設前」と「出来形」の状態が並んで見える。各記録の行にも段階名を出す。主担当/代行者名(不在なら「代行中」)。ローカル下書きバッジ | 職長: 各階に「新しい記録」(→S05。S05 で段階を選べる。S04 から `?stage=` を渡して事前選択してもよい)。自班の記録→S06(編集可なら)/S08。**他班(`masked`)は「他班が入力中」で開けない(S06/S08へは遷移しない)。ただし行の `actions` に `stopPour` が含まれるときは、その行に「打設を止める」ボタンだけを出し、M4(理由必須)から `stopPour` を送れる(打設前の記録のみ。出来形では `actions` に出ない)。記録の内容は表示しない(現場・階・ロット・班名・ステータスのみ)**。QA/責任者: 記録→S08(`submitted`でclaim可ならS10への導線も) |
-| S05 | `#/site/:siteId/new` | 職長 | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(**版1.9: 「打設前」「出来形」から選ぶ**。選択肢は `config.enabledStages` に含まれ、かつ `getBootstrap.items` にその段階の項目が1件以上ある段階。既定は打設前。選択肢が1つだけなら選択欄を出さず固定表示。出来形を選ぶと説明 `scr.S05.stage_hint_post_demold` を出す。出来形では、同じ階・工区の打設前の記録の打設箇所(ロット)を候補に出してよい(推奨。入力の手間を減らすだけで、APIと一意制約は変えない))、打設予定日時(`datetime-local`。**打設前のときだけ**表示し、提出時必須。出来形では欄も `scr.S05.plan_hint` も出さない)、再検査のとき元記録の表示(段階は元記録の段階に固定) | 「作成して入力へ」→`createRecord`(Q。`stage` は選んだ段階。出来形では `pourPlannedAt` を送らない。オフラインで作る仮の記録の項目は `getBootstrap.items` を **選んだ段階で絞って** 作る)→S06。同じ階・工区・ロットでも段階が違えば別の記録なので `ALREADY_EXISTS` にならない。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
-| S06 | `#/record/:id/edit` | 職長 | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**(打設予定日時の入力欄は打設前だけ。版1.9)、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目を `seq` 昇順にグループ見出し付きで列挙(`groupKey` が変わるたびに見出し。§2.6.1a)。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「図面を追加」ボタン・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
-| S07 | `#/record/:id/confirm` | 職長 | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階(打設前のときは打設予定日時も)** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
+| S05 | `#/site/:siteId/new` | 職長(版1.12.0: QA・責任者も。§9.2c) | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(**版1.9: 「打設前」「出来形」から選ぶ**。選択肢は `config.enabledStages` に含まれ、かつ `getBootstrap.items` にその段階の項目が1件以上ある段階。既定は打設前。選択肢が1つだけなら選択欄を出さず固定表示。出来形を選ぶと説明 `scr.S05.stage_hint_post_demold` を出す。出来形では、同じ階・工区の打設前の記録の打設箇所(ロット)を候補に出してよい(推奨。入力の手間を減らすだけで、APIと一意制約は変えない))、打設予定日時(`datetime-local`。**打設前のときだけ**表示し、提出時必須。出来形では欄も `scr.S05.plan_hint` も出さない)、再検査のとき元記録の表示(段階は元記録の段階に固定) | 「作成して入力へ」→`createRecord`(Q。`stage` は選んだ段階。出来形では `pourPlannedAt` を送らない。オフラインで作る仮の記録の項目は `getBootstrap.items` を **選んだ段階で絞って** 作る)→S06。同じ階・工区・ロットでも段階が違えば別の記録なので `ALREADY_EXISTS` にならない。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
+| S06 | `#/record/:id/edit` | 職長(版1.12.0: 1次検査者のQA・責任者も。§9.2c) | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**(打設予定日時の入力欄は打設前だけ。版1.9)、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目を `seq` 昇順にグループ見出し付きで列挙(`groupKey` が変わるたびに見出し。§2.6.1a)。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「図面を追加」ボタン・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
+| S07 | `#/record/:id/confirm` | 職長(版1.12.0: 1次検査者のQA・責任者も。§9.2c) | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階(打設前のときは打設予定日時も)** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
 | S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大。**`approved` の表示名は段階で決まる**: 打設前=打設可、出来形=出来形確認済。§6.8)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色。出来形では全て `null` なので欄ごと出さない)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5(語は段階で変わる)、「打設を止める」(`stopPour`)→M4(`actions` に `stopPour` がある=打設前の記録のみ。出来形には出ない)、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
 | S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人。②③④の各行に段階名)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド(**版1.9: 1つの階のセルに段階ごとのチップを並べる**。段階名つきで `打設前 確認待ち` / `出来形 未着手` のように出す。段階内の代表ステータスは S04 と同じ規則)。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
 | S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット・段階、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「図面を追加」・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示(**版1.11.1: 管理者が許容超の値に OK を付けた項目はコメントが必須**。§9.2b)。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信(`major` の確認文は、出来形では「打設」の語を含まない `scr.S10.confirm_major@post_demold`)。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
@@ -1774,6 +1818,35 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 6. **他の画面は変更なし**: S06/S07(職長)は許容超に OK を付けても従来どおり `MEASURE_OVER_TOL_OK` で提出できない。S08(閲覧)・M1(PIN)・S20 は変更なし。
 7. 画面に出る結果の語は現行の `result.ok`(= `OK`)のまま変えない(辞書に新しい語を足さない)。
 
+### 9.2c 1次検査者と承認者(版1.12.0。§6.9。上の表(§9.2)と食い違うときは本節が優先)
+表示制御の原則(§9.1)は変えない: 記録に対するボタンは `actions` だけで決める。役割(`Me.role`)は「どの導線を出すか」にだけ使う。
+
+| 画面 | 変更 |
+|---|---|
+| S04(現場) | QA(その現場の `myAssignRole`∈{qa_main,qa_sub})と責任者に、各階の「1次検査を始める」(`scr.S04.first_new`)を出す(→S05)。職長の「新しい記録」は従来どおり。記録の行: 1次検査者が管理者・責任者の記録には作成者名の横にバッジ `badge.owner_qa`/`badge.owner_lead` を出す。行のタップ先は `actions` に `saveDraft` があれば S06、それ以外は S08(職長が管理者の1次検査の行を開くと S08 の読み取り)。 |
+| S05(作成) | QA・責任者も使う。画面の内容は職長と同じ(段階・階・工区・ロット・打設予定日時)。成功後は S06。`ALREADY_EXISTS` は従来どおり既存記録へ誘導(`mine` なら S06、そうでなければ S08 を開けるときは S08、開けなければ案内のみ)。 |
+| S06・S07(入力・提出) | 1次検査者の QA・責任者にも同じ画面を使う(`actions` に `saveDraft`/`submitRecord` があるとき)。**入力の対象は職長と同じく `audience` が both/foreman の項目だけ**(QA・責任者への応答には `audience=qa` の項目も含まれるので、S06・S07・事前検証では除く。進捗の総数は `counts.total` と同じ)。記録の `ownerRole` が `qa`/`lead` のとき、見出しの語を下の「語の読み替え」に従って1次検査の語にする。提出は PIN(M1)。 |
+| S08(詳細) | 3者サイン欄・項目一覧の見出し・コメント枠の見出しを、`ownerRole` が `qa`/`lead` のとき下の「語の読み替え」で表示する。1次検査者の氏名の横に役割(`role.*`)を出す。 |
+| S09(ボード。QA・責任者) | ①**「自分の1次検査」**(`scr.S09.my_first`): `ownerUserId`=自分 かつ status∈{draft,fix,submitted} の記録(入力中・是正中・確認待ち。行→ `actions` に `saveDraft` があれば S06、なければ S08)。0件なら節ごと出さない。②「確認待ち」: 従来どおり `submitted` を提出順に出す。**QA のボードの「確認待ち」からは、`ownerRole` が `qa`/`lead` の行(責任者だけが承認する記録。自分の1次検査を含む)を除く**(自分の1次検査は①に出る。判断に使うのは記録の値 `ownerRole` だけで、`actions` の有無では除かない=他のQAが確認中の職長の記録は従来どおり「{名前}が確認中」として出る)。責任者のボードでは除かない。1次検査者が管理者・責任者の行にはバッジ `badge.owner_qa`/`badge.owner_lead` を出す。③④⑤は従来どおり。 |
+| S10(確認) | 承認できない人には、従来どおり `actions` に `claimReview` が無いので「確認中にする」が出ない。その場合、`ownerRole` が `qa`/`lead` なら案内 `scr.S10.lead_only`(この記録は責任者が確認します)を出す。1次検査者の結果・コメント・写真の見出しは「語の読み替え」に従う。`APPROVER_NOT_ALLOWED` を受けたら `err.APPROVER_NOT_ALLOWED` を出し、記録を取り直す。 |
+| S11(履歴) | 作成者の欄に、1次検査者が管理者・責任者ならバッジ(S04 と同じ)。 |
+
+**語の読み替え**(記録の `ownerRole` が `qa` または `lead` のときだけ。`foreman`・空・応答に無いときは従来の語のまま):
+
+| 従来のキー(ja) | 読み替え先のキー | ja | id(暫定訳) |
+|---|---|---|---|
+| `lbl.foreman_res`(職長) | `lbl.first_res` | 1次検査 | Pemeriksaan pertama |
+| `lbl.foreman_note`(職長のコメント) | `lbl.first_note` | 1次検査のコメント | Komentar pemeriksaan pertama |
+| `lbl.sig_foreman`(職長サイン) | `lbl.sig_first` | 1次検査(提出) | Pemeriksaan pertama (kirim) |
+| `lbl.qa_res`(管理者) | `lbl.approver_res` | 承認 | Persetujuan |
+| `lbl.manager_note`(管理者のコメント) | `lbl.approver_note` | 承認者のコメント | Komentar pemberi persetujuan |
+| `lbl.sig_qa`(品質管理者) | `lbl.sig_approver` | 承認者 | Pemberi persetujuan |
+| `drawing.by_self`(職長の図面) | `drawing.by_first` | 1次検査の図面 | Gambar pemeriksaan pertama |
+| `drawing.by_qa`(管理者の図面) | `drawing.by_approver` | 承認者の図面 | Gambar pemberi persetujuan |
+
+- 読み替えは画面側の表示だけ(API・列名は変えない)。`ev.*`(履歴)は語を変えない代わりに、`ev.submitted` の ja を「職長が提出」から **「提出」**(id `Dikirim`)へ、`ev.verdict_ok` の ja を「品質管理者が合格」から **「合格」**(id `Diluluskan`)へ変える(実行者の氏名は履歴の行に別に出ているため。全ての記録で同じ語)。
+- コメントの種類 `note.foreman`/`note.manager` の表示も、`ownerRole` が `qa`/`lead` の記録では `lbl.first_res`/`lbl.approver_res` を使う。
+
 ### 9.3 画面ごとの空状態・エラー表示
 - 一覧が空: `scr.<ID>.empty` の文言。通信エラー: 画面上部にバナー(`err.network`)+キャッシュ表示。サーバーエラー: `err.<CODE>`(§5.3の全コードに辞書キー必須)。`VALIDATION_FAILED` は `rule.<RULE>` を該当項目の下に表示。
 - 読み込み中はスケルトンまたはスピナー。操作ボタンは二重押下防止(送信中は無効)。 **待つ操作の進行中表示(『送信中…』と8秒後の `msg.slow_wait`)は §8.11.8**。
@@ -1817,6 +1890,18 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | `scr.S09.major`(重大不適合・打設停止中) | 重大不適合 | Ketidaksesuaian berat |
 
 - 版1.9 で足す通常のキー: `scr.S05.stage_hint_post_demold`=「出来形検査は、脱型・解体のあとに行う検査です。打設予定日時は要りません」/ id「Pemeriksaan hasil pekerjaan dilakukan setelah bongkar bekisting. Rencana waktu pengecoran tidak diperlukan」。段階名の表示は既存の `stage.*`、ステータスは `st.*`、`lbl.stage` を使う(段階とステータスを並べる表示は `t('stage.x')` と `t('st.y')` をつなげて作る)。
+- **版1.12.0 で足すキー**(ja/id の両方。インドネシア語は暫定訳 P-22。`@` を含まない通常のキー。§9.2c の「語の読み替え」の8キーもこの版で足す):
+
+| キー | ja | id(暫定) |
+|---|---|---|
+| `err.APPROVER_NOT_ALLOWED` | この記録は承認できません(自分の1次検査、または責任者だけが承認する記録です) | Catatan ini tidak dapat Anda setujui (pemeriksaan pertama Anda sendiri, atau hanya penanggung jawab yang dapat menyetujui) |
+| `scr.S04.first_new` | 1次検査を始める | Mulai pemeriksaan pertama |
+| `scr.S09.my_first` | 自分の1次検査 | Pemeriksaan pertama saya |
+| `scr.S10.lead_only` | この記録は責任者が確認します | Catatan ini diperiksa oleh penanggung jawab |
+| `badge.owner_qa` | 管理者の1次検査 | Pemeriksaan pertama oleh pengawas |
+| `badge.owner_lead` | 責任者の1次検査 | Pemeriksaan pertama oleh penanggung jawab |
+
+  `err.*` は §5.3 の全コードを網羅する不変条件(U-I18N-01・spec-sync)なので、`err.APPROVER_NOT_ALLOWED` が無いとテストが落ちる。
 - **版1.11.1 で足すキー**(ja/id の両方。インドネシア語は暫定訳 P-22。`@` を含まない通常のキー。§9.2b):
 
 | キー | ja | id(暫定) |
@@ -1987,6 +2072,23 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 **7. 出来形検査(`post_demold`)**: **同じ規則をそのまま適用する**(上の1のとおり。段階で分けない)。
 **8. 注記**: 項目表の直後に1段落(HTML 8px / doc 6pt、`#444444`)`実測の ▲ は許容(±)を超えた値の目安です。合否は職長・管理者が判定した結果(合/NG)で、▲ だけでは決まりません。許容ちょうどは許容内として扱います。` を、**項目表のどこかの行に「許容あり」の実測(要約に `許容±` を含むもの)が1つでもあるときだけ**出す。無ければ出さない。従来の注記「管理者コメントの全文は…」は廃止(§10.2b-A)。
 **9. 許容超でも結果が `ok` の行(版1.11.1 で確定)**: 行の背景を変えない(▲だけが読み手への目印。NG の赤背景 `#fde8e8` は付けない)。職長の `selfResult=ok` は §5.3.1 の `MEASURE_OVER_TOL_OK` で提出できないため、実際に現れるのは**管理者の `qaResult=ok` の行**(ユーザー決定 2026-10-20: 管理者は許容超に `ok` を付けられる)。管理者の許容超 `ok` は項目コメント `qaNote` が必須(§5.3.1 `QA_OVER_TOL_COMMENT_REQUIRED`)なので、その行の「管理者コメント」列(§10.2b-A)には必ず理由が出る。PDF の表示規則は変えない(▲と管理者コメントで足りる)。
+
+### 10.2e 1次検査者が管理者・責任者の記録の欄名(版1.12.0。§6.9。HTML方式・doc方式で同じ)
+- **対象は `ownerRole` が `qa`/`lead` の記録だけ**。職長の記録(空の既存記録を含む)のPDFは従来どおり(欄名・列幅・ハッシュとも変えない)。
+- 置き換える語(日本語固定):
+
+| 場所 | 職長の記録(従来) | 管理者・責任者の記録 |
+|---|---|---|
+| §10.2 項目2 基本情報 | 職長の会社名 | 1次検査者の会社名 |
+| §10.2 項目3 3者サイン欄 | 職長 / 品質管理者 / 元請 | **1次検査**({役割名}: 管理者 または 責任者)/ **承認**(責任者)/ 元請 |
+| §10.2 項目4 結果サマリ | 職長 / 管理者 | 1次検査 / 承認 |
+| §10.2b-A 項目表の見出し | `職長結果` / `管理者結果` / `職長コメント` / `管理者コメント` | `1次検査結果` / `承認結果` / `1次検査コメント` / `承認者コメント`(列幅は同じ) |
+| §10.2b-B 写真の情報欄 | 職長の結果・管理者の結果、`実測(職長):`・`実測(管理者):`、職長コメント・管理者コメント、撮影者区分 職長 / 管理者 | 1次検査の結果・承認の結果、`実測(1次検査):`・`実測(承認):`、1次検査コメント・承認者コメント、撮影者区分 1次検査 / 承認 |
+| §10.2 項目6 NG・是正の経過 | 判定者 | 承認者(氏名の後ろに役割) |
+
+- 3者サイン欄の各欄には、従来どおり会社名・氏名・日時を出し、1次検査欄には「PIN認証による電子サイン」を出す。責任者が自分の1次検査を承認した記録は、1次検査欄と承認欄に同じ氏名が出る(そのまま出す。注記しない)。
+- ハッシュ(§10.2 項目8)の対象データは変えない(欄名は対象外)。
+- 自己点検: 職長の記録の HTML が版1.11.2 と同じ文字列になること(C-REP-09)。
 
 ### 10.3 生成方法(GAS)
 1. 記録の詳細・Notes・判定Events・写真メタをシートから取得(権限は `generateReport` の `authorize`)。
@@ -2261,6 +2363,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | 段階(打設前/出来形)をまたいだ記録の分離、出来形に打設可/打設を止める操作が出ない、項目の絞り込み、`enabledStages` 既定(版1.9) | C-STAGE-01〜06, C-ITEM-01〜03, U-SEED-01, U-I18N-01, E-15 |
 | 元請PDFの実測が切れず読める(項目表の折り返し・要約・許容超の ▲・図面の項目グループ・写真ブロック)。判定は人(▲は目安のみ)(版1.11.0) | U-MEAS-01, C-REP-01(②改訂), C-REP-07, C-REP-08, C-DRAW-07、(実機)REAL-PDF-06 |
 | 管理者は許容超の実測値に OK を付けられる。ただし管理者コメントが必須(職長側は変えない)(版1.11.1) | C-VERD-01, C-VERD-02, C-VERD-03, U-VALID-01, U-I18N-01, E-30、C-REP-07(データ改訂) |
+| 管理者・責任者も1次検査ができる。1次検査者は承認できない(責任者は自己承認可)。管理者・責任者の1次検査は責任者だけが承認・元請提出。職長に詳細を見せる(版1.12.0) | C-OWN-01〜07, C-PERM-04(改訂), C-REP-09, U-I18N-01, E-31 |
 | 実装がSPECと一致 | `spec-sync.test.js` |
 
 ### 12.3 契約テスト(C-)
@@ -2290,13 +2393,23 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-PERM-01: 田中の `listRecords` は s_a,s_b のみ。`siteId=s_c` 指定→`FORBIDDEN_SITE`。s_c の記録の `getRecord`→`FORBIDDEN_SITE`。`getBootstrap.sites` は s_a,s_b のみ。
 - C-PERM-02: 田中から s_b/2F(スギアント班)は `masked:true` で最小キーのみ。`getRecord`→`FORBIDDEN_TEAM`。その記録の写真ID→`getPhotoThumbs` の `missing`。田中が同スロットを `createRecord`→`ALREADY_EXISTS`(`mine:false`)。
 - C-PERM-03: 佐藤(s_c担当外)が s_c の submitted 記録に `claimReview`/`submitVerdict`/`recordPrimeSign`/`generateReport` → すべて `FORBIDDEN_SITE`。責任者は同記録を `claimReview` 可(最終代行)。
-- C-PERM-04: 職長の `claimReview`/`submitVerdict`/`recordPrimeSign`/`generateReport`/`listAssignments` → `FORBIDDEN_ROLE`。QA/責任者の `createRecord`/`saveDraft`/`submitRecord`/`requestJoin` → `FORBIDDEN_ROLE`。
+- C-PERM-04: 職長の `claimReview`/`submitVerdict`/`recordPrimeSign`/`generateReport`/`listAssignments` → `FORBIDDEN_ROLE`。QA/責任者の `requestJoin` → `FORBIDDEN_ROLE`。**版1.12.0: QA/責任者の `createRecord`/`saveDraft`/`submitRecord` は `FORBIDDEN_ROLE` ではない**(担当外現場の QA は `FORBIDDEN_SITE`、他人の記録は `FORBIDDEN_TEAM`。C-OWN-01・C-OWN-03)。
 - C-PERM-05: 提出後(submitted/qa_ok/approved)の田中の `saveDraft`・`uploadPhotoChunk(self)`・`addNote`・`deletePhoto` → `RECORD_LOCKED`。`fix` では全て成功。
 - C-PERM-06(コメント保全): QAが `saveQaDraft`/`submitVerdict`/`addNote(manager)` を行っても `self.note`(職長コメント)は不変。QAが職長列に相当するキーを送る → `VALIDATION_FAILED`(`FIELD_INVALID`)。Notes の既存行(職長・管理者とも)は判定・再提出を経ても本文・件数が減らない(件数は単調増加、既存 `noteId` の `text` 不変)。`fix` の再提出で QA列は空になるが Notes と `verdict_*` Events に前回分が残る。
 - C-PERM-07: `admin*` は職長・QAで `FORBIDDEN_ROLE`。
 - C-PERM-08: 同班の別職長は自班記録を編集可、他班は不可(`FORBIDDEN_TEAM`)。`team` が空の職長は本人記録のみ。(`/__mock/patch` で用意)
 - C-PERM-09: `requestJoin`: 誤 `joinKey`→`JOIN_KEY_INVALID`、正→pending、再申請→`JOIN_PENDING`。`decideJoin`: 主担当(佐藤)は可、代行者(鈴木)は主担当在席中 `FORBIDDEN_ROLE`、`adminSetAbsence`(佐藤)後は鈴木可、責任者は常に可。承認で Assignments に有効行ができ、その現場が見える。`revokeMembership` 後は見えなくなる。`adminRotateJoinKey` 後は旧キーが `JOIN_KEY_INVALID`。
 - C-PERM-10: 無効な担当(`active=FALSE`/期間外/役割不整合(例 QAのUserに `foreman` 担当を `patch`))は権限を与えない(兼任なしの強制)。
+
+**1次検査者と承認者(版1.12.0。§6.9。mock・backend harness の両方)**
+- C-OWN-01(管理者の1次検査): 佐藤(s_a の qa_main)が s_a/1F で `createRecord` → 成功、`ownerUserId=u_sato`・`ownerRole="qa"`・`team=""`。`saveDraft`・写真(`side=self`)・`addNote`(`kind=foreman`)・`submitRecord`(PIN 3333)が成功し `submitted`。提出の検査(§5.3.1。`PHOTO_REQUIRED` を含む)は職長と同じ。佐藤が s_c(担当外)で `createRecord` → `FORBIDDEN_SITE`。責任者は全現場で作成でき `ownerRole="lead"`。`Records.ownerRole` 列に値が入る。佐藤の `saveDraft` で `audience=qa` の項目(テストでは `/__mock/patch` で用意)を書くと `VALIDATION_FAILED`(`FIELD_INVALID`)。提出検査の対象は `audience` が both/foreman の項目だけ(職長と同じ)。
+- C-OWN-02(承認できない人): C-OWN-01 の `submitted` 記録に、①佐藤(本人)の `claimReview` → `APPROVER_NOT_ALLOWED`(`error.data.ownerRole="qa"`)②鈴木(同じ現場の qa_sub)の `claimReview`・`takeoverReview` → `APPROVER_NOT_ALLOWED` ③佐藤・鈴木の `listRecords`/`getRecord` の `actions` に `claimReview`・`takeoverReview`・`recordPrimeSign`・`generateReport` が入らない ④責任者の `claimReview` → 成功→`saveQaDraft`→`submitVerdict(ok, PIN 9999)`→`qa_ok`。⑤`qa_ok` で佐藤・鈴木の `recordPrimeSign`(誤ったPIN付きでも)・`generateReport`・`uploadPhotoChunk(side=prime)` → `APPROVER_NOT_ALLOWED`(PIN誤りカウントは増えない。C-PIN-03 と同じ考え方)。責任者は成功(`approved`)。
+- C-OWN-03(本人スコープ): 佐藤の1次検査の `draft` 記録に、鈴木(同じ現場の QA)・責任者の `saveDraft`・`submitRecord`・`uploadPhotoChunk(side=self)` → `FORBIDDEN_TEAM`。佐藤・責任者が田中(職長)の `draft` 記録に `saveDraft` → `FORBIDDEN_TEAM`。田中が佐藤の記録に `saveDraft`・`addNote` → `FORBIDDEN_TEAM`。提出後(submitted/qa_ok/approved)の佐藤の `saveDraft`・`uploadPhotoChunk(self)`・`addNote` → `RECORD_LOCKED`(C-PERM-05 と同じ)。`fix` に差し戻されたら佐藤が是正して再提出でき `round=2`。
+- C-OWN-04(責任者の自己承認): 責任者が `createRecord`→入力→`submitRecord`(PIN)→同じ責任者が `claimReview`→`saveQaDraft`→`submitVerdict(ok)`→`recordPrimeSign`→`approved`。全て成功。その現場の QA(佐藤)は同記録の `claimReview` が `APPROVER_NOT_ALLOWED`。`addNote` は責任者本人が draft/fix で `kind=foreman`、submitted 以降で `kind=manager`。
+- C-OWN-05(職長の閲覧): s_a の田中が、佐藤の1次検査の記録を `listRecords` で `masked:false`・`ownerRole="qa"` として受け取り、`getRecord` で項目・写真・コメント・履歴まで見られる(`FORBIDDEN_TEAM` にならない)。写真の `getPhotoThumbs` も取れる。status が `submitted` のあいだ、田中・佐藤・鈴木への応答では `items[].qa` が `null`・`qaComment` が `""`・`side=qa` の図面が無い。責任者には `qa` が返る。s_c の職長(スギアント)は s_a が見えない(`FORBIDDEN_SITE`。従来どおり)。打設前の記録なら田中の `actions` に `stopPour` が入る(`submitted` 以降)。
+- C-OWN-06(職長の記録は従来どおり): 田中の記録は `ownerRole="foreman"`。佐藤・鈴木・責任者が承認でき(C-STATE-01 と同じ)、`APPROVER_NOT_ALLOWED` は出ない。`ownerRole` 列が空の記録(`/__mock/patch` で空にする)も `foreman` として同じ結果。
+- C-OWN-07(通知。mock-only): 佐藤の1次検査の `submitRecord` のメール宛先は責任者だけ(佐藤・鈴木を含まない。実行者を除く)。30分経過(`escalationTick`)の宛先も責任者。田中の記録の提出は従来どおり主担当QA。
+- C-REP-09(PDF の欄名。HTML方式は mock の `lastHtml` が無いので harness。doc 方式は harness-only): `ownerRole="qa"` の記録(`qa_ok`)の PDF に `1次検査結果`・`承認結果`・`1次検査コメント`・`承認者コメント`・サイン欄 `1次検査`・`承認` が出て、`職長結果` が出ない。職長の記録の PDF の HTML は版1.11.2 と同じ見出し(`職長結果` ほか)。
 
 **状態遷移**
 - C-STATE-01(正常系): 田中 `createRecord`→`saveDraft`→写真→`submitRecord`(PIN)→佐藤 `claimReview`→`saveQaDraft`→`submitVerdict(ok,PIN)`→`recordPrimeSign`(PIN)→`approved`。各段で status・`round`・`signatures`・`actions` が §6 通り。Events の `kind` 列が期待順。
@@ -2430,6 +2543,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-27 未送信の可視化(版1.10): 圏外で下書きを入力 → ヘッダのバッジが黄色『未送信 {n}』、保存状態行『圏外のため端末に保存中({n}件)…』。復帰して自動送信 → バッジが 0 になり『送信済み ✓』。S04 の該当の記録の行に『未送信』バッジが付き、送信後に消える。375px・ja/id で横スクロールなし、バッジ・[再送][破棄]・[確認する]のタップ領域が44px以上(E-07 の巡回にも含める)。
 - E-28 getRecord を省く(版1.10): 提出(S07)・合格/軽微/重大(S10)・元請サイン(M5)・打設停止(M4)・確認中にする(S10)の成功直後(15秒以内)に開く S08/S10 の描画のために `getRecord` が呼ばれない(リクエスト監視)。描かれた内容は `getRecord` の結果と一致する。Playwright の `route` で応答から `record` を取り除いた場合は、従来どおり `getRecord` で取り直して同じ画面になる(後方互換)。
 - E-29 読み取り側の待ち短縮(仮置き P-45 の承認後のみ): 起動で `me` と `getBootstrap` が同時に送られる。`deviceToken` とキャッシュがある端末は、応答を待たずにホームが描かれる(`--latency 2000` で 500ms以内)。応答が `UNAUTHENTICATED`/`USER_LOCKED` ならS01/S02 へ遷移する。キャッシュのある記録の S08/S10 は先に描かれ、裏の `getRecord` で `version` が大きければ差し替わる。**承認までは実装・実行しない**。
+- E-31 1次検査者と承認者(版1.12.0。§9.2c。mock。ja と id、375px): ①佐藤で S04 を開くと各階に「1次検査を始める」が出て、S05→S06 で入力→S07→PIN→`submitted`。S09 の「自分の1次検査」に出て、「確認待ち」には出ない。S10 を開いても「確認中にする」が出ず、『この記録は責任者が確認します』が出る。②鈴木のボードの「確認待ち」にもその記録が出ない。③責任者のボードの「確認待ち」に、バッジ『管理者の1次検査』つきで出る。責任者が確認中にし、全項目を入力して合格(PIN)→元請サイン記録(M5)→打設可。S08 の3者サイン欄の見出しが『1次検査(提出)』『承認者』『元請サイン』になる。④田中で S04 を開くとその記録の行が『他班が入力中』にならず、タップで S08(読み取り。編集ボタンなし)に行き、写真・1次検査のコメントが見える。⑤職長の記録の S08・S10 の見出しは従来の語(『職長』『管理者のコメント』)のまま。⑥キー文字列が露出せず、横スクロールなし(E-07)。
 - E-30 管理者の許容超 OK とコメント必須(版1.11.1。§9.2b。mock。ja と id、375px): 職長が i4(許容5)に実測 `3` を入れて提出 → 佐藤が S10 で確認中にし、i4 の管理者の実測に `6` を入れて `OK` を押す → ①コメント欄の直上にヒント(ja: `許容を超えた値があります。OKにする場合は、理由を管理者のコメントに書いてください(必須)`)が出て、コメント欄が赤枠(`aria-invalid="true"`)で `placeholder` が `理由・確認した内容を書いてください(必須)`。②「合格」「軽微な不適合」「重大な不適合」の3つが無効で、各ボタンの下と「やること」に `許容を超えた値にOKを付けるには、コメントを書いてください`(項目番号つき)。この間に `submitVerdict` のリクエストが出ない(Playwright のリクエスト監視)。③`saveQaDraft` は送られる(コメント空でも下書きは保存される)。④コメントに空白だけを入れても同じ。⑤コメントに文を入れる → ヒントの赤枠が消え、「合格」が有効 → PIN → 成功して S08 に遷移し、管理者コメントが表示され、職長のコメントは変わらない。⑥実測を `5` に直す(または結果を `NG` に変える)とヒントが消え、コメント無しで「合格」が有効(NG にしたときは備考と重さが要る)。⑦キー文字列(`rule.`/`scr.`)が画面に露出せず、id でも同じ流れ(辞書キーが ja/id で揃う)。⑧職長の S06 では、許容超に OK を付けて提出すると従来どおり `許容を超えているためOKにできません` が出る。⑨全画面の横スクロールなし(E-07)。
 
 ### 12.6 性能の受け入れ基準(版1.5。実GASでの目標。手動確認項目)
@@ -2557,6 +2671,11 @@ katawaku-inspection/
 - モック+テスト: ①`mock/actions.js` の `itemViolations` を同様に(`who==='qa'` では `MEASURE_OVER_TOL_OK` を出さず、新 rule を出す)、`mock/engine.js` の `VIOLATION_RULES` に追加 ②C-VERD-01〜03・U-VALID-01 のケース追加(`tests/fixtures/validation-cases.json`)・U-I18N-01・E-30 ③既存テストの改訂: `tests/helpers/report-measure.js` と `tests/contract/report-measure.test.js`(管理者の許容超 `ok` が拒否される前提の箇所)、`backend/harness/test/measure.test.js` の「現行は拒否」コメントと該当ケース、C-REP-07 のデータ(許容超の i5・i6 の管理者 `qaNote` を入れる)。
 - フロント: ①`frontend/js/validate.js`(§9.2b-1。`side='qa'` では `MEASURE_OVER_TOL_OK` を出さず新 rule を出す。職長側は変更なし)②`frontend/js/ui/s10.js`(§9.2b-2〜4: ヒント・赤枠・`placeholder`・判定ボタンの無効化と理由)③`frontend/i18n.js` に新キー3つ(§9.4 の版1.11.1 の表。ja/id)。`frontend/sw.js` の `SW_VERSION` を上げる(シェルのファイルを変えたので。sw.js の既存の注記どおり)。
 
+版1.12.0 の責務(SPEC §6.9 ほか。1次検査者と承認者の分離。action 数・status・Events の kind は変更なし。列 `Records.ownerRole` とエラーコード `APPROVER_NOT_ALLOWED` を追加):
+- バックエンド: ①`Schema.gs` の Records に `ownerRole` を末尾追加(`setupSheets` の不足列追記で既存シートにも足す)②`Authz.gs`: §4.1 の役割表の変更、`ownerRoleOf`・`canApprove`・`canViewDetail`・`canEditRecord` の改訂、§4.2 の5(本人スコープ・職長の閲覧)と7(`APPROVER_NOT_ALLOWED`)③`Records.gs`: `createRecord` で `ownerRole`・`team` を設定、`addNote` の `kind` の決め方、`RecordSummary.ownerRole`、承認できない人に `qa` 側を隠す ④`Notify.gs`: 提出・30分経過の宛先(§6.9-4)⑤`Report.gs`・`ReportDoc.gs`: §10.2e の欄名(職長の記録は変えない)⑥harness の C-OWN / C-REP-09。
+- フロント: ①S04「1次検査を始める」・S05〜S07 を QA・責任者でも使う導線 ②S09「自分の1次検査」と「確認待ち」の除外・バッジ ③S08/S10 の「語の読み替え」(§9.2c)と `scr.S10.lead_only` ④`err.APPROVER_NOT_ALLOWED` ほか新しい i18n キー(§9.4 の版1.12.0 の表と §9.2c の8キー。ja/id)、`ev.submitted`/`ev.verdict_ok` の語の変更 ⑤`sw.js` の `SW_VERSION` を上げる。
+- モック+テスト: ①mock の Records 列・権限・`canApprove`・通知・`/__mock/meta` のエラーコード ②C-OWN-01〜07・C-PERM-04 の改訂・C-REP-09・E-31・U-I18N-01 ③spec-sync(列・エラーコード・i18n)。
+
 ### 13.3 契約変更の手順
 1. 実装者が食い違い・不足を見つけたら、**実装を直す前に**設計担当(親エージェント)へ報告する(契約外のフィールド/エンドポイントを勝手に足さない)。
 2. 設計担当が SPEC.md を直し、末尾「変更履歴」に1行追記する。
@@ -2625,6 +2744,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-47 | `createRecord` は先出しにしない(版1.10。**ユーザー未確認**) | 同じ場所(現場・階・工区・ロット・段階)の記録の先着があり(`ALREADY_EXISTS`)、後続の写真・下書きが `createRecord` の成功に依存する(§8.4 の送信可否規則)ため、オンラインでは応答を待つ(『送信中…』)。圏外は従来どおり端末に仮の記録を作ってキューに積む。先出しにすると入力後に失敗して失われるリスクが出る |
 | P-48 | 元請PDFの生成方式(版1.10.1。ユーザー了承 2026-10-17 の方針。**既定の変更は未決**) | 実機で HTML方式がレターサイズになる(`@page` が無視される)ため、Googleドキュメント方式(`reportEngine=doc`)を追加。**既定は `html` のまま**。ユーザーが §10.6 で見た目を確認して良ければ既定を `doc` に変える(別の版)。doc 方式の失敗時は自動で `html`。フォント `Noto Sans JP`、写真ページ 4枚/ページの収まり、所要時間は**実機未確認**(§10.5 の予備値・§12.7) |
 | P-49 | 元請PDFの実測の見せ方の細部(版1.11.0。ユーザー依頼 2026-10-20 の方向+設計判断。**細部はユーザー未確認**) | ①許容超は 値の絶対値>許容(境界は許容内)・許容は0より大きい数のときだけ「あり」(§10.2d-1)②表示は「▲+値」(赤太字)と要約 `n=… 最小/最大/許容±…`、許容超が1件以上なら `▲許容超n件`(§10.2d-2〜3)③職長と管理者は別の系列で混ぜない(§10.2d-1)④実測が無い項目は空欄・許容が無い項目は値と最小/最大だけ(§10.2d-5)⑤出来形にも同じ規則(§10.2d-7)⑥項目表は全列折り返し・実測列を24→46mm・旧注記は廃止(§10.2b-A)⑦図面の凡例は項目ごとの見出し行+番号行・6列・系列Sは図面を書いた側(§10.2c-3)。 | 本書の値で実装する。ユーザーが見て直すなら設計担当が SPEC を直してから実装 |
+| P-50 | 1次検査者と承認者の細部(版1.12.0。方針はユーザー決定 2026-11-04、**細部はユーザー未確認**) | ①管理者・責任者の1次検査の記録は `team` を空にし、編集は本人だけ(同じ現場の他の管理者は1次検査側を書けない)②提出・30分経過の通知は責任者全員へ(QAへは送らない)③QA のボードの「確認待ち」から承認できない記録を除く ④職長に見せる範囲は詳細まで(承認者の下書きは `draft`/`submitted` のあいだ見せない=従来の職長と同じ)⑤PDF の欄名は管理者・責任者の記録だけ変える(職長の記録は従来どおり)⑥履歴の語 `ev.submitted`・`ev.verdict_ok` を役割を含まない語に変える(§6.9・§9.2c・§10.2e) |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -2653,6 +2773,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 16. **版1.11.0の確認**(元請PDFの実測の表現。方向はユーザー依頼どおり、細部は設計判断。P-49): ①**許容超の扱い**: 「許容超」は目安の印(▲)だけで、判定・NG行の背景・サマリ・提出可否には一切影響しない。管理者(QA)が許容超の値に `ok` を付けられるかは、版1.11.1 でユーザーが決定した(コメント必須つきで許可。§5.3.1・本節の17)。②**要約に出す項目**: n・最小・最大・許容(平均は出さない)。平均や「許容に対する余裕」を足すか。③**実測が無い項目は空欄**(「-」「未入力」を出さない)。出す方がよいか。④**許容なしの項目**(下限だけの基準など)は値と最小/最大だけ出し、▲は出さない。⑤**項目表の列幅**: 実測を24→46mm にし、項目を62→40mm に縮めた。項目文が3行になる項目が出る(行が伸びて項目表が長くなる)。⑥**旧注記**「管理者コメントの全文は写真ページ…」は、全文が項目表に出るので廃止。⑦**図面の凡例の長さ**: 項目ごとの見出し行が増えるので、凡例が次のページへ流れる(図面の画像は1ページ目のまま)。⑧**▲ の文字**: Googleドキュメント(Noto Sans JP 想定)とHTML変換のフォントに含まれる想定だが**実機未確認**(REAL-PDF-06)。□ になるなら `△` か `※` に変える。⑨**図面の系列**は図面を書いた側に統一(従来の「要素ごとに他方で補う」は廃止)。
 17. **版1.11.1の確認**(管理者の許容超 `ok` とコメント必須。方針はユーザー決定 2026-10-20「管理者が許容を超えた実測値に『合』を付けられる。ただし許容を超えた場合は管理者のコメントを必須にする」。以下は設計担当の**解釈**で、念のための確認): ①**職長側は変えない**(職長は許容超に `ok` を付けて提出できないまま。ユーザーが指定したのは管理者側だけ)。職長にも許したいなら別の依頼。②**必須のコメントは項目ごとの管理者コメント(`qaNote`)**。総合コメントでは代用できない。③**総合判定が軽微・重大でも**、`ok` のまま残る許容超の項目にはコメントが要る。④**管理者の `qaValues` が許容超のときだけ**対象。管理者が値を入れず、職長の値だけが許容超の項目に `ok` を付けても、コメントは要らない(職長の値を見て管理者が合にするのは従来どおり)。この場合にもコメントを要るようにするか。⑤**内容の質は検査しない**(空白だけは不可。1文字でも通る)。⑥**新しいエラーコードは作らず**、`VALIDATION_FAILED` の `violations[].rule=QA_OVER_TOL_COMMENT_REQUIRED` にした。⑦**画面の語**は `OK`(現行の `result.ok`)のまま。⑧インドネシア語の新しい3文言は暫定訳(P-22)。⑨許容の定義は PDF(§10.2d-1)と同じ(0より大きい数のときだけ。境界は許容内)。
 18. **版1.11.2の確認**(実機の所見。方針はユーザー報告のとおり): ①**h2 見出しの孤立防止は不可**: doc 方式では見出しだけがページ末に残ることがあるのを許容する(代替なし。§10.5.3)。許容できない場合は html 方式を既定のままにする(`reportEngine=html`)。②**doc 方式が `DocumentApp` の未知のメソッド違いでまだ落ちうる**: `ReportDoc.gs` が使う `DocumentApp` のメソッドを、実機で**全部は確認できていない**(`setKeepWithNext` も実機で初めて分かった)。落ちたら html にフォールバックする既存の安全網(§10.5.8。`report_generated.detail.fallbackReason` に例外メッセージが残る)でカバーする。実機で doc 方式を使う前に、Events の `fallbackReason` を見て、`is not a function` が出ていないかを確認する運用とする。落ちた方法が出るたびに、そのメソッドを使わない形へ直す(SPEC を先に直す)。③値の区切り `、 `(§10.2d-2)は実PDF(HTML方式)の再確認が必要(REAL-PDF-06)。
+19. **版1.12.0の確認**(1次検査者と承認者の分離。方針はユーザー決定 2026-11-04。以下は設計担当の判断=P-50): ①管理者が1次検査をした記録は、同じ現場の他の管理者も1次検査側を直せない(本人だけ)で良いか ②提出・30分経過の通知を責任者全員に送る(主担当・代行者には送らない)で良いか ③管理者のボードの「確認待ち」に、自分が承認できない記録(自分の1次検査・ほかの管理者の1次検査)を出さない、で良いか ④PDF の欄名「1次検査/承認」は、管理者・責任者が1次検査をした記録だけに使い、職長の記録は従来の「職長/品質管理者」のままで良いか ⑤履歴の「職長が提出」「品質管理者が合格」を、全ての記録で「提出」「合格」に変えて良いか ⑥インドネシア語の新しい文言は暫定訳(P-22)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
@@ -2733,3 +2854,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-20 | 1.11.0 | ユーザー依頼(2026-10-20): 検査記録PDFの実測の表現を、読み手が分かりやすいように改善。既存の列名・action名・エラーコード・action数(43)・Config・ハッシュは変更なし(PDFの表示のみ)。①**§10.2d 新設**(実測の表示規則): 有効値・許容(>0のとき)・許容超(値の絶対値>許容。境界は許容内)・値の書式(符号つき、許容超は `▲`)・要約 `n=… 最小/最大/許容±…` と `▲許容超n件`・職長/管理者は別系列・出す/出さない表・見た目と HTML の `class="over"`・出来形にも同じ規則・注記(許容ありの実測があるときだけ)。許容超は**目安**で判定ではない(CLAUDE.md §3。結果・背景・サマリに影響しない)。純関数 `measureView_` を新設し `measureText_` を廃止。②**§10.2b-A 項目表**: 全列折り返し可・行は最低6mm・列幅 8/62/14/18/24/30/30 → **8/40/14/18/46/30/30**・実測列の書式を §10.2d に・旧注記(管理者コメントの全文は…)を廃止。③**§10.2b-B 写真ブロック**の実測を §10.2d の書式(`実測(職長):`/`実測(管理者):`+要約)に。④**§10.2c-3 図面の凡例**: 印1個=1行・5列から、**項目ごとのグループ(見出し行=項目名+要約、番号行=値と許容超の `▲`)・6列 24/76/28/24/17/17**(`N` だけの項目は1行)に。系列は図面を書いた側(要素ごとの補完は廃止)。⑤**§10.5**(doc方式): 1.の共有関数、項目表・凡例・写真の同内容、注記、セル結合なし、HTML方式との差(項目表の折り返し)を解消。⑥**§11.4** `/__mock/docShim` の `lastDoc` に `tables[i].cellTexts`・`coloredTexts`・`boldTexts` を追加。⑦**§12**: C-REP-01 ②・C-REP-03 ⑤を改訂、U-MEAS-01・C-REP-07・C-REP-08・C-DRAW-07 を追加、§12.2 に対応行、REAL-PDF-06 と §10.6 の確認項目。⑧§13.2 の版1.11.0 の責務、§14 P-49、§14.2 の16。REQUIREMENTS.md §17 を追加。 |
 | 2026-10-20 | 1.11.1 | ユーザー決定(2026-10-20): 「管理者(QA)が許容を超えた実測値に『合』を付けられるようにする。ただし許容を超えた場合は管理者のコメントを必須にする」。**職長側は変更しない**(許容超の `ok` は `MEASURE_OVER_TOL_OK` のまま)。既存の列名・action名・エラーコード・action数(43)・Config・シートは変更なし(violations の rule を1つ追加)。①**§5.3.1**: `MEASURE_OVER_TOL_OK` を「職長提出のみ」に限定し、新 rule `QA_OVER_TOL_COMMENT_REQUIRED`(管理者の `qaResult=ok` で `qaValues` に許容超 `|値|>tol`(tol>0)があるのに `qaNote` が空)を追加。QA判定の検査ルールの「測定・許容超過は職長側と同じルール」を撤回し、4条件・見る列(`qaValues`/`qaNote` のみ。職長の値・コメントは見ない)・コメントの出どころ(`saveQaDraft` 保存済み)・`ng`/`na` は従来どおり・総合判定に依らない・`saveQaDraft` では検査しない・通ったあとの Notes を明記。新しいエラーコードは作らず `VALIDATION_FAILED` + `violations` にした。②**§5.4.3** `submitVerdict`/`saveQaDraft` に注記。③**§9.2b 新設・§9.2 S10 の行**: 許容超の OK でコメント必須を送信前に示す画面の挙動(ヒント・赤枠・`placeholder`・判定ボタン3つの無効化と理由・OK ボタンは押せる・職長側は変更なし)。④**§9.4**: 新キー `rule.QA_OVER_TOL_COMMENT_REQUIRED`・`scr.S10.over_tol_hint`・`scr.S10.over_tol_note_ph`(ja/id。id は暫定)。⑤**§10.2d-9**: 「管理者の `ok` に許容超を許すか未確認」を確定に書き換え(許容超の `ok` 行は赤背景にしない=従来どおり、▲は出る、管理者コメント列に理由が出る)。**矛盾の解消**: §10.2d-9 と §12.3 C-REP-07 の「管理者側に検査なし」、§14.2 の16 ①、§5.3.1 の「QAも職長と同じ許容超ルール」が実装(管理者側も拒否)と食い違っていたのを、本決定で揃えた。⑥**§12**: C-VERD-01〜03・E-30 を追加、U-VALID-01 に QA 側のケース、C-REP-07 のデータ(許容超の管理者値に `qaNote` を入れる)、§12.2 に対応行。⑦§13.2 の版1.11.1 の責務、§14.2 の17(解釈の確認)。REQUIREMENTS.md §18 を追加し §17 の該当を確定に更新。 |
 | 2026-10-20 | 1.11.2 | 実機(本番GAS)の所見による修正。API契約・列名・action・エラーコード・action数(43)・Config・ハッシュは変更なし(PDFの内部の作り方のみ)。①**§10.5.3 の h2 `setKeepWithNext(true)`(版1.10.2)を撤回**: 本番 `DocumentApp` の `Paragraph` に `setKeepWithNext` が無く、`p.setKeepWithNext is not a function` で doc 方式が html にフォールバックした(`report_generated.detail.fallbackReason`)。見出しの孤立防止は `DocumentApp` では実現できず、代替なし(許容)と明記。連動して §11.4 `lastDoc.paragraphs` の `keepWithNext` 項目、§12.3 C-REP-03 の keepWithNext 検査(§12.3 C-REP-08 ⑧の言及)を撤回し、§13.2 の版1.10.2 の関連記述を整合(版1.10.2 の履歴行は当時の記録として残す)。②**§10.2d-2 値の区切りを `、`→`、 `(読点+半角スペース)に変更**: 負数 `、-3` は `-`(UAX#14 の HY)の前で改行できず、HTML方式の実PDFで項目17の10個の値がセルからはみ出したため。`valuesText`・HTML方式 `measureValuesHtml_`・doc方式 `docMeasureLines_` の runs に適用。図面の凡例は影響なし。U-MEAS-01・C-REP-07・C-REP-08 の期待文字列(例 `職長: -3、 +1`、▲付きも)を全て更新。③§13.2 に版1.11.2 の責務、§14.2 の18(doc 方式が `DocumentApp` の未確認メソッドで落ちうる点を未確定事項に)。 |
+| 2026-11-04 | 1.12.0 | ユーザー決定(2026-11-04。REQUIREMENTS §20): 管理者(QA)・責任者も1次検査ができる。1次検査者は自分の記録を承認できない(責任者だけ例外)。管理者・責任者の1次検査は責任者だけが承認・元請提出。職長にも詳細を見せる。action数(43)・status・Events の kind は変更なし。①§2.7: 列 `ownerRole`(末尾。空は `foreman`)、`ownerUserId` を1次検査者に ②§4.1・§4.2: QA・責任者の `createRecord`/`saveDraft`/`submitRecord`、本人スコープ、`canApprove`・`ownerRoleOf`・`canViewDetail`、承認者の条件 ③§5.1: `RecordSummary.ownerRole`、承認者の下書きを承認できない人に隠す ④§5.3: `APPROVER_NOT_ALLOWED` 追加、§5.4.3/5.4.5 のエラー ⑤§6.2・§6.3・§6.4・§6.6: 実行者と通知先 ⑥§6.9 新設(まとめ)⑦§9.2c 新設・§9.4 キー追加・`ev.submitted`/`ev.verdict_ok` の語 ⑧§10.2e 新設(PDF の欄名)⑨§12: C-OWN-01〜07・C-PERM-04 改訂・C-REP-09・E-31 ⑩§13.2・§14(P-50、§14.2 の19)。§0.1 の再掲も更新。 |
