@@ -15,6 +15,16 @@ beforeEach(async () => { await E.reset(); });
 
 const qaItem = (s, idx) => s.page.locator('.item').nth(idx).locator('.side.qa');
 const verdictBtn = (s, v) => s.page.getByRole('button', { name: s.t('verdict.' + v), exact: true });
+/**
+ * ボタンが有効になるまで待つ(最大 timeout ミリ秒)。有効になれば true、ならなければ false。
+ * S10 は入力の0.5秒後に saveQaDraft をまとめて送り、送信中は判定ボタンを無効にする(s10.js drawVerdict の left)。
+ * E.settle は「未送信0件」を見てから一定時間待つだけなので、入力直後はまだ送信が始まっておらず、待ちが足りないことがある。
+ */
+async function waitEnabled(loc, timeout = 10000) {
+  const end = Date.now() + timeout;
+  while (await loc.isDisabled()) { if (Date.now() > end) return false; await new Promise((r) => setTimeout(r, 100)); }
+  return true;
+}
 
 /** S10: 全項目 ok(over で個別指定)+写真。claim 済みの画面で呼ぶ */
 async function fillQa(s, { ng = {} } = {}) {
@@ -65,7 +75,7 @@ describe('E-03/E-04 QA: 確認中→判定→差し戻し→是正→再提出',
     assert.equal(await verdictBtn(q, 'minor').isDisabled(), true, '軽微はコメント必須');
     await page.getByLabel(q.t('scr.S10.comment')).fill('控えを追加してください');
     await E.settle(q);
-    assert.equal(await verdictBtn(q, 'minor').isDisabled(), false);
+    assert.equal(await waitEnabled(verdictBtn(q, 'minor')), true, '総合コメントの入力後、保存の送信が終われば軽微が有効');
     assert.equal(await verdictBtn(q, 'major').isDisabled(), true, '重大項目なしで重大は無効');
     await verdictBtn(q, 'minor').click();
     await page.locator('.sheet .btns .btn:not(.ghost)').click(); // 確認ダイアログ(PINなし)

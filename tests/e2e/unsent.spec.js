@@ -14,9 +14,27 @@ before(async () => { env = await E.setup(); });
 after(async () => { await env.teardown(); });
 beforeEach(async () => { await E.reset(); });
 
-const bg = (s) => s.page.locator('.obx').evaluate((e) => getComputedStyle(e).backgroundColor.match(/\d+(\.\d+)?/g).map(Number));
-const isYellow = ([r, g, b]) => r >= 200 && g >= 150 && b <= 150;
-const isRed = ([r, g, b]) => r >= 150 && r > g + 60 && r > b + 60;
+/**
+ * ヘッダの未送信バッジ(.obx)の塗りが、黄色/赤になるまで待つ。
+ * バッジは件数や通信状態が変わるたびに作り直される(app.js renderHeader)。
+ * 「探す」と「色を読む」を分けると、間で作り直された古いバッジ(画面から外れた要素)の色を読むことがあるため、
+ * ブラウザ内の1回の処理で「今あるバッジを探して色を読む」を、条件を満たすまで繰り返す。判定の基準は従来と同じ。
+ */
+async function expectBadgeColor(s, kind, label, timeout = 5000) {
+  try {
+    await s.page.waitForFunction((k) => {
+      const b = document.querySelector('.obx');
+      if (!b || !b.isConnected) return false;
+      const m = getComputedStyle(b).backgroundColor.match(/\d+(\.\d+)?/g);
+      if (!m) return false;
+      const [r, g, bl] = m.map(Number);
+      return k === 'yellow' ? (r >= 200 && g >= 150 && bl <= 150) : (r >= 150 && r > g + 60 && r > bl + 60);
+    }, kind, { timeout });
+  } catch (e) {
+    const now = await s.page.evaluate(() => { const b = document.querySelector('.obx'); return b ? getComputedStyle(b).backgroundColor : '(バッジなし)'; });
+    assert.fail(`${label}: ${now}`);
+  }
+}
 /** 登録直後の表示言語は Me.lang(ja)。id のセッションはヘッダの言語ボタンで切り替える */
 async function loginAs(s, name) {
   await E.login(s, name);
@@ -50,7 +68,7 @@ for (const lang of ['ja', 'id']) {
       await page.locator('#it-i5 .v-ok').click();
       await page.waitForFunction((zero) => { const b = document.querySelector('.obx'); return b && b.textContent.trim() !== zero; }, s.t('outbox.badge', { n: 0 }));
       assert.match(await E.outboxCount(s), E.rx('outbox.badge', null, lang), 'ヘッダのバッジ『未送信 {n}』');
-      assert.ok(isYellow(await bg(s)), `n≥1 は黄色の塗り: ${await bg(s)}`);
+      await expectBadgeColor(s, 'yellow', 'n≥1 は黄色の塗り');
       assert.ok((await page.locator('.obx').getAttribute('aria-label') || '').includes(s.t('photo.st.offline')), '圏外のとき aria-label に『圏外のため送信待ち』');
       await E.waitText(s, E.rx('save.offline', null, lang), 5000);
       await tapOk(page.locator('.obx'), 'バッジ');
@@ -87,7 +105,7 @@ for (const lang of ['ja', 'id']) {
       await page.locator('#it-i4 .v-ok').click();
       await E.waitText(s, E.rx('outbox.problem_input', null, lang), 10000);
       assert.match(await E.outboxCount(s), E.rx('outbox.badge_bad', null, lang), '赤の『未送信 {n} ・要対応 {m}』');
-      assert.ok(isRed(await bg(s)), `failed があれば赤の塗り: ${await bg(s)}`);
+      await expectBadgeColor(s, 'red', 'failed があれば赤の塗り');
       await tapOk(page.locator('.obx'), 'バッジ');
       for (const k of ['act.resend', 'act.discard']) await tapOk(page.getByRole('button', { name: s.t(k), exact: true }), k);
       await tapOk(page.getByRole('button', { name: s.t('save.check') }), 'save.check');
