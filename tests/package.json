@@ -5,7 +5,7 @@
   "scripts": {
     "unit": "node --test unit/*.test.js spec-sync.test.js",
     "specsync": "node --test spec-sync.test.js",
-    "contract": "node --test contract/*.test.js",
+    "contract": "node --test --test-concurrency=1 contract/*.test.js",
     "e2e": "node --test --test-concurrency=1 e2e/*.spec.js"
   },
   "devDependencies": {
