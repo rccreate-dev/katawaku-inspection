@@ -47,8 +47,8 @@ Claude Code(デスクトップアプリ)で作業を引き継ぐための資料�
 
 - 構文確認: `node --check`
 - 単体: `cd tests && npm run unit`(216件)
-- 契約: モックサーバー(`node mock/server.js`、ポート8787)を起動して `npm run contract`(189件)。GAS互換ハーネス(`backend/harness/server.js`、ポート8788)に対しては `API_URL=http://127.0.0.1:8788/api` を付けて実行(215件)
-- E2E: `npm run e2e`(Playwright)
+- 契約: モックサーバー(`node mock/server.js`、ポート8787)を起動して `npm run contract`(189件合格・26件はモック対象外でスキップ。`--test-concurrency=1` 付きにした。付けないと共有サーバーで混ざって失敗する)。GAS互換ハーネス(`backend/harness/server.js`、ポート8788)に対しては `API_URL=http://127.0.0.1:8788/api` を付けて実行(215件)
+- E2E: `npm run e2e`(Playwright。64件。この環境に入っているブラウザで動く。全体で約10分かかる。2026-11-04 の結果は63件合格・1件不合格で、不合格の E-27(未送信の可視化)は単独で再実行すると合格(色の取得のタイミングによる不安定なテスト。アプリの不具合ではない)
 - SPEC と実装・テストの同期: `npm run specsync`
 - ハーネス単体のテストは `backend/harness/test/`
 
