@@ -252,7 +252,8 @@ function docMeasureLines_(row, withKeyword) {
   ['self', 'qa'].forEach(function (side) {
     var v = measureView_(row, side);
     if (!v) return;
-    var runs = [{ t: (withKeyword ? '実測(' + v.label + '): ' : v.label + ': '), color: REPORT_DOC_COLOR.label }];
+    var vl = side === 'self' ? RPT_L_.self : RPT_L_.qa;   // 版1.12.0: 欄名(§10.2e)
+    var runs = [{ t: (withKeyword ? '実測(' + vl + '): ' : vl + ': '), color: REPORT_DOC_COLOR.label }];
     v.values.forEach(function (x, i) {
       if (i > 0) runs.push({ t: '、 ' });   // 読点+半角スペース(「、」直後の「-」で折り返せずセルからはみ出したため)
       runs.push(x.over ? { t: '▲' + x.text, bold: true, color: REPORT_DOC_COLOR.ng } : { t: x.text });
@@ -281,7 +282,7 @@ function docCount_(rows, side) {
 function docDrawingPage_(body, ph, rows, seq, t0) {
   body.appendPageBreak();
   docBodyPara_(body, '確認箇所(図面)', REPORT_DOC_H2);
-  docBodyPara_(body, (ph.side === 'qa' ? '管理者' : '職長') + ': ' + userName_(ph.takenBy) + ' / ' + dtShort_(ph.takenAt));
+  docBodyPara_(body, (ph.side === 'qa' ? RPT_L_.qa : RPT_L_.self) + ': ' + userName_(ph.takenBy) + ' / ' + dtShort_(ph.takenAt));
 
   // 画像(1行1列の罫線なしの表。中央寄せ)
   var t = docNewTable_(body, 1, [REPORT_DOC_BODY_W_MM], { noBorder: true });
@@ -305,7 +306,7 @@ function docDrawingPage_(body, ph, rows, seq, t0) {
     return;
   }
   // 凡例(SPEC §10.5.4・§10.2c-3 版1.11.0): 項目ごとのグループ。6列 24/76/28/24/17/17mm。セル結合は使わず通常の6セルで作る
-  var trs = [['番号', '項目', '実測値', '許容超', '職長', '管理者']], shadeRows = {};
+  var trs = [['番号', '項目', '実測値', '許容超', RPT_L_.self, RPT_L_.qa]], shadeRows = {};
   drawingLegendModel_(ph, rows, seq).forEach(function (e) {
     var row = e.row;
     if (e.type === 'mark') {
@@ -355,16 +356,16 @@ function docPhotoBlock_(body, ph, rowOf, seq) {
 
   // 右: 情報欄(HTML方式 §10.2b-B の1〜7と同じ内容・同じ順)
   var lb = function (s) { return { t: s, color: REPORT_DOC_COLOR.label }; };
-  var who = ph.side === 'self' ? '職長' : (ph.side === 'qa' ? '管理者' : '元請サイン証跡');
+  var who = ph.side === 'self' ? RPT_L_.self : (ph.side === 'qa' ? RPT_L_.qa : '元請サイン証跡');
   var row = ph.itemId ? rowOf[ph.itemId] : null;
   var lines = [];
   if (row) {
     var snap = row.snapshot;
     lines.push([{ t: 'No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + docStr_(snap.textJa), bold: true }]);
-    lines.push([lb('職長:'), { t: ' ' }, docResRun_(row.selfResult, row.selfSeverity), { t: ' / ' }, lb('管理者:'), { t: ' ' }, docResRun_(row.qaResult, row.qaSeverity)]);
+    lines.push([lb(RPT_L_.self + ':'), { t: ' ' }, docResRun_(row.selfResult, row.selfSeverity), { t: ' / ' }, lb(RPT_L_.qa + ':'), { t: ' ' }, docResRun_(row.qaResult, row.qaSeverity)]);
     docMeasureLines_(row, true).forEach(function (l) { lines.push(l); });   // 実測(職長): 値 / 要約 / 実測(管理者): … (§10.2d。なければ行なし)
-    lines.push([lb('職長コメント:'), { t: ' ' + docStr_(row.foremanNote) }]);
-    lines.push([lb('管理者コメント:'), { t: ' ' + docStr_(row.qaNote) }]);
+    lines.push([lb(RPT_L_.selfNote + ':'), { t: ' ' + docStr_(row.foremanNote) }]);
+    lines.push([lb(RPT_L_.qaNote + ':'), { t: ' ' + docStr_(row.qaNote) }]);
   }
   lines.push([lb('撮影:'), { t: ' ' + who }]);
   lines.push([{ t: docStr_(ph.stampText), size: REPORT_DOC_SIZE.note, color: REPORT_DOC_COLOR.note }]);
@@ -375,6 +376,7 @@ function docPhotoBlock_(body, ph, rowOf, seq) {
 
 /** 文書本体を組み立てる(SPEC §10.5.3〜10.5.6)。例外はそのまま投げる */
 function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0) {
+  var L = reportLabelsFor_(rec);   // 版1.12.0: 欄名(§10.2e。Report.gs)
   var body = doc.getBody();
   docSetupPage_(body);
   var photos = allPhotos.filter(function (x) { return photoKindOf_(x) !== 'drawing'; });
@@ -392,7 +394,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
 
   // 3. 基本情報表(4列 30/63/30/63)
   var info = [['現場名', docStr_(site.name), '元請会社', docStr_(site.primeContractor)]];
-  if (ownerCompany) info.push(['職長の会社名', ownerCompany, '職長', docStr_(userName_(rec.ownerUserId))]);
+  if (ownerCompany) info.push([L.company, ownerCompany, L.owner, docStr_(userName_(rec.ownerUserId))]);
   info.push(['階・工区・打設箇所', rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot, '段階', stage]);
   if (rec.stage === 'post_demold') info.push(['記録ID', rec.recordId, '', '']);   // 出来形は打設予定日時を出さない(セル結合はしない)
   else info.push(['打設予定日時', dtShort_(rec.pourPlannedAt), '記録ID', rec.recordId]);
@@ -417,7 +419,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
     prime = [docStr_(rec.primeSignerName), METHOD_LABEL_[rec.primeSignMethod] || docStr_(rec.primeSignMethod),
       '記録者: ' + docStr_(userName_(rec.primeSignedBy)), dtShort_(rec.primeSignedAt)];
   }
-  docTextTable_(body, [['職長', '品質管理者', '元請'], [foreman, qa, prime]],
+  docTextTable_(body, [[L.signSelf, L.signQa, '元請'], [foreman, qa, prime]],
     { widths: [62, 62, 62], headRows: [0], rowMin: { 1: REPORT_DOC_SIGN_MIN_PT } }, t0);
 
   // 5. 打設停止履歴
@@ -429,12 +431,12 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   // 6. 結果サマリ(4列 30/52/52/52)
   docBodyPara_(body, '結果サマリ', h2);
   var cs = docCount_(rows, 'self'), cq = docCount_(rows, 'qa');
-  docTextTable_(body, [['', '合', 'NG', '該当なし'], ['職長', String(cs.ok), String(cs.ng), String(cs.na)], ['管理者', String(cq.ok), String(cq.ng), String(cq.na)]],
+  docTextTable_(body, [['', '合', 'NG', '該当なし'], [L.self, String(cs.ok), String(cs.ng), String(cs.na)], [L.qa, String(cq.ok), String(cq.ng), String(cq.na)]],
     { widths: [30, 52, 52, 52], headRows: [0], labelCols: [0] }, t0);
 
   // 7. 項目表(7列 8/40/14/18/46/30/30。全列で折り返しうる。文字は切り詰めない。実測は §10.2d の書式)
   docBodyPara_(body, '項目表', h2);
-  var items = [['No.', '項目', '職長結果', '管理者結果', '実測(設計値との差)', '職長コメント', '管理者コメント']], ngRows = {};
+  var items = [['No.', '項目', L.selfRes, L.qaRes, '実測(設計値との差)', L.selfNote, L.qaNote]], ngRows = {};
   rows.forEach(function (r, i) {
     var snap = r.snapshot;
     var ml = docMeasureLines_(r, false);
@@ -462,7 +464,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   verdicts.forEach(function (e) {
     var d = e.detail || {};
     var ngs = (d.items || []).filter(function (x) { return x.result === 'ng'; }).map(function (x) { return x.itemId; });
-    docBodyPara_(body, dtShort_(e.at) + ' ' + docStr_(userName_(e.actorUserId)) + ' 判定: ' + (VERDICT_LABEL_[d.verdict] || docStr_(d.verdict)) +
+    docBodyPara_(body, dtShort_(e.at) + ' ' + docStr_(reportJudgeName_(e.actorUserId)) + ' 判定: ' + (VERDICT_LABEL_[d.verdict] || docStr_(d.verdict)) +
       (d.comment ? ' / ' + d.comment : '') + (ngs.length ? ' / NG項目: ' + ngs.join(',') : ''));
   });
   docBodyPara_(body, '提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length);

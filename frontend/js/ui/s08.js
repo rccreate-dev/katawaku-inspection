@@ -13,24 +13,24 @@
   };
 
   /* 読み取り専用の項目表示(職長結果・QA結果を別枠で) */
-  C.itemReadonly = function (it, idx) {
+  C.itemReadonly = function (it, idx, rec) {
     var def = it.def, s = it.self || {}, q = it.qa;
     var node = h('div', { class: 'item' });
     node.appendChild(h('div', { class: 'q' }, h('span', { class: 'no' }, String(idx + 1)), h('div', null, KW.itemText(def), def.key ? h('span', { class: 'key' }, t('lbl.photo_required')) : null)));
     var pair = h('div', { class: 'pair' });
     if (def.audience !== 'qa') {
-      var a = h('div', { class: 'side' }, h('h4', null, t('lbl.foreman_res')),
+      var a = h('div', { class: 'side' }, h('h4', null, C.lbl('lbl.foreman_res', rec)),
         h('div', { class: 'chips' }, C.resultChip(s.result), s.severity ? C.chip(s.severity === 'major' ? 'bad' : 'warn', t('sev.' + s.severity)) : null));
       if ((s.values || []).length) a.appendChild(h('div', { class: 'sub' }, t('lbl.measure') + ': ' + C.valuesText(s.values, def.unit) + (def.tol != null ? ' (' + t('lbl.tol') + ' ±' + def.tol + ')' : '')));
-      if (s.note) a.appendChild(h('div', { class: 'cmt' }, h('b', null, t('lbl.foreman_note')), s.note));
+      if (s.note) a.appendChild(h('div', { class: 'cmt' }, h('b', null, C.lbl('lbl.foreman_note', rec)), s.note));
       if ((s.photos || []).length) a.appendChild(C.photoStrip(s.photos));
       pair.appendChild(a);
     }
     if (q && def.audience !== 'foreman' && (q.result || q.note || (q.photos || []).length)) {
-      var b = h('div', { class: 'side qa' }, h('h4', null, t('lbl.qa_res')),
+      var b = h('div', { class: 'side qa' }, h('h4', null, C.lbl('lbl.qa_res', rec)),
         h('div', { class: 'chips' }, C.resultChip(q.result), q.severity ? C.chip(q.severity === 'major' ? 'bad' : 'warn', t('sev.' + q.severity)) : null));
       if ((q.values || []).length) b.appendChild(h('div', { class: 'sub' }, t('lbl.measure') + ': ' + C.valuesText(q.values, def.unit)));
-      if (q.note) b.appendChild(h('div', { class: 'cmt mgr' }, h('b', null, t('lbl.manager_note')), q.note));
+      if (q.note) b.appendChild(h('div', { class: 'cmt mgr' }, h('b', null, C.lbl('lbl.manager_note', rec)), q.note));
       if ((q.photos || []).length) b.appendChild(C.photoStrip(q.photos));
       pair.appendChild(b);
     }
@@ -155,8 +155,9 @@
         // 3者サイン
         var sg = d.signatures || {};
         el.appendChild(h('div', { class: 'sigs' },
-          C.sigBox(t('lbl.sig_foreman'), sg.foreman && sg.foreman.name, sg.foreman && sg.foreman.at),
-          C.sigBox(t('lbl.sig_qa'), sg.qa && sg.qa.name, sg.qa && sg.qa.at),
+          // 版1.12.0: 1次検査者が管理者・責任者なら見出しを読み替え、氏名の横に役割を出す(SPEC §9.2c)
+          C.sigBox(C.lbl('lbl.sig_foreman', d), sg.foreman && (sg.foreman.name + (C.isMgrOwned(d) ? '(' + C.roleName(d.ownerRole) + ')' : '')), sg.foreman && sg.foreman.at),
+          C.sigBox(C.lbl('lbl.sig_qa', d), sg.qa && sg.qa.name, sg.qa && sg.qa.at),
           C.sigBox(t('lbl.sig_prime'), sg.prime && (sg.prime.signerName), sg.prime && sg.prime.at, sg.prime ? h('div', null, t('method.' + sg.prime.method)) : null)));
         if ((d.primePhotos || []).length) el.appendChild(C.photoStrip(d.primePhotos));
         // 期限
@@ -196,7 +197,7 @@
         list.forEach(function (it, i) {
           var g = KW.groupText(it.def);
           if (g !== lastG) { el.appendChild(h('div', { class: 'grp' }, g)); lastG = g; }
-          el.appendChild(C.itemReadonly(it, i));
+          el.appendChild(C.itemReadonly(it, i, d));
         });
         // 図面(読み取り専用。SPEC §7.7)
         el.appendChild(C.drawingSection({
@@ -216,7 +217,7 @@
         (d.notes || []).forEach(function (n) {
           var it = n.itemId ? (d.items || []).filter(function (x) { return x.itemId === n.itemId; })[0] : null;
           el.appendChild(h('div', { class: 'cmt' + (n.kind === 'manager' ? ' mgr' : '') },
-            h('b', null, [t('note.' + n.kind), n.authorName, 'R' + n.round, C.fmt(n.createdAt)].join(' / ')),
+            h('b', null, [C.lbl('note.' + n.kind, d), n.authorName, 'R' + n.round, C.fmt(n.createdAt)].join(' / ')),
             it ? h('div', { class: 'sub' }, KW.itemText(it.def)) : null, n.text));
         });
         // 履歴

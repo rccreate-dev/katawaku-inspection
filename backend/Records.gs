@@ -50,14 +50,14 @@ function recordSummary_(actor, rec) {
     }
     if (aud !== 'foreman' && it.qaResult) { qaCounts.filled++; qaCounts[it.qaResult]++; }
   });
-  // 職長にはQAの下書き進捗を見せない
-  if (actor.role === 'foreman' && (rec.status === 'draft' || rec.status === 'submitted')) {
+  // 承認者の下書き進捗は、承認できる人にだけ見せる(版1.12.0。従来は職長に見せない規則)
+  if (!canApprove(actor, rec) && (rec.status === 'draft' || rec.status === 'submitted')) {
     qaCounts = { filled: 0, ok: 0, ng: 0, na: 0 };
   }
   return {
     recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone, lot: rec.lot, stage: rec.stage,
     status: rec.status, round: rec.round, reinspectOf: orNull_(rec.reinspectOf),
-    ownerUserId: rec.ownerUserId, ownerName: userName_(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompany_(rec.ownerUserId), team: rec.team,
+    ownerUserId: rec.ownerUserId, ownerName: userName_(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompany_(rec.ownerUserId), ownerRole: ownerRoleOf(rec), team: rec.team,
     pourPlannedAt: orNull_(rec.pourPlannedAt), submittedAt: orNull_(rec.submittedAt),
     claimedBy: orNull_(rec.claimedBy), claimedByName: userName_(rec.claimedBy), claimedAt: orNull_(rec.claimedAt),
     qaVerdict: orNull_(rec.qaVerdict), major: !!rec.major, stopped: !!rec.stopped,
@@ -84,7 +84,7 @@ function recordMasked_(actor, rec) {
 
 /** 一覧用: 職長が他班の記録を見るとき masked 形 */
 function recordListView_(actor, rec) {
-  if (actor.role === 'foreman' && !inTeamScope_(actor, rec)) return recordMasked_(actor, rec);
+  if (actor.role === 'foreman' && !canViewDetail(actor, rec)) return recordMasked_(actor, rec);
   return recordSummary_(actor, rec);
 }
 
@@ -129,7 +129,8 @@ function defView_(snap) {
 function recordDetail_(actor, rec) {
   var base = recordSummary_(actor, rec);
   var isForeman = actor.role === 'foreman';
-  var hideQa = isForeman && (rec.status === 'draft' || rec.status === 'submitted');
+  // 版1.12.0: 承認者の下書きは、draft/submitted のあいだ承認できる人にだけ見せる
+  var hideQa = !canApprove(actor, rec) && (rec.status === 'draft' || rec.status === 'submitted');
   var allPhotos = Repo.where('Photos', 'recordId', rec.recordId).filter(function (p) { return !p.deleted; });
   // 検査写真のみ(図面は drawings に分ける。版1.6)
   var photos = allPhotos.filter(function (p) { return photoKindOf_(p) === 'photo'; });
@@ -156,7 +157,7 @@ function recordDetail_(actor, rec) {
   var notes = Repo.where('Notes', 'recordId', rec.recordId).map(noteView_);
   var evs = Repo.where('Events', 'recordId', rec.recordId);
   evs = evs.slice(Math.max(0, evs.length - 100)).map(eventView_);
-  var qaVisible = !isForeman || ['fix', 'qa_ok', 'approved'].indexOf(rec.status) >= 0;
+  var qaVisible = canApprove(actor, rec) || ['fix', 'qa_ok', 'approved'].indexOf(rec.status) >= 0;
   var detail = Object.assign({}, base, {
     items: items,
     primePhotos: photos.filter(function (p) { return p.side === 'prime'; }).map(photoMeta_),
@@ -366,7 +367,7 @@ function act_listRecords(ctx) {
   });
   var page = recs.slice(offset, offset + limit);
   var next = offset + limit < recs.length ? 'o' + (offset + limit) : null;
-  if (page.some(function (r) { return !(actor.role === 'foreman' && !inTeamScope_(actor, r)); })) itemsIndex_();
+  if (page.some(function (r) { return !(actor.role === 'foreman' && !canViewDetail(actor, r)); })) itemsIndex_();
   return {
     records: page.map(function (r) { return recordListView_(actor, r); }),
     nextCursor: next, serverTime: Util.nowIso()
@@ -429,11 +430,12 @@ function act_createRecord(ctx) {
   }
 
   var now = Util.nowIso();
-  var team = myTeams_(actor, p.siteId)[0] || '';
+  // 版1.12.0: 管理者・責任者の1次検査は班なし
+  var team = actor.role === 'foreman' ? (myTeams_(actor, p.siteId)[0] || '') : '';
   var rec = Repo.append('Records', {
     recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone: zone, lot: p.lot, stage: p.stage, status: 'draft', round: 1,
     reinspectOf: reinspectOf, ownerUserId: actor.userId, team: team, pourPlannedAt: planned, major: false, stopped: false,
-    escNotified: 0, createdAt: now, updatedAt: now, version: 1, ownerCompany: userCompany_(actor.userId)
+    escNotified: 0, createdAt: now, updatedAt: now, version: 1, ownerCompany: userCompany_(actor.userId), ownerRole: actor.role
   });
   var itemRows = stageItems.map(function (i) {
     return {
@@ -549,7 +551,9 @@ function act_submitRecord(ctx) {
 
   var timing = computeTiming(rec, Util.now());
   var site = Repo.get('Sites', rec.siteId);
-  var mailed = Notify.toActingQa(site, rec, '提出', 'record');
+  // 版1.12.0(§6.6): 管理者・責任者の1次検査の提出は責任者全員へ(実行者を除く)
+  var mailed = ownerRoleOf(rec) === 'foreman' ? Notify.toActingQa(site, rec, '提出', 'record')
+    : Notify.toLeads(site, rec, '提出', actor.userId);
   Ev.add(ctx, resubmit ? 'resubmitted' : 'submitted', {
     siteId: rec.siteId, recordId: rec.recordId, from: from, to: 'submitted', round: round,
     detail: { items: itemResultsFor_('self', rows), late: timing.selfLate, pourPlannedAt: orNull_(rec.pourPlannedAt), mailed: mailed }
@@ -730,7 +734,9 @@ function act_addNote(ctx) {
   if (itemId && !itemsOf_(rec.recordId).some(function (r) { return r.itemId === itemId; })) {
     throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
   }
-  var kind = actor.role === 'foreman' ? 'foreman' : 'manager';
+  // 版1.12.0: 自分の1次検査の記録に draft/fix で書くコメントは1次検査側(kind=foreman)
+  var ownDraft = rec.ownerUserId === actor.userId && (rec.status === 'draft' || rec.status === 'fix');
+  var kind = actor.role === 'foreman' || ownDraft ? 'foreman' : 'manager';
   var note = Repo.append('Notes', {
     noteId: Util.newId('n'), recordId: rec.recordId, itemId: itemId, kind: kind, authorUserId: actor.userId,
     authorRole: actor.role, round: rec.round, text: text, source: 'addNote', clientId: ctx.clientId, createdAt: Util.nowIso()

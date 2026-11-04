@@ -112,7 +112,8 @@
           function recordRow(r) {
             var masked = !!r.masked;
             var acts = r.actions || [];
-            var dest = masked ? null : (role === 'foreman' && acts.indexOf('saveDraft') >= 0 ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId);
+            // 版1.12.0: actions に saveDraft があれば S06、それ以外は S08(1次検査者が管理者・責任者でも同じ。SPEC §9.2c S04)
+            var dest = masked ? null : (acts.indexOf('saveDraft') >= 0 ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId);
             var label = masked
               ? t('badge.masked')
               : [t('lbl.lot') + ' ' + (r.lot || ''), r.zone || null, C.ownerLabel(r) || null].filter(Boolean).join(' / ');
@@ -124,6 +125,7 @@
             }, h('span', null, h('b', null, masked ? t('badge.masked') : label),
               masked ? null : h('small', null, [t('stage.' + C.stageOf(r)), r.team || null].filter(Boolean).join(' / '))),
             h('span', { class: 'chips' }, C.statusChip(r.status, false, r.stage),
+              masked ? null : C.ownerBadge(r),
               drafts[r.recordId] ? C.chip('warn', t('badge.draft_local')) : null,
               unsent[r.recordId] ? C.chip('warn', t('badge.unsent')) : null,
               (!masked && r.stopped) ? C.chip('bad', t('badge.stopped')) : null,
@@ -143,8 +145,10 @@
                 fr.filter(function (r) { return C.stageOf(r) === stage; }).forEach(function (r) { card.appendChild(recordRow(r)); });
               });
             }
-            if (role === 'foreman' && site.status !== 'closed') {
-              card.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/site/' + siteId + '/new?floor=' + encodeURIComponent(f)); } } }, t('scr.S04.new')));
+            // 版1.12.0: 管理者(その現場の qa_main/qa_sub)と責任者には「1次検査を始める」(SPEC §9.2c S04)
+            var canFirst = role === 'foreman' || role === 'lead' || (role === 'qa' && (site.myAssignRole === 'qa_main' || site.myAssignRole === 'qa_sub'));
+            if (canFirst && site.status !== 'closed') {
+              card.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/site/' + siteId + '/new?floor=' + encodeURIComponent(f)); } } }, t(role === 'foreman' ? 'scr.S04.new' : 'scr.S04.first_new')));
             }
             el.appendChild(card);
           });

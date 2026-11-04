@@ -44,6 +44,11 @@ var Notify = {
     return this.send_([q.acting], this.subject_(kind, site, rec), this.body_(kind, site, rec, linkType === 'joins' ? 'joins' : 'record'));
   },
 
+  /** 版1.12.0: 責任者全員へ(実行者を除く) */
+  toLeads: function (site, rec, kind, exceptUserId) {
+    var ids = this.leadIds_().filter(function (id) { return id !== exceptUserId; });
+    return this.send_(ids, this.subject_(kind, site, rec), this.body_(kind, site, rec, 'record'));
+  },
   leadIds_: function () {
     return Repo.all('Users').filter(function (u) { return u.role === 'lead' && u.status === 'active'; }).map(function (u) { return u.userId; });
   },
@@ -74,7 +79,10 @@ function escalationTick() {
       if (!site) return;
       for (var stage = (rec.escNotified || 0) + 1; stage <= lvl; stage++) {
         var to;
-        if (stage === 1) {
+        if (stage === 1 && ownerRoleOf(rec) !== 'foreman') {
+          // 版1.12.0(§6.4): 管理者・責任者の1次検査は責任者だけが承認できるので、30分も責任者へ(1次検査者本人を除く)
+          to = Notify.leadIds_().filter(function (id) { return id !== rec.ownerUserId; });
+        } else if (stage === 1) {
           var today = Util.today();
           to = effectiveAssignmentsFor_(site.siteId, 'qa_sub').map(function (a) { return a.userId; })
             .filter(function (id) { return !isAbsent(id, today); });

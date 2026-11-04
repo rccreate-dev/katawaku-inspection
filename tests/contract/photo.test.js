@@ -252,7 +252,8 @@ describe('C-PHOTO 写真', () => {
     const { recordId } = await h.makeFilledDraft(t);
     assert.equal((await h.uploadPhoto(t, { recordId, itemId: 'i1', side: 'qa' })).error.code, 'FORBIDDEN_ROLE');
     assert.equal((await h.uploadPhoto(t, { recordId, side: 'prime' })).error.code, 'FORBIDDEN_ROLE');
-    assert.equal((await h.uploadPhoto(sato, { recordId, itemId: 'i1', side: 'self' })).error.code, 'FORBIDDEN_ROLE');
+    // 版1.12.0(§4.2 の5②): QA も side=self を撮れるが、他人(職長)の記録は本人スコープで FORBIDDEN_TEAM
+    assert.equal((await h.uploadPhoto(sato, { recordId, itemId: 'i1', side: 'self' })).error.code, 'FORBIDDEN_TEAM');
     await t.ok('submitRecord', { recordId, round: 1 }, { pin: t.pin });
     assert.equal((await h.uploadPhoto(t, { recordId, itemId: 'i1', side: 'self' })).error.code, 'RECORD_LOCKED');
     const unclaimed = await h.uploadPhoto(sato, { recordId, itemId: 'i1', side: 'qa' });

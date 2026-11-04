@@ -240,7 +240,7 @@ test('C-PERM-01/02/03/04 可視範囲・masked・担当外・役割', () => {
     assert.equal(tanaka(a, roleParams[a]).error.code, 'FORBIDDEN_ROLE', a);
   }
   assert.equal(tanaka('listAssignments', {}).error.code, 'FORBIDDEN_ROLE');
-  assert.equal(sato('createRecord', { recordId: rid('r'), siteId: 's_a', floor: '1F', lot: 'x', stage: 'pre_pour' }).error.code, 'FORBIDDEN_ROLE');
+  // 版1.12.0: 管理者も1次検査の記録を作れる(SPEC §6.9)。createRecord の FORBIDDEN_ROLE の確認は外した
   assert.equal(sato('requestJoin', { siteId: 's_a', joinKey: 'x' }).error.code, 'FORBIDDEN_ROLE');
   assert.equal(tanaka('adminListUsers', {}).error.code, 'FORBIDDEN_ROLE');
   assert.equal(sato('adminUnlockUser', { userId: 'u_tanaka' }).error.code, 'FORBIDDEN_ROLE');

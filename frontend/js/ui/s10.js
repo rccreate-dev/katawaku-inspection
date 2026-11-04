@@ -89,10 +89,10 @@
         node.appendChild(h('div', { class: 'q' }, h('span', { class: 'no' }, String(idx + 1)), h('div', null, KW.itemText(def), def.key ? h('span', { class: 'key' }, t('lbl.photo_required')) : null)));
         var pair = h('div', { class: 'pair' });
         if (def.audience !== 'qa') {
-          var a = h('div', { class: 'side' }, h('h4', null, t('lbl.foreman_res')),
+          var a = h('div', { class: 'side' }, h('h4', null, C.lbl('lbl.foreman_res', detail)),
             h('div', { class: 'chips' }, C.resultChip(s.result), s.severity ? C.chip(s.severity === 'major' ? 'bad' : 'warn', t('sev.' + s.severity)) : null));
           if ((s.values || []).length) a.appendChild(h('div', { class: 'sub' }, t('lbl.measure') + ': ' + C.valuesText(s.values, def.unit)));
-          if (s.note) a.appendChild(h('div', { class: 'cmt' }, h('b', null, t('lbl.foreman_note')), s.note));
+          if (s.note) a.appendChild(h('div', { class: 'cmt' }, h('b', null, C.lbl('lbl.foreman_note', detail)), s.note));
           if ((s.photos || []).length) a.appendChild(C.photoStrip(s.photos));
           pair.appendChild(a);
         }
@@ -100,7 +100,7 @@
         if (def.audience !== 'foreman') {
           var x = work.qaItems[it.itemId] || (work.qaItems[it.itemId] = { result: null, severity: null, values: [], note: '' });
           var ed = editable();
-          var box = h('div', { class: 'side qa' }, h('h4', null, t('lbl.qa_res')));
+          var box = h('div', { class: 'side qa' }, h('h4', null, C.lbl('lbl.qa_res', detail)));
           box.appendChild(C.seg([{ v: 'ok', label: t('result.ok') }, { v: 'ng', label: t('result.ng') }, { v: 'na', label: t('result.na') }], x.result, function (v) {
             x.result = v; if (v !== 'ng') x.severity = null; touch(it.itemId); redraw(it.itemId);
           }, { disabled: !ed }));
@@ -113,7 +113,7 @@
             // 版1.11.1(§9.2b): 許容超の OK は管理者コメント必須。ヒントはコメント欄の直上
             var overOk = x.result === 'ok' && KW.validate.overTol(def, x.values);
             if (overOk) box.appendChild(C.msg('warn', t('scr.S10.over_tol_hint')));
-            var ta = h('textarea', { maxlength: '1000', disabled: !ed, 'aria-label': t('lbl.manager_note'), placeholder: overOk ? t('scr.S10.over_tol_note_ph') : t('scr.S10.note_ph') });
+            var ta = h('textarea', { maxlength: '1000', disabled: !ed, 'aria-label': C.lbl('lbl.manager_note', detail), placeholder: overOk ? t('scr.S10.over_tol_note_ph') : t('scr.S10.note_ph') });
             ta.value = x.note || '';
             if (overOk && !String(ta.value).trim()) ta.setAttribute('aria-invalid', 'true');
             ta.addEventListener('input', function () {
@@ -336,6 +336,10 @@
           }
         } else if (editable()) {
           box.appendChild(C.banner('good', h('b', null, t('scr.S10.mine'))));
+        }
+        // 版1.12.0: 責任者だけが承認する記録(1次検査者が管理者・責任者)を、責任者でない人が開いたときの案内(SPEC §9.2c S10)
+        if (!has(d, 'claimReview') && !editable() && C.isMgrOwned(d) && !(KW.state.me && KW.state.me.role === 'lead')) {
+          box.appendChild(C.banner('', t('scr.S10.lead_only')));
         }
         return box;
       }

@@ -11,7 +11,7 @@ const ROLES_ALL = ['foreman', 'qa', 'lead'];
 const ROLES_QL = ['qa', 'lead'];
 const SAMPLE_JPEG = Buffer.from(SAMPLE_JPEG_B64, 'base64');
 
-const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
+const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
 const VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED', 'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'QA_OVER_TOL_COMMENT_REQUIRED', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG', 'VERDICT_MAJOR_NEEDS_MAJOR_ITEM', 'VERDICT_MINOR_HAS_MAJOR_ITEM', 'COMMENT_REQUIRED', 'PRIME_SIGNER_REQUIRED', 'REASON_REQUIRED'];
 
 class ApiError extends Error {
@@ -147,13 +147,27 @@ const photosOf = (recordId) => table('Photos').filter((p) => p.recordId === reco
 const isDrawing = (p) => p.kind === 'drawing';
 const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && !isDrawing(p) && p.side === side && (itemId == null || p.itemId === itemId)).length;
 
+// 版1.12.0(§6.9): 1次検査者の役割。空の既存記録は foreman とみなす
+const ownerRoleOf = (rec) => rec.ownerRole || 'foreman';
+// 職長の班スコープ(書き込み用): 自分の記録、または自班(同team・空でない)の記録
+function inTeam(actor, rec) {
+  if (rec.ownerUserId === actor.userId) return true;
+  const team = teamOf(actor.userId, rec.siteId);
+  return !!team && rec.team === team;
+}
 function canViewDetail(actor, rec) {
   if (actor.role === 'lead') return true;
   if (!siteAccess(actor, rec.siteId)) return false;
   if (actor.role === 'qa') return true;
-  if (rec.ownerUserId === actor.userId) return true;
-  const team = teamOf(actor.userId, rec.siteId);
-  return !!team && rec.team === team;
+  // 版1.12.0: 管理者・責任者の1次検査の記録は、同じ現場の職長が詳細まで見られる(読むだけ)
+  if (ownerRoleOf(rec) !== 'foreman') return true;
+  return inTeam(actor, rec);
+}
+// 版1.12.0(§4.2・§6.9): その記録を承認(確認開始・判定・元請サイン・PDF)できるか
+function canApprove(actor, rec) {
+  if (actor.role === 'lead') return true;
+  if (actor.role !== 'qa') return false;
+  return ownerRoleOf(rec) === 'foreman' && siteAccess(actor, rec.siteId);
 }
 function touch(rec) { rec.updatedAt = nowDt(); rec.version += 1; }
 
@@ -187,7 +201,9 @@ const deny = (code, reason, data) => ({ ok: false, code, reason, data });
 const stateData = (rec) => ({ status: rec.status, round: rec.round });
 const SITE_SCOPED = new Set(['getRecord', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'uploadPhotoChunk', 'deletePhoto', 'generateReport', 'listReports', 'decideJoin', 'revokeMembership']);
 const TEAM_SCOPED = new Set(['getRecord', 'saveDraft', 'submitRecord', 'addNote', 'uploadPhotoChunk']);
-const SIDE_ROLES = { self: ['foreman'], qa: ROLES_QL, prime: ROLES_QL };
+const SIDE_ROLES = { self: ROLES_ALL, qa: ROLES_QL, prime: ROLES_QL }; // 版1.12.0: self は1次検査側(QA・責任者も)
+// 版1.12.0: QA・責任者が1次検査側として書けるのは自分の記録だけ(本人スコープ。§4.2 の5②)
+const SELF_SCOPED = new Set(['saveDraft', 'submitRecord']);
 
 function claimCheck(actor, rec) {
   if (!rec.claimedBy) return deny('NOT_CLAIMED', '未claim');
@@ -213,18 +229,25 @@ function authorize(actor, action, ctx) {
   }
   // 4 班スコープ
   if (actor.role === 'foreman' && rec && TEAM_SCOPED.has(action)) {
-    if (!(action === 'uploadPhotoChunk' && p.side && p.side !== 'self') && !canViewDetail(actor, rec)) return deny('FORBIDDEN_TEAM', 'team');
+    // getRecord は閲覧の可否(管理者・責任者の1次検査は班を問わず見られる)、書き込みは従来の班スコープ
+    const okScope = action === 'getRecord' ? canViewDetail(actor, rec) : inTeam(actor, rec);
+    if (!(action === 'uploadPhotoChunk' && p.side && p.side !== 'self') && !okScope) return deny('FORBIDDEN_TEAM', 'team');
+  }
+  if (actor.role !== 'foreman' && rec && (SELF_SCOPED.has(action) || (action === 'uploadPhotoChunk' && p.side === 'self'))) {
+    if (rec.ownerUserId !== actor.userId) return deny('FORBIDDEN_TEAM', 'not owner');
   }
   // 5/6 状態・個別条件
   const st = rec ? rec.status : null;
   const roundBad = rec && p.round !== undefined && p.round !== rec.round;
   const conflict = () => deny('STATE_CONFLICT', 'state', stateData(rec));
   const locked = () => deny('RECORD_LOCKED', 'locked', { status: st });
+  const notApprover = () => (rec && !canApprove(actor, rec) ? deny('APPROVER_NOT_ALLOWED', 'approver', { ownerRole: ownerRoleOf(rec) }) : null);
   switch (action) {
     case 'saveDraft': if (st !== 'draft' && st !== 'fix') return locked(); break;
     case 'submitRecord': if ((st !== 'draft' && st !== 'fix') || roundBad) return conflict(); break;
     case 'claimReview':
       if (st !== 'submitted' || roundBad) return conflict();
+      { const na = notApprover(); if (na) return na; }
       if (rec.claimedBy) return deny('ALREADY_CLAIMED', 'claimed', { claimedBy: rec.claimedBy, claimedByName: userName(rec.claimedBy), claimedAt: rec.claimedAt });
       break;
     case 'releaseClaim': {
@@ -235,6 +258,7 @@ function authorize(actor, action, ctx) {
     }
     case 'takeoverReview': {
       if (st !== 'submitted' || roundBad) return conflict();
+      { const na = notApprover(); if (na) return na; }
       if (!rec.claimedBy) return deny('NOT_CLAIMED');
       if (rec.claimedBy === actor.userId) return conflict();
       if (actor.role !== 'lead') {
@@ -253,23 +277,25 @@ function authorize(actor, action, ctx) {
       const c = claimCheck(actor, rec); if (c) return c;
       break;
     }
-    case 'recordPrimeSign': if (st !== 'qa_ok') return conflict(); break;
+    case 'recordPrimeSign': { if (st !== 'qa_ok') return conflict(); const na = notApprover(); if (na) return na; break; }
     case 'stopPour':
       // 版1.9(§4・§6.8): 打設を止められるのは stage=pre_pour の記録のみ。出来形は STATE_CONFLICT
       if (rec.stage !== 'pre_pour' || !['submitted', 'qa_ok', 'approved'].includes(st)) return conflict();
       break;
     case 'addNote':
       if (actor.role === 'foreman' && st !== 'draft' && st !== 'fix') return locked();
+      // 版1.12.0: QA が自分の1次検査の記録に書けるのは draft/fix のときだけ(責任者は承認者として書ける)
+      if (actor.role === 'qa' && rec.ownerUserId === actor.userId && st !== 'draft' && st !== 'fix') return locked();
       break;
     case 'uploadPhotoChunk': {
       if (p.side === 'self' || (!p.side && actor.role === 'foreman')) { if (st !== 'draft' && st !== 'fix') return locked(); }
       else if (p.side === 'qa') {
         if (st !== 'submitted') return locked();
         const c = claimCheck(actor, rec); if (c) return c;
-      } else if (p.side === 'prime') { if (st !== 'qa_ok') return conflict(); }
+      } else if (p.side === 'prime') { if (st !== 'qa_ok') return conflict(); const na = notApprover(); if (na) return na; }
       break;
     }
-    case 'generateReport': if (st !== 'qa_ok' && st !== 'approved') return deny('REPORT_NOT_ALLOWED', 'report', { status: st }); break;
+    case 'generateReport': { if (st !== 'qa_ok' && st !== 'approved') return deny('REPORT_NOT_ALLOWED', 'report', { status: st }); const na = notApprover(); if (na) return na; break; }
     case 'deletePhoto': {
       const ph = ctx.photo;
       if (ph.takenBy !== actor.userId) return deny('FORBIDDEN_TEAM', 'not owner');
@@ -358,11 +384,12 @@ function summaryView(actor, rec) {
   const rows = itemsOf(rec.recordId);
   const c = countsOf(rows, ['both', 'foreman'], 'selfResult');
   const qc = countsOf(rows, ['both', 'qa'], 'qaResult');
-  const hideQa = actor.role === 'foreman' && (rec.status === 'draft' || rec.status === 'submitted');
+  // 版1.12.0: 承認者の下書きは、draft/submitted のあいだ承認できる人にだけ見せる
+  const hideQa = !canApprove(actor, rec) && (rec.status === 'draft' || rec.status === 'submitted');
   return {
     recordId: rec.recordId, siteId: rec.siteId, floor: rec.floor, zone: rec.zone || '', lot: rec.lot, stage: rec.stage,
     status: rec.status, round: rec.round, reinspectOf: rec.reinspectOf || null,
-    ownerUserId: rec.ownerUserId, ownerName: userName(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompanyOf(rec.ownerUserId), team: rec.team || '',
+    ownerUserId: rec.ownerUserId, ownerName: userName(rec.ownerUserId), ownerCompany: rec.ownerCompany || userCompanyOf(rec.ownerUserId), ownerRole: ownerRoleOf(rec), team: rec.team || '',
     pourPlannedAt: rec.pourPlannedAt || null, submittedAt: rec.submittedAt || null,
     claimedBy: rec.claimedBy || null, claimedByName: rec.claimedBy ? userName(rec.claimedBy) : null, claimedAt: rec.claimedAt || null,
     qaVerdict: rec.qaVerdict || null, major: !!rec.major, stopped: !!rec.stopped, escLevel: escLevel(rec),
@@ -383,7 +410,7 @@ function eventView(e) {
 function detailView(actor, rec) {
   const base = summaryView(actor, rec);
   const isForeman = actor.role === 'foreman';
-  const hideQa = isForeman && (rec.status === 'draft' || rec.status === 'submitted');
+  const hideQa = !canApprove(actor, rec) && (rec.status === 'draft' || rec.status === 'submitted');
   // 版1.6: 検査写真(kind=photo)と図面(kind=drawing)を分ける。items[].photos・primePhotos には図面を含めない。
   const allPhotos = photosOf(rec.recordId);
   const photos = allPhotos.filter((p) => !isDrawing(p));
@@ -401,7 +428,7 @@ function detailView(actor, rec) {
     });
   const events = table('Events').filter((e) => e.recordId === rec.recordId).slice(-100).map(eventView);
   const notes = table('Notes').filter((n) => n.recordId === rec.recordId).map(noteView);
-  const showQaComment = !isForeman || ['fix', 'qa_ok', 'approved'].includes(rec.status);
+  const showQaComment = canApprove(actor, rec) || ['fix', 'qa_ok', 'approved'].includes(rec.status);
   return Object.assign(base, {
     items, primePhotos: photos.filter((p) => p.side === 'prime' && p.round === rec.round).map(photoMeta), drawings, notes, events,
     qaComment: showQaComment ? (rec.qaComment || '') : '',
@@ -488,7 +515,10 @@ function escalationTick() {
       while (rec.escNotified < lvl) {
         const next = rec.escNotified + 1;
         let to;
-        if (next === 1) {
+        if (next === 1 && ownerRoleOf(rec) !== 'foreman') {
+          // 版1.12.0(§6.4): 管理者・責任者の1次検査は責任者だけが承認できるので、30分も責任者へ(1次検査者本人を除く)
+          to = leads().filter((u) => u.userId !== rec.ownerUserId);
+        } else if (next === 1) {
           to = effectiveQa(rec.siteId).actingSubs;
           if (!to.length) to = leads();
         } else to = leads();
@@ -556,9 +586,9 @@ const ACTIONS = {
   logoutDevice: A(ROLES_ALL, {}, { write: true }), getBootstrap: A(ROLES_ALL, {}),
   listRecords: A(ROLES_ALL, { siteId: 's?', statuses: 'a?', since: 's?', limit: 'i?', cursor: 's?' }),
   getRecord: A(ROLES_ALL, { recordId: 's' }, { load: 'record' }),
-  createRecord: A(['foreman'], { recordId: 's', siteId: 's', floor: 's', zone: 's?', lot: 's', stage: 's', pourPlannedAt: 's?', reinspectOf: 's?' }, { write: true, star: true, site: 'param' }),
-  saveDraft: A(['foreman'], { recordId: 's', header: 'o?', items: 'a?' }, { write: true, star: true, load: 'record' }),
-  submitRecord: A(['foreman'], { recordId: 's', round: 'i' }, { write: true, star: true, pin: true, load: 'record' }),
+  createRecord: A(ROLES_ALL, { recordId: 's', siteId: 's', floor: 's', zone: 's?', lot: 's', stage: 's', pourPlannedAt: 's?', reinspectOf: 's?' }, { write: true, star: true, site: 'param' }),
+  saveDraft: A(ROLES_ALL, { recordId: 's', header: 'o?', items: 'a?' }, { write: true, star: true, load: 'record' }),
+  submitRecord: A(ROLES_ALL, { recordId: 's', round: 'i' }, { write: true, star: true, pin: true, load: 'record' }),
   claimReview: A(ROLES_QL, { recordId: 's', round: 'i' }, { write: true, star: true, load: 'record' }),
   releaseClaim: A(ROLES_QL, { recordId: 's' }, { write: true, star: true, load: 'record' }),
   takeoverReview: A(ROLES_QL, { recordId: 's', round: 'i' }, { write: true, star: true, load: 'record' }),
@@ -1130,7 +1160,7 @@ function loadState(d) {
 const C = {
   ApiError, fail, S: () => S, table, find, insert, cfg, U, nowMs, nowDt, today, ev, mailTo, mailSubject, mailBody, recordLink,
   user, userName, siteRow, splitCsv, effAssigns, siteAccess, visibleSiteIds, myAssign, teamOf, isAbsent, effectiveQa, leads, qaRecipients, siteQaUsers,
-  recordRow, itemsOf, photosOf, photoCount, canViewDetail, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
+  recordRow, itemsOf, photosOf, photoCount, canViewDetail, canApprove, ownerRoleOf, inTeam, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
   meView, publicItem, enabledItems, siteView, photoMeta, summaryView, detailView, noteView, membershipView, assignmentView, absenceView, reportView,
   state: () => S, countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
   ROLES_QL, ISOK: okRes,

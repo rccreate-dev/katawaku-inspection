@@ -2,7 +2,7 @@
  * Authz.gs — 権限判定の唯一の場所(SPEC §4.2)。
  * 全ての権限・状態条件は authorize() に置く。各actionハンドラは冒頭で必ず authorize を呼ぶ。
  * 補助: siteAccess / visibleSiteIds / canViewDetail / isAbsent / effectiveQaMain / canEditRecord /
- *       allowedActions / escLevel / computeTiming
+ *       ownerRoleOf / canApprove / allowedActions / escLevel / computeTiming
  */
 
 function deny_(code, reason, data) {
@@ -87,16 +87,27 @@ function inTeamScope_(actor, record) {
   return !!record.team && myTeams_(actor, record.siteId).indexOf(record.team) >= 0;
 }
 
-/** 詳細を見てよいか(現場スコープ+職長は班スコープ) */
+/** 版1.12.0(§6.9): 1次検査者の役割。空の既存記録は foreman とみなす */
+function ownerRoleOf(record) { return record.ownerRole || 'foreman'; }
+
+/** 版1.12.0(§4.2・§6.9): その記録を承認(確認開始・引き継ぎ・判定・元請サイン・PDF)できるか */
+function canApprove(actor, record) {
+  if (actor.role === 'lead') return true;
+  if (actor.role !== 'qa') return false;
+  return ownerRoleOf(record) === 'foreman' && siteAccess(actor, record.siteId);
+}
+
+/** 詳細を見てよいか(現場スコープ+職長は班スコープ。管理者・責任者の1次検査は同じ現場の職長も見られる) */
 function canViewDetail(actor, record) {
   if (!siteAccess(actor, record.siteId)) return false;
-  if (actor.role === 'foreman') return inTeamScope_(actor, record);
+  if (actor.role === 'foreman') return ownerRoleOf(record) !== 'foreman' || inTeamScope_(actor, record);
   return true;
 }
 
+/** 1次検査側として編集できるか(職長=班スコープ、QA・責任者=本人の記録) */
 function canEditRecord(actor, record) {
-  return actor.role === 'foreman' && siteAccess(actor, record.siteId) && inTeamScope_(actor, record) &&
-    (record.status === 'draft' || record.status === 'fix');
+  var scope = actor.role === 'foreman' ? inTeamScope_(actor, record) : record.ownerUserId === actor.userId;
+  return siteAccess(actor, record.siteId) && scope && (record.status === 'draft' || record.status === 'fix');
 }
 
 /* ---------- 時間ルール ---------- */
@@ -134,6 +145,12 @@ function computeTiming(rec, nowDate) {
 /* ---------- authorize ---------- */
 
 var TEAM_SCOPED_ACTIONS = ['getRecord', 'saveDraft', 'submitRecord', 'addNote', 'deletePhoto'];
+// 版1.12.0(§4.2 の5②): QA・責任者が1次検査側として書けるのは自分の記録だけ
+var SELF_SCOPED_ACTIONS = ['saveDraft', 'submitRecord'];
+// 版1.12.0(§4.2 の7): 承認者の条件を見る action
+function approverDeny_(actor, rec) {
+  return canApprove(actor, rec) ? null : deny_('APPROVER_NOT_ALLOWED', 'この記録を承認できる人ではありません', { ownerRole: ownerRoleOf(rec) });
+}
 var PHOTO_EDIT_STATES = { self: ['draft', 'fix'], qa: ['submitted'], prime: ['qa_ok'] };
 
 /**
@@ -157,7 +174,8 @@ function authorize(actor, action, ctx) {
   if (!def || def.roles.indexOf(actor.role) < 0) return deny_('FORBIDDEN_ROLE', 'この役割では実行できません');
   if (action === 'uploadPhotoChunk') {
     var sd = params.side;
-    if (sd === 'self' ? actor.role !== 'foreman' : actor.role === 'foreman') return deny_('FORBIDDEN_ROLE', 'このsideは撮影できません');
+    // 版1.12.0: self は1次検査側(職長・QA・責任者)。qa/prime は承認側(職長は不可)
+    if (sd !== 'self' && actor.role === 'foreman') return deny_('FORBIDDEN_ROLE', 'このsideは撮影できません');
   }
 
   // 3
@@ -168,7 +186,13 @@ function authorize(actor, action, ctx) {
   // 4
   if (actor.role === 'foreman' && rec) {
     var scoped = TEAM_SCOPED_ACTIONS.indexOf(action) >= 0 || (action === 'uploadPhotoChunk' && params.side === 'self');
-    if (scoped && !inTeamScope_(actor, rec)) return deny_('FORBIDDEN_TEAM', '他班の記録です');
+    // getRecord は閲覧の可否(管理者・責任者の1次検査は班を問わず見られる)。書き込みは従来の班スコープ
+    var inScope = action === 'getRecord' ? canViewDetail(actor, rec) : inTeamScope_(actor, rec);
+    if (scoped && !inScope) return deny_('FORBIDDEN_TEAM', '他班の記録です');
+  }
+  if (actor.role !== 'foreman' && rec) {
+    var selfScoped = SELF_SCOPED_ACTIONS.indexOf(action) >= 0 || (action === 'uploadPhotoChunk' && params.side === 'self');
+    if (selfScoped && rec.ownerUserId !== actor.userId) return deny_('FORBIDDEN_TEAM', '自分の1次検査の記録ではありません');
   }
 
   // 5・6
@@ -187,6 +211,7 @@ function authorize(actor, action, ctx) {
       break;
     case 'claimReview':
       if (st !== 'submitted' || roundBad) return deny_('STATE_CONFLICT', '確認中にできる状態ではありません', sdata);
+      var ad1 = approverDeny_(actor, rec); if (ad1) return ad1;
       if (rec.claimedBy) return deny_('ALREADY_CLAIMED', '先に確認中にされています', {
         claimedBy: rec.claimedBy, claimedByName: userName_(rec.claimedBy), claimedAt: rec.claimedAt
       });
@@ -198,6 +223,7 @@ function authorize(actor, action, ctx) {
       break;
     case 'takeoverReview':
       if (st !== 'submitted' || roundBad) return deny_('STATE_CONFLICT', '引き継げる状態ではありません', sdata);
+      var ad2 = approverDeny_(actor, rec); if (ad2) return ad2;
       if (!rec.claimedBy) return deny_('NOT_CLAIMED', '確認中ではありません');
       if (rec.claimedBy === actor.userId) return deny_('STATE_CONFLICT', '既に自分が確認中です', sdata);
       if (actor.role !== 'lead') {
@@ -221,6 +247,7 @@ function authorize(actor, action, ctx) {
       break;
     case 'recordPrimeSign':
       if (st !== 'qa_ok') return deny_('STATE_CONFLICT', '元請サインを記録できる状態ではありません', sdata);
+      var ad3 = approverDeny_(actor, rec); if (ad3) return ad3;
       break;
     case 'stopPour':
       // 版1.9(§4.2 の6・§6.8): 打設を止められるのは打設前(pre_pour)の記録だけ。出来形(post_demold)は STATE_CONFLICT
@@ -229,6 +256,10 @@ function authorize(actor, action, ctx) {
       break;
     case 'addNote':
       if (actor.role === 'foreman' && st !== 'draft' && st !== 'fix') return deny_('RECORD_LOCKED', '提出後はコメントを追加できません', { status: st });
+      // 版1.12.0: QA が自分の1次検査の記録に書けるのは draft/fix のときだけ(責任者は承認者として書ける)
+      if (actor.role === 'qa' && rec.ownerUserId === actor.userId && st !== 'draft' && st !== 'fix') {
+        return deny_('RECORD_LOCKED', '提出後はコメントを追加できません', { status: st });
+      }
       break;
     case 'uploadPhotoChunk':
       if (params.side === 'self') {
@@ -239,6 +270,7 @@ function authorize(actor, action, ctx) {
         if (rec.claimedBy !== actor.userId) return deny_('NOT_CLAIMER', 'claim者ではありません', claimData);
       } else if (params.side === 'prime') {
         if (st !== 'qa_ok') return deny_('STATE_CONFLICT', '元請サイン証跡を追加できる状態ではありません', sdata);
+        var ad4 = approverDeny_(actor, rec); if (ad4) return ad4;
       }
       break;
     case 'deletePhoto':
@@ -250,6 +282,7 @@ function authorize(actor, action, ctx) {
       break;
     case 'generateReport':
       if (st !== 'qa_ok' && st !== 'approved') return deny_('REPORT_NOT_ALLOWED', 'PDFを生成できない状態です', { status: st });
+      var ad5 = approverDeny_(actor, rec); if (ad5) return ad5;
       break;
     case 'decideJoin':
     case 'revokeMembership': {

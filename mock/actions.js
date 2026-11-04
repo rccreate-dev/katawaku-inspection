@@ -237,9 +237,9 @@ module.exports = function install(C) {
     const n = nowDt();
     const rec = insert('Records', {
       recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone, lot: p.lot, stage: p.stage, status: 'draft', round: 1, reinspectOf: p.reinspectOf || null,
-      ownerUserId: actor.userId, team: C.teamOf(actor.userId, p.siteId), pourPlannedAt: (p.stage === 'pre_pour' && p.pourPlannedAt) ? U.normDt(p.pourPlannedAt) : null, // 出来形では指定されても保存しない(§5.4.3・§6.8)
+      ownerUserId: actor.userId, team: actor.role === 'foreman' ? C.teamOf(actor.userId, p.siteId) : '', pourPlannedAt: (p.stage === 'pre_pour' && p.pourPlannedAt) ? U.normDt(p.pourPlannedAt) : null, // 出来形では指定されても保存しない(§5.4.3・§6.8)
      
-      major: false, stopped: false, escNotified: 0, createdAt: n, updatedAt: n, version: 1, ownerCompany: actor.company || '',
+      major: false, stopped: false, escNotified: 0, createdAt: n, updatedAt: n, version: 1, ownerCompany: actor.company || '', ownerRole: actor.role,
     });
     for (const it of C.enabledItems().filter((i) => i.stage === p.stage)) {
       insert('RecordItems', { recordItemId: `${rec.recordId}:${it.itemId}`, recordId: rec.recordId, itemId: it.itemId, snapshot: { seq: it.seq, stage: it.stage, audience: it.audience, groupKey: it.groupKey, groupJa: it.groupJa, groupId: it.groupId, textJa: it.textJa, textId: it.textId, key: it.key, tol: it.tol, measure: it.measure, minMeasures: it.minMeasures, unit: it.unit }, selfValues: [], qaValues: [] });
@@ -295,7 +295,9 @@ module.exports = function install(C) {
     const timing = C.computeTiming(rec);
     ev(resub ? 'resubmitted' : 'submitted', { siteId: rec.siteId, recordId: rec.recordId, fromStatus: prev, toStatus: 'submitted', round: rec.round, detail: { items: list, late: timing.selfLate, pourPlannedAt: rec.pourPlannedAt } });
     C.touch(rec);
-    C.mailTo(C.qaRecipients(rec.siteId), C.mailSubject('提出', rec), C.mailBody(rec));
+    // 版1.12.0(§6.6): 管理者・責任者の1次検査の提出は責任者全員へ(実行者を除く)
+    const to = C.ownerRoleOf(rec) === 'foreman' ? C.qaRecipients(rec.siteId) : C.leads().filter((u) => u.userId !== actor.userId);
+    C.mailTo(to, C.mailSubject('提出', rec), C.mailBody(rec));
     return { record: summary(actor, rec), warnings: timing.selfLate ? ['SELF_LATE'] : [] };
   };
 
@@ -407,7 +409,7 @@ module.exports = function install(C) {
     if (blank(p.text) || p.text.length > 2000) viol.push({ rule: 'FIELD_INVALID', path: 'text' });
     if (p.itemId != null && !rowsOf(rec).some((r) => r.itemId === p.itemId)) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
     if (viol.length) vfail(viol);
-    const note = insert('Notes', { noteId: U.newId('n'), recordId: rec.recordId, itemId: p.itemId || null, kind: actor.role === 'foreman' ? 'foreman' : 'manager', authorUserId: actor.userId, authorRole: actor.role, round: rec.round, text: p.text, source: 'addNote', clientId: rc.clientId, createdAt: nowDt() });
+    const note = insert('Notes', { noteId: U.newId('n'), recordId: rec.recordId, itemId: p.itemId || null, kind: (actor.role === 'foreman' || (rec.ownerUserId === actor.userId && (rec.status === 'draft' || rec.status === 'fix'))) ? 'foreman' : 'manager', authorUserId: actor.userId, authorRole: actor.role, round: rec.round, text: p.text, source: 'addNote', clientId: rc.clientId, createdAt: nowDt() });
     ev('note_added', { siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: { noteId: note.noteId, itemId: note.itemId, kind: note.kind } });
     C.touch(rec);
     return { note: C.noteView(note) };

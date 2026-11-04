@@ -73,9 +73,10 @@ describe('C-PERM 権限', () => {
       ['listAssignments', {}, {}],
     ]) assert.equal((await t.call(action, params, opts)).error.code, 'FORBIDDEN_ROLE', `職長の ${action}`);
     for (const s of [qa, lead]) {
-      assert.equal((await s.call('createRecord', { recordId: h.newRecordId(), siteId: 's_a', floor: '1F', lot: 'Q1', stage: 'pre_pour' })).error.code, 'FORBIDDEN_ROLE');
-      assert.equal((await s.call('saveDraft', { recordId: SEED.a3, items: [] })).error.code, 'FORBIDDEN_ROLE');
-      assert.equal((await s.call('submitRecord', { recordId: SEED.a3, round: 1 }, { pin: s.pin })).error.code, 'FORBIDDEN_ROLE');
+      // 版1.12.0(§6.9): QA・責任者も1次検査ができるので createRecord/saveDraft/submitRecord は FORBIDDEN_ROLE ではない。
+      // 他人(職長)の記録の1次検査側は本人スコープで FORBIDDEN_TEAM(C-OWN-03)
+      assert.equal((await s.call('saveDraft', { recordId: SEED.a3, items: [] })).error.code, 'FORBIDDEN_TEAM');
+      assert.equal((await s.call('submitRecord', { recordId: SEED.a3, round: 1 }, { pin: s.pin })).error.code, 'FORBIDDEN_TEAM');
       assert.equal((await s.call('requestJoin', { siteId: 's_a', joinKey: 'joinkeyaaaaaaaa1' })).error.code, 'FORBIDDEN_ROLE');
     }
   });

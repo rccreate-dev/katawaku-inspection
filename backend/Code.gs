@@ -11,7 +11,7 @@ var ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_
   'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT',
   'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED',
   'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING',
-  'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT',
+  'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT',
   'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
 
 var VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED',
@@ -74,7 +74,8 @@ var ACTIONS = {
   },
   getRecord: { roles: ALL_ROLES, params: { recordId: { t: 'id', p: 'r', req: 1 } } },
   createRecord: {
-    w: true, idem: true, replay: true, roles: ['foreman'],
+    // 版1.12.0(§4.1): QA・責任者も1次検査として記録を作れる
+    w: true, idem: true, replay: true, roles: ALL_ROLES,
     params: {
       recordId: { t: 'str', req: 1, max: 40 }, siteId: { t: 'id', p: 's', req: 1 }, floor: { t: 'str', req: 1, min: 1, max: 10 },
       zone: { t: 'str', max: 10 }, lot: { t: 'str', req: 1, min: 1, max: 40 },
@@ -84,11 +85,11 @@ var ACTIONS = {
     }
   },
   saveDraft: {
-    w: true, idem: true, roles: ['foreman'],
+    w: true, idem: true, roles: ALL_ROLES,
     params: { recordId: { t: 'id', p: 'r', req: 1 }, header: { t: 'obj' }, items: { t: 'arr', maxItems: 200 } }
   },
   submitRecord: {
-    w: true, idem: true, pin: 'always', roles: ['foreman'],
+    w: true, idem: true, pin: 'always', roles: ALL_ROLES,
     params: { recordId: { t: 'id', p: 'r', req: 1 }, round: { t: 'int', req: 1, min: 1 } }
   },
   claimReview: {

@@ -400,6 +400,19 @@
 
   C.roleName = function (r) { return t('role.' + r); };
 
+  /* 版1.12.0: 1次検査者が管理者・責任者の記録(ownerRole∈{qa,lead})の語の読み替え(SPEC §9.2c)。
+   * 読み替えは表示だけ。職長の記録(ownerRole が foreman・空・応答に無い)は従来のキーのまま */
+  var OWNER_SWAP = {
+    'lbl.foreman_res': 'lbl.first_res', 'lbl.foreman_note': 'lbl.first_note', 'lbl.sig_foreman': 'lbl.sig_first',
+    'lbl.qa_res': 'lbl.approver_res', 'lbl.manager_note': 'lbl.approver_note', 'lbl.sig_qa': 'lbl.sig_approver',
+    'drawing.by_self': 'drawing.by_first', 'drawing.by_qa': 'drawing.by_approver',
+    'note.foreman': 'lbl.first_res', 'note.manager': 'lbl.approver_res'
+  };
+  C.isMgrOwned = function (rec) { var r = rec && rec.ownerRole; return r === 'qa' || r === 'lead'; };
+  C.lbl = function (key, rec) { return t(C.isMgrOwned(rec) && OWNER_SWAP[key] ? OWNER_SWAP[key] : key); };
+  /** 1次検査者が管理者・責任者の記録のバッジ(S04・S09・S11)。職長の記録は null */
+  C.ownerBadge = function (rec) { return C.isMgrOwned(rec) ? C.chip('', t('badge.owner_' + rec.ownerRole)) : null; };
+
   /* 数値配列の表示 */
   C.valuesText = function (v, unit) { return (v || []).map(function (x, i) { return KW.photo.pointNo(i + 1) + (x > 0 ? '+' : '') + x; }).join(', ') + (v && v.length ? ' ' + (unit || 'mm') : ''); };
 

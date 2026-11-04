@@ -103,7 +103,7 @@
       if (!list.length && !own) return null;
       var editable = !!o.canEdit();
       var node = h('div', { class: 'dside', 'data-side': side });
-      node.appendChild(h('h4', null, t('drawing.by_' + side), own ? h('span', { class: 'sub' }, ' ' + t('photo.count', { n: list.length, max: MAX })) : null));
+      node.appendChild(h('h4', null, C.lbl('drawing.by_' + side, o.get().detail), own ? h('span', { class: 'sub' }, ' ' + t('photo.count', { n: list.length, max: MAX })) : null));
       var strip = C.photoStrip(list, {
         onDelete: own && editable ? deleteDrawing : null,
         onView: function (p) { KW.modal.photoView(p); }

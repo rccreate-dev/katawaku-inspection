@@ -15,7 +15,7 @@
     var now = KW.time.toIso(KW.time.nowMs(KW.state.skewMs));
     return {
       recordId: p.recordId, siteId: p.siteId, floor: p.floor, zone: p.zone || '', lot: p.lot, stage: p.stage,
-      status: 'draft', round: 1, reinspectOf: p.reinspectOf || null, ownerUserId: me.userId, ownerName: me.name, ownerCompany: me.company || '', team: site && site.myTeam || '',
+      status: 'draft', round: 1, reinspectOf: p.reinspectOf || null, ownerUserId: me.userId, ownerName: me.name, ownerCompany: me.company || '', ownerRole: me.role, team: me.role === 'foreman' ? (site && site.myTeam || '') : '',
       pourPlannedAt: p.pourPlannedAt || null, submittedAt: null, claimedBy: null, claimedByName: null, claimedAt: null,
       qaVerdict: null, major: false, stopped: false, escLevel: 0,
       counts: { total: items.length, filled: 0, ok: 0, ng: 0, na: 0 }, qaCounts: { filled: 0, ok: 0, ng: 0, na: 0 },
@@ -144,6 +144,12 @@
             if (err.code === 'ALREADY_EXISTS' && err.data && err.data.mine && err.data.recordId) {
               C.toast(t('scr.S05.exists_mine'));
               return KW.data.loadDetail(err.data.recordId).then(function () { KW.app.go('#/record/' + err.data.recordId + '/edit'); });
+            }
+            // 版1.12.0: 管理者・責任者は同じ現場の記録を開けるので、他の人の記録なら S08 へ(SPEC §9.2c S05)
+            if (err.code === 'ALREADY_EXISTS' && err.data && err.data.recordId && KW.state.me && KW.state.me.role !== 'foreman') {
+              C.toast(t('scr.S05.exists_other'));
+              KW.app.go('#/record/' + err.data.recordId);
+              return null;
             }
             msg.appendChild(C.msg('', err.code === 'ALREADY_EXISTS' ? t('scr.S05.exists_other') : KW.errText(err)));
             return null;

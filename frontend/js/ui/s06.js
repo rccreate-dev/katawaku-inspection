@@ -149,7 +149,7 @@
         if (def.measure !== 'none' || def.tol != null) node.appendChild(buildMeasure(it, x));
         if (x.result || x.note) {
           var ta = h('textarea', {
-            maxlength: '1000', disabled: !editable, 'aria-label': t('lbl.foreman_note'),
+            maxlength: '1000', disabled: !editable, 'aria-label': C.lbl('lbl.foreman_note', detail),
             placeholder: x.result === 'ng' ? t('scr.S06.note_ng_ph') : t('scr.S06.note_ph')
           });
           ta.value = x.note || '';
@@ -159,7 +159,7 @@
         // 差し戻し時の管理者コメント(別枠・読み取り専用)
         var q = it.qa;
         if (detail.status === 'fix' && q && (q.result === 'ng' || q.note)) {
-          node.appendChild(h('div', { class: 'cmt mgr' }, h('b', null, t('lbl.manager_note')),
+          node.appendChild(h('div', { class: 'cmt mgr' }, h('b', null, C.lbl('lbl.manager_note', detail)),
             q.result ? C.resultChip(q.result) : null, q.severity ? C.chip(q.severity === 'major' ? 'bad' : 'warn', t('sev.' + q.severity)) : null,
             h('div', null, q.note || '')));
         }
@@ -472,7 +472,7 @@
         if (ngs.length) {
           el.appendChild(h('h3', null, t('scr.S07.ng_list')));
           ngs.forEach(function (it) {
-            el.appendChild(h('div', { class: 'card' }, h('b', null, KW.itemText(it.def)), h('div', { class: 'cmt' }, h('b', null, t('lbl.foreman_note')), work.items[it.itemId].note || '')));
+            el.appendChild(h('div', { class: 'card' }, h('b', null, KW.itemText(it.def)), h('div', { class: 'cmt' }, h('b', null, C.lbl('lbl.foreman_note', detail)), work.items[it.itemId].note || '')));
           });
         }
         var online = KW.isOnline();

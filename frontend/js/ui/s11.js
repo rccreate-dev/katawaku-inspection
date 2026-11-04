@@ -54,7 +54,8 @@
             if (masked && (r.actions || []).indexOf('stopPour') >= 0) { el.appendChild(C.maskedStopRow(r)); return; }
             el.appendChild(h('button', { type: 'button', class: 'tap', disabled: masked, on: { click: function () { KW.app.go('#/record/' + r.recordId); } } },
               h('span', null, h('b', null, masked ? t('badge.masked') : C.placeLine(r)),
-                h('small', null, masked ? C.siteName(r.siteId) : [C.siteName(r.siteId), t('stage.' + C.stageOf(r)), C.ownerLabel(r), C.fmt(r.updatedAt), r.counts ? t('lbl.ng_count') + ' ' + r.counts.ng : null].filter(Boolean).join(' / '))),
+                h('small', null, masked ? C.siteName(r.siteId) : [C.siteName(r.siteId), t('stage.' + C.stageOf(r)), C.ownerLabel(r), C.fmt(r.updatedAt), r.counts ? t('lbl.ng_count') + ' ' + r.counts.ng : null].filter(Boolean).join(' / ')),
+                masked ? null : C.ownerBadge(r)),
               C.statusChip(r.status, false, r.stage)));
           });
         });

@@ -67,12 +67,12 @@
     return card;
   }
 
-  function recRow(r, hint) {
-    var dest = '#/record/' + r.recordId + (r.status === 'submitted' && (has(r, 'claimReview') || has(r, 'saveQaDraft')) ? '/review' : '');
+  function recRow(r, hint, to) {
+    var dest = to || ('#/record/' + r.recordId + (r.status === 'submitted' && (has(r, 'claimReview') || has(r, 'saveQaDraft')) ? '/review' : ''));
     return h('button', { type: 'button', class: 'tap', on: { click: function () { KW.app.go(dest); } } },
       h('span', null, h('b', null, C.placeLine(r)),
         h('small', null, [C.ownerLabel(r), r.submittedAt ? C.ago(r.submittedAt) : null, r.claimedByName ? t('msg.claimed_by_name', { name: r.claimedByName }) : null].filter(Boolean).join(' / ')),
-        h('span', { class: 'chips' }, C.stageChip(r.stage), C.flags(r), hint ? C.chip('good', hint) : null)),
+        h('span', { class: 'chips' }, C.stageChip(r.stage), C.ownerBadge(r), C.flags(r), hint ? C.chip('good', hint) : null)),
       C.statusChip(r.status, false, r.stage));
   }
 
@@ -99,8 +99,15 @@
           if (!decidable.length) el.appendChild(C.empty('scr.S09.no_joins'));
           decidable.slice(0, 5).forEach(function (m) { el.appendChild(joinCard(m, loadJoins)); });
           el.appendChild(h('button', { type: 'button', class: 'link', on: { click: function () { KW.app.go('#/joins'); } } }, t('scr.S09.all_joins')));
-          // ② 確認待ち(提出順)
-          var waiting = all.filter(function (r) { return !r.masked && r.status === 'submitted'; })
+          // 版1.12.0: 自分の1次検査(入力中・是正中・確認待ち)。0件なら節ごと出さない(SPEC §9.2c S09)
+          var mine = all.filter(function (r) { return !r.masked && r.ownerUserId === me.userId && ['draft', 'fix', 'submitted'].indexOf(r.status) >= 0; })
+            .sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+          if (mine.length) {
+            el.appendChild(h('h3', null, t('scr.S09.my_first')));
+            mine.forEach(function (r) { el.appendChild(recRow(r, null, has(r, 'saveDraft') ? '#/record/' + r.recordId + '/edit' : '#/record/' + r.recordId)); });
+          }
+          // ② 確認待ち(提出順)。管理者のボードでは、責任者だけが承認する記録(ownerRole∈{qa,lead})を除く(版1.12.0)
+          var waiting = all.filter(function (r) { return !r.masked && r.status === 'submitted' && (me.role === 'lead' || !C.isMgrOwned(r)); })
             .sort(function (a, b) { return String(a.submittedAt).localeCompare(String(b.submittedAt)); });
           el.appendChild(h('h3', null, t('scr.S09.queue')));
           if (!waiting.length) el.appendChild(C.empty('scr.S09.queue_none'));

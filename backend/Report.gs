@@ -59,6 +59,35 @@ function measureCell_(raw, tol) {
 }
 
 /**
+ * PDF の欄名(SPEC §10.2e。版1.12.0)。1次検査者が管理者・責任者の記録だけ「1次検査/承認」の語にする。
+ * 職長の記録(ownerRole が空・foreman)は従来の語のまま(版1.11.2 と同じ文字列)。
+ * buildReportHtml_・docBuild_ の先頭で reportLabelsFor_(rec) を呼んで RPT_L_ を差し替える(1回の生成の中だけで使う)。
+ */
+var RPT_L_FOREMAN_ = {
+  self: '職長', qa: '管理者', selfRes: '職長結果', qaRes: '管理者結果', selfNote: '職長コメント', qaNote: '管理者コメント',
+  signSelf: '職長', signQa: '品質管理者', company: '職長の会社名', owner: '職長', judgeSuffix: false
+};
+var RPT_L_ = RPT_L_FOREMAN_;
+var RPT_ROLE_JA_ = { foreman: '職長', qa: '管理者', lead: '責任者' };
+function reportLabelsFor_(rec) {
+  var role = (rec && rec.ownerRole) || 'foreman';
+  if (role === 'foreman') { RPT_L_ = RPT_L_FOREMAN_; return RPT_L_; }
+  RPT_L_ = {
+    self: '1次検査', qa: '承認', selfRes: '1次検査結果', qaRes: '承認結果', selfNote: '1次検査コメント', qaNote: '承認者コメント',
+    signSelf: '1次検査(' + (RPT_ROLE_JA_[role] || role) + ')', signQa: '承認(責任者)', company: '1次検査者の会社名', owner: '1次検査者',
+    judgeSuffix: true
+  };
+  return RPT_L_;
+}
+/** NG・是正の経過の判定者名。管理者・責任者の記録では役割を後ろに付ける(§10.2e) */
+function reportJudgeName_(userId) {
+  var name = userName_(userId);
+  if (!RPT_L_.judgeSuffix) return name;
+  var u = Repo.get('Users', userId);
+  return name + '(' + (u ? (RPT_ROLE_JA_[u.role] || u.role) : '') + ')';
+}
+
+/**
  * 1項目・1側(side='self'|'qa')の実測の見せ方(§10.2d-4)。有効値が0個なら null。
  * 職長と管理者は別の系列で、混ぜない。row を変更しない純関数(Math/Number/String 以外に依存しない)
  */
@@ -133,7 +162,8 @@ function measureBlockHtml_(row, withKeyword) {
   ['self', 'qa'].forEach(function (side) {
     var v = measureView_(row, side);
     if (!v) return;
-    var lab = (withKeyword ? '実測(' + v.label + '): ' : v.label + ': ');
+    var vl = side === 'self' ? RPT_L_.self : RPT_L_.qa;   // 版1.12.0: 欄名(§10.2e)。measureView_ は純関数のまま
+    var lab = (withKeyword ? '実測(' + vl + '): ' : vl + ': ');
     o.push('<div><span style="color:' + MEASURE_COLOR_.label + '">' + esc_(lab) + '</span>' + measureValuesHtml_(v) + '</div>');
     o.push('<div style="color:' + MEASURE_COLOR_.summary + '">' + measureSummaryHtml_(v) + '</div>');
   });
@@ -224,7 +254,7 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
   } else {
     style = 'height:170mm';
   }
-  var who = (ph.side === 'qa' ? '管理者' : '職長') + ': ' + userName_(ph.takenBy);
+  var who = (ph.side === 'qa' ? RPT_L_.qa : RPT_L_.self) + ': ' + userName_(ph.takenBy);
   var o = [];
   o.push('<div style="page-break-before:always"><h2>確認箇所(図面)</h2>');
   o.push('<p>' + esc_(who) + ' / ' + esc_(dtShort_(ph.takenAt)) + '</p>');
@@ -241,7 +271,7 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
   var td = function (inner, extra) { return '<td style="' + cell + (extra || '') + '">' + inner + '</td>'; };
   o.push('<table style="table-layout:fixed;width:186mm;margin-top:3mm"><colgroup><col style="width:24mm"><col style="width:76mm"><col style="width:28mm"><col style="width:24mm"><col style="width:17mm"><col style="width:17mm"></colgroup>');
   var th = '<th style="' + cell + ';background:#eeeeee;font-weight:bold">';
-  o.push('<tr>' + th + '番号</th>' + th + '項目</th>' + th + '実測値</th>' + th + '許容超</th>' + th + '職長</th>' + th + '管理者</th></tr>');
+  o.push('<tr>' + th + '番号</th>' + th + '項目</th>' + th + '実測値</th>' + th + '許容超</th>' + th + esc_(RPT_L_.self) + '</th>' + th + esc_(RPT_L_.qa) + '</th></tr>');
   drawingLegendModel_(ph, rows, seq).forEach(function (e) {
     var row = e.row;
     if (e.type === 'mark') {
@@ -260,6 +290,7 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
 }
 
 function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, nowDt) {
+  var L = reportLabelsFor_(rec);   // 版1.12.0: 欄名(§10.2e)
   // 版1.6: 写真ページ(60枚上限・並び)には図面を含めない。図面は §10.2c で別に載せる
   var photos = allPhotos.filter(function (x) { return photoKindOf_(x) !== 'drawing'; });
   var drawings = allPhotos.filter(function (x) { return photoKindOf_(x) === 'drawing'; })
@@ -286,7 +317,7 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<p>型枠工事 ' + esc_(stage) + '検査記録</p>');
   h.push('<table><tr><th>現場名</th><td>' + esc_(site.name) + '</td><th>元請会社</th><td>' + esc_(site.primeContractor) + '</td></tr>');
   var ownerCompany = rec.ownerCompany || userCompany_(rec.ownerUserId);
-  if (ownerCompany) h.push('<tr><th>職長の会社名</th><td>' + esc_(ownerCompany) + '</td><th>職長</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
+  if (ownerCompany) h.push('<tr><th>' + esc_(L.company) + '</th><td>' + esc_(ownerCompany) + '</td><th>' + esc_(L.owner) + '</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
   if (rec.stage === 'post_demold') {
     // 出来形は打設予定日時を使わない(行ごと出さない。SPEC §6.8・§10.2 の2)
@@ -298,7 +329,7 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<tr><th>生成日時</th><td>' + esc_(dtShort_(nowDt)) + '</td><th>版</th><td>v' + version + '</td></tr></table>');
 
   // 3者サイン
-  h.push('<h2>サイン欄(3者)</h2><table class="sign"><tr><th>職長</th><th>品質管理者</th><th>元請</th></tr><tr>');
+  h.push('<h2>サイン欄(3者)</h2><table class="sign"><tr><th>' + esc_(L.signSelf) + '</th><th>' + esc_(L.signQa) + '</th><th>元請</th></tr><tr>');
   h.push('<td>' + (rec.submittedAt ? esc_(userName_(rec.submittedBy)) + (rec.submittedBy === rec.ownerUserId && ownerCompany ? '<br>' + esc_(ownerCompany) : companyLine_(rec.submittedBy)) + '<br>' + esc_(dtShort_(rec.submittedAt)) + '<br>PIN認証による電子サイン' : '未') + '</td>');
   h.push('<td>' + (rec.qaVerdict === 'ok' ? esc_(userName_(rec.qaVerdictBy)) + companyLine_(rec.qaVerdictBy) + '<br>' + esc_(dtShort_(rec.qaVerdictAt)) + '<br>判定: 合格' : '未') + '</td>');
   if (rec.primeSignedAt) {
@@ -325,12 +356,12 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   }
   var cs = cnt('self'), cq = cnt('qa');
   h.push('<h2>結果サマリ</h2><table><tr><th></th><th>合</th><th>NG</th><th>該当なし</th></tr>');
-  h.push('<tr><th>職長</th><td>' + cs.ok + '</td><td>' + cs.ng + '</td><td>' + cs.na + '</td></tr>');
-  h.push('<tr><th>管理者</th><td>' + cq.ok + '</td><td>' + cq.ng + '</td><td>' + cq.na + '</td></tr></table>');
+  h.push('<tr><th>' + esc_(L.self) + '</th><td>' + cs.ok + '</td><td>' + cs.ng + '</td><td>' + cs.na + '</td></tr>');
+  h.push('<tr><th>' + esc_(L.qa) + '</th><td>' + cq.ok + '</td><td>' + cq.ng + '</td><td>' + cq.na + '</td></tr></table>');
 
   // 項目表(SPEC §10.2b-A・§10.2d。版1.11.0)
   h.push('<h2>項目表</h2><table class="items"><colgroup><col style="width:8mm"><col style="width:40mm"><col style="width:14mm"><col style="width:18mm"><col style="width:46mm"><col style="width:30mm"><col style="width:30mm"></colgroup>');
-  h.push('<tr><th>No.</th><th>項目</th><th>職長結果</th><th>管理者結果</th><th class="meas">実測(設計値との差)</th><th>職長コメント</th><th>管理者コメント</th></tr>');
+  h.push('<tr><th>No.</th><th>項目</th><th>' + esc_(L.selfRes) + '</th><th>' + esc_(L.qaRes) + '</th><th class="meas">実測(設計値との差)</th><th>' + esc_(L.selfNote) + '</th><th>' + esc_(L.qaNote) + '</th></tr>');
   rows.forEach(function (r, i) {
     var snap = r.snapshot;
     var ng = r.selfResult === 'ng' || r.qaResult === 'ng';   // 許容超(▲)は行の色に影響しない(判定は人。§10.2d-9)
@@ -361,7 +392,7 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   verdicts.forEach(function (e) {
     var d = e.detail || {};
     var ngs = (d.items || []).filter(function (x) { return x.result === 'ng'; }).map(function (x) { return x.itemId; });
-    h.push('<p>' + esc_(dtShort_(e.at)) + ' ' + esc_(userName_(e.actorUserId)) + ' 判定: ' + esc_(VERDICT_LABEL_[d.verdict] || d.verdict) +
+    h.push('<p>' + esc_(dtShort_(e.at)) + ' ' + esc_(reportJudgeName_(e.actorUserId)) + ' 判定: ' + esc_(VERDICT_LABEL_[d.verdict] || d.verdict) +
       (d.comment ? ' / ' + esc_(d.comment) : '') + (ngs.length ? ' / NG項目: ' + esc_(ngs.join(',')) : '') + '</p>');
   });
   h.push('<p>提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length + '</p>');
@@ -381,17 +412,17 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   shown.forEach(function (ph, idx) {
     var b64 = '';
     try { b64 = photoBytesB64_(ph.thumbFileId); } catch (e) { b64 = ''; }
-    var who = ph.side === 'self' ? '職長' : (ph.side === 'qa' ? '管理者' : '元請サイン証跡');
+    var who = ph.side === 'self' ? L.self : (ph.side === 'qa' ? L.qa : '元請サイン証跡');
     var row = ph.itemId ? rowOf[ph.itemId] : null;
     var info = '';
     if (row) {
       var snap = row.snapshot;
       info += '<div><b>No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</b></div>';
-      info += '<div><span class="lb">職長:</span> ' + resChip_(row.selfResult, row.selfSeverity) + ' / <span class="lb">管理者:</span> ' + resChip_(row.qaResult, row.qaSeverity) + '</div>';
+      info += '<div><span class="lb">' + esc_(L.self) + ':</span> ' + resChip_(row.selfResult, row.selfSeverity) + ' / <span class="lb">' + esc_(L.qa) + ':</span> ' + resChip_(row.qaResult, row.qaSeverity) + '</div>';
       var mt = measureBlockHtml_(row, true);   // §10.2b-B の3・§10.2d: 値の並び+要約の2行を側ごとに。実測なしなら行を作らない
       if (mt) info += mt + '\n';
-      info += '<div><span class="lb">職長コメント:</span> ' + esc_(row.foremanNote) + '</div>';
-      info += '<div><span class="lb">管理者コメント:</span> ' + esc_(row.qaNote) + '</div>';
+      info += '<div><span class="lb">' + esc_(L.selfNote) + ':</span> ' + esc_(row.foremanNote) + '</div>';
+      info += '<div><span class="lb">' + esc_(L.qaNote) + ':</span> ' + esc_(row.qaNote) + '</div>';
     }
     info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + who + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
     info = info.replace(/<\/div><div/g, '</div>\n<div');   // 段落ごとに改行(HTMLの見た目は変わらない。タグを除いたテキストを行で読めるように)
