@@ -64,13 +64,13 @@ Apps Script は、プロジェクトを作ったままだと名前がすべて�
 5. 手引きアプリなど他アプリの作業と、検査アプリの作業は、別のタブ・別の時間に分けて行う。
 
 ### 3-3. `.gs` ファイルを貼る
-貼るのは `backend/` 直下の次の **18ファイル**(`harness/` は貼らない):
+貼るのは `backend/` 直下の次の **19ファイル**(`harness/` は貼らない):
 
 `Code.gs` `Util.gs` `Repo.gs` `Schema.gs` `Seed.gs` `Auth.gs` `Authz.gs` `Idem.gs` `Records.gs` `Photos.gs` `PhotoUpload.gs` `RefCache.gs` `RecordResp.gs` `Report.gs` `ReportDoc.gs` `Membership.gs` `Notify.gs` `Admin.gs` `SiteAdmin.gs`(版1.13.0)
 
 手順:
 1. 最初からある `コード.gs`(`Code.gs`)の中身を全部消し、`backend/Code.gs` の中身を貼る。
-2. 左の「ファイル」の「+」→「スクリプト」で新しいファイルを作り、名前を上の各ファイル名(拡張子 `.gs` なし。例 `Util`)にして、中身を貼る。17回繰り返す(`Code.gs` 以外の17ファイル)。
+2. 左の「ファイル」の「+」→「スクリプト」で新しいファイルを作り、名前を上の各ファイル名(拡張子 `.gs` なし。例 `Util`)にして、中身を貼る。18回繰り返す(`Code.gs` 以外の18ファイル)。
 3. ファイルの並び順は問わない見込みです(他ファイルの関数を読み込み時に呼ぶ記述は確認できませんでした)。実機で動かないときは要確認。
 4. 保存(Ctrl+S / ディスクのアイコン)。
 
