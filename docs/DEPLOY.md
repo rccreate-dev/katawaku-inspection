@@ -66,7 +66,7 @@ Apps Script は、プロジェクトを作ったままだと名前がすべて�
 ### 3-3. `.gs` ファイルを貼る
 貼るのは `backend/` 直下の次の **18ファイル**(`harness/` は貼らない):
 
-`Code.gs` `Util.gs` `Repo.gs` `Schema.gs` `Seed.gs` `Auth.gs` `Authz.gs` `Idem.gs` `Records.gs` `Photos.gs` `PhotoUpload.gs` `RefCache.gs` `RecordResp.gs` `Report.gs` `ReportDoc.gs` `Membership.gs` `Notify.gs` `Admin.gs`
+`Code.gs` `Util.gs` `Repo.gs` `Schema.gs` `Seed.gs` `Auth.gs` `Authz.gs` `Idem.gs` `Records.gs` `Photos.gs` `PhotoUpload.gs` `RefCache.gs` `RecordResp.gs` `Report.gs` `ReportDoc.gs` `Membership.gs` `Notify.gs` `Admin.gs` `SiteAdmin.gs`(版1.13.0)
 
 手順:
 1. 最初からある `コード.gs`(`Code.gs`)の中身を全部消し、`backend/Code.gs` の中身を貼る。

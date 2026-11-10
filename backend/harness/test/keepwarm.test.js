@@ -30,8 +30,8 @@ function setKeepWarm(value) {
 }
 const configRows = () => h.control('state', { sheet: 'Config' }).data.rows;
 
-test('C-KEEP-01① ACTIONS は43のまま。keepWarm 系を含まず、HTTP で action に送ると BAD_REQUEST', () => {
-  assert.equal(Object.keys(h.ctx.ACTIONS).length, 43);
+test('C-KEEP-01① ACTIONS は §5.5 の数(51)のまま。keepWarm 系を含まず、HTTP で action に送ると BAD_REQUEST', () => {
+  assert.equal(Object.keys(h.ctx.ACTIONS).length, 51);
   ['installKeepWarmTrigger', 'removeKeepWarmTrigger', 'keepWarm'].forEach((a) => {
     assert.equal(Object.prototype.hasOwnProperty.call(h.ctx.ACTIONS, a), false);
     const r = h.call(a, {});

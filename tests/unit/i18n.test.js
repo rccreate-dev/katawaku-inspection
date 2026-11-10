@@ -55,7 +55,7 @@ describe('U-I18N-01 i18n 辞書', () => {
     const kinds = [...kindLine.matchAll(/`([a-z_0-9]+)`/g)].map((m) => m[1]).filter((k) => k !== 'kind');
     assert.ok(codes.length >= 30, 'エラーコードを読み取れた: ' + codes.length);
     assert.ok(rules.length >= 14, 'rule を読み取れた: ' + rules.length);
-    assert.equal(kinds.length, 30, 'Events kind は30種: ' + kinds.length);
+    assert.equal(kinds.length, 37, 'Events kind は37種(版1.13.0 で7つ追加): ' + kinds.length);
     for (const lang of ['ja', 'id']) {
       const keys = new Set(countedKeys(dict[lang]));
       for (const c of codes) assert.ok(keys.has(`err.${c}`), `${lang}: err.${c}`);

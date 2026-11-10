@@ -34,9 +34,9 @@ Claude Code(デスクトップアプリ)で作業を引き継ぐための資料�
 ## 4. 本番へ反映する手順(Claude がブラウザで実行してきた方法)
 
 1. バックエンドは Apps Script の1ファイル(`コード.gs`)に連結して貼る。順番は固定:
-   `Util Schema Seed RefCache Repo Code Idem Auth Authz RecordResp Records Photos PhotoUpload Membership Admin Report ReportDoc Notify`
+   `Util Schema Seed RefCache Repo Code Idem Auth Authz RecordResp Records Photos PhotoUpload Membership Admin SiteAdmin Report ReportDoc Notify`
    ```sh
-   for f in Util Schema Seed RefCache Repo Code Idem Auth Authz RecordResp Records Photos PhotoUpload Membership Admin Report ReportDoc Notify; do printf '\n// ===== %s.gs =====\n' $f; cat backend/$f.gs; done > コード.gs.txt
+   for f in Util Schema Seed RefCache Repo Code Idem Auth Authz RecordResp Records Photos PhotoUpload Membership Admin SiteAdmin Report ReportDoc Notify; do printf '\n// ===== %s.gs =====\n' $f; cat backend/$f.gs; done > コード.gs.txt
    ```
 2. `appsscript.json` も同じ内容にする(`documents` を含む権限設定。Webアプリは USER_DEPLOYING / ANYONE_ANONYMOUS)。
 3. 保存 → デプロイ → デプロイを管理 → 本番のデプロイ(IDが `AKfycbw9CHK3…`)を選び、鉛筆 → バージョン「新バージョン」→ デプロイ。

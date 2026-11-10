@@ -11,19 +11,23 @@ var ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_
   'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT',
   'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED',
   'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING',
-  'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT',
+  'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'SITE_HAS_OPEN_RECORDS', 'CLOSE_CONFIRM_REQUIRED', 'IDEMPOTENCY_CONFLICT',
   'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
 
 var VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED',
   'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'QA_OVER_TOL_COMMENT_REQUIRED', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG',
   'VERDICT_MAJOR_NEEDS_MAJOR_ITEM', 'VERDICT_MINOR_HAS_MAJOR_ITEM', 'COMMENT_REQUIRED', 'PRIME_SIGNER_REQUIRED',
-  'REASON_REQUIRED'];
+  'REASON_REQUIRED',
+  // 版1.13.0(§5.3.1。責任者の現場管理)
+  'FLOOR_IN_USE', 'ZONE_IN_USE', 'SITE_NAME_DUPLICATE', 'ASSIGN_ROLE_MISMATCH', 'ASSIGN_DUPLICATE', 'QA_MAIN_EQ_SUB', 'LAST_QA_MAIN', 'LAST_QA_SUB'];
 
 var EVENT_KINDS = ['record_created', 'submitted', 'resubmitted', 'claimed', 'claim_released', 'claim_taken_over',
   'verdict_ok', 'verdict_minor', 'verdict_major', 'prime_signed', 'stopped', 'note_added', 'report_generated',
   'escalate_30', 'escalate_60', 'join_requested', 'join_approved', 'join_rejected', 'join_revoked',
   'device_registered', 'device_revoked', 'pin_failed', 'pin_locked', 'pin_changed', 'user_unlocked',
-  'user_status_changed', 'invite_issued', 'invite_failed', 'absence_set', 'absence_cancelled', 'joinkey_rotated'];
+  'user_status_changed', 'invite_issued', 'invite_failed', 'absence_set', 'absence_cancelled', 'joinkey_rotated',
+  // 版1.13.0(§2.11)
+  'site_created', 'site_updated', 'site_closed', 'site_reopened', 'assignment_added', 'assignment_ended', 'user_created'];
 
 /** 内部用の例外。code は ERROR_CODES のいずれか */
 class ApiError extends Error {
@@ -192,7 +196,42 @@ var ACTIONS = {
   adminCancelAbsence: { w: true, roles: LEAD_ONLY, params: { absenceId: { t: 'id', p: 'b', req: 1 } } },
   adminGetJoinInfo: { roles: LEAD_ONLY, params: { siteId: { t: 'id', p: 's', req: 1 } } },
   adminRotateJoinKey: { w: true, idem: true, roles: LEAD_ONLY, params: { siteId: { t: 'id', p: 's', req: 1 } } },
-  adminValidateRoster: { roles: LEAD_ONLY, params: {} }
+  adminValidateRoster: { roles: LEAD_ONLY, params: {} },
+
+  // 版1.13.0(§5.4.8。責任者の現場管理。SiteAdmin.gs)。値の細かい検査はハンドラが全て列挙して行う(ここは型だけ)
+  adminGetSite: { roles: LEAD_ONLY, params: { siteId: { t: 'id', p: 's', req: 1 } } },
+  adminCreateSite: {
+    w: true, idem: true, roles: LEAD_ONLY,
+    params: {
+      name: { t: 'str', req: 1, max: 200 }, floors: { t: 'arr', req: 1, maxItems: 200 }, zones: { t: 'arr', maxItems: 200 },
+      primeContractor: { t: 'str', max: 400 }, address: { t: 'str', max: 400 }, startDate: { t: 'str', max: 20 }, endDate: { t: 'str', max: 20 },
+      qaMainUserId: { t: 'str', req: 1, max: 40 }, qaSubUserIds: { t: 'arr', req: 1, maxItems: 50 }
+    }
+  },
+  adminUpdateSite: {
+    w: true, idem: true, roles: LEAD_ONLY,
+    params: {
+      siteId: { t: 'id', p: 's', req: 1 }, name: { t: 'str', max: 200 }, floors: { t: 'arr', maxItems: 200 }, zones: { t: 'arr', maxItems: 200 },
+      primeContractor: { t: 'str', max: 400 }, address: { t: 'str', max: 400 }, startDate: { t: 'str', max: 20 }, endDate: { t: 'str', max: 20 }
+    }
+  },
+  adminCloseSite: { w: true, idem: true, roles: LEAD_ONLY, params: { siteId: { t: 'id', p: 's', req: 1 }, acceptQaOk: { t: 'bool' } } },
+  adminReopenSite: { w: true, idem: true, roles: LEAD_ONLY, params: { siteId: { t: 'id', p: 's', req: 1 } } },
+  adminAddAssignment: {
+    w: true, idem: true, roles: LEAD_ONLY,
+    params: {
+      siteId: { t: 'id', p: 's', req: 1 }, userId: { t: 'str', req: 1, max: 40 },
+      assignRole: { t: 'enum', req: 1, values: ['qa_main', 'qa_sub', 'foreman', 'subforeman'] }, team: { t: 'str', max: 200 }
+    }
+  },
+  adminEndAssignment: { w: true, idem: true, roles: LEAD_ONLY, params: { assignId: { t: 'id', p: 'a', req: 1 } } },
+  adminCreateUser: {
+    w: true, idem: true, roles: LEAD_ONLY,
+    params: {
+      name: { t: 'str', req: 1, max: 200 }, nameKana: { t: 'str', max: 200 }, role: { t: 'str', req: 1, max: 20 },
+      company: { t: 'str', max: 200 }, lang: { t: 'str', req: 1, max: 10 }, qaQualified: { t: 'bool', req: 1 }, email: { t: 'str', max: 400 }
+    }
+  }
 };
 
 /* ===================== エントリポイント ===================== */

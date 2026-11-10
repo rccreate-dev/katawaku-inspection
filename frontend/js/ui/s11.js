@@ -74,7 +74,6 @@
       var el = ctx.el;
       var isLead = KW.state.me && KW.state.me.role === 'lead';
       el.appendChild(h('h2', null, t('scr.S12.title')));
-      el.appendChild(h('p', { class: 'sub' }, t('scr.S12.edit_note')));
       el.appendChild(C.skeleton(3));
       var calls = [KW.api.call('listAssignments', {}), KW.api.call('listAbsences', {})];
       if (isLead) calls.push(KW.api.call('adminValidateRoster', {}));
@@ -82,7 +81,9 @@
         if (!ctx.alive()) return;
         KW.clear(el);
         el.appendChild(h('h2', null, t('scr.S12.title')));
-        el.appendChild(h('p', { class: 'sub' }, t('scr.S12.edit_note')));
+        // 版1.13.0(§9.2d): 責任者は「現場の管理」へ。QA には「担当表の変更は責任者が行います」
+        if (isLead) el.appendChild(h('button', { type: 'button', class: 'btn', on: { click: function () { KW.app.go('#/admin/sites'); } } }, t('scr.S12.lead_edit')));
+        else el.appendChild(h('p', { class: 'sub' }, t('scr.S12.qa_note')));
         if (!rs[0].ok) { el.appendChild(C.banner('warn', rs[0].network ? t('err.network') : KW.errText(rs[0].error))); return; }
         if (isLead) {
           el.appendChild(h('button', { type: 'button', class: 'btn ghost', on: { click: function () { KW.app.go('#/admin/absences'); } } }, t('scr.S17.title')));
@@ -185,7 +186,7 @@
       ctx.chrome({ tab: 'admin' });
       var el = ctx.el;
       el.appendChild(h('h2', null, t('nav.admin')));
-      [['#/admin/users', 'scr.S16.title'], ['#/admin/absences', 'scr.S17.title'], ['#/admin/qr', 'scr.S18.title'], ['#/joins', 'scr.S14.title'], ['#/roster', 'scr.S12.title']].forEach(function (x) {
+      [['#/admin/sites', 'scr.S22.title'], ['#/admin/users', 'scr.S16.title'], ['#/admin/absences', 'scr.S17.title'], ['#/admin/qr', 'scr.S18.title'], ['#/joins', 'scr.S14.title'], ['#/roster', 'scr.S12.title']].forEach(function (x) {
         el.appendChild(h('button', { type: 'button', class: 'tap', on: { click: function () { KW.app.go(x[0]); } } }, h('span', null, h('b', null, t(x[1]))), h('span', { 'aria-hidden': 'true' }, '›')));
       });
     }

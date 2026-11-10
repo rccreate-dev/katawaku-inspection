@@ -85,9 +85,9 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
     }
   });
 
-  h.mockOnly(it, 'C-REP-06③(契約側): Config 初期値に reportEngine=html(str)があり、meta.configKeys に含まれ、actions は43のまま', async () => {
+  h.mockOnly(it, 'C-REP-06③(契約側): Config 初期値に reportEngine=html(str)があり、meta.configKeys に含まれ、actions は §5.5 の数(51)', async () => {
     const meta = await h.mock('meta', {});
-    assert.equal(meta.actions.length, 43);
+    assert.equal(meta.actions.length, 51);
     assert.ok(!meta.actions.includes('checkReportEngine'));
     assert.ok(meta.configKeys.includes(ENGINE_KEY), 'SPEC §2.14 のキー');
     const row = (await h.stateRows('Config')).find((r) => r.key === ENGINE_KEY);

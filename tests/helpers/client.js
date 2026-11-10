@@ -11,7 +11,9 @@ const API_URL = process.env.API_URL || 'http://127.0.0.1:8787/api';
 const BASE = API_URL.replace(/\/api\/?$/, '');
 const APP_VERSION = '1.0.0';
 const PINS = { u_tanaka: '1111', u_sugiant: '2222', u_sato: '3333', u_suzuki: '4444', u_lead: '9999' };
-const STAR = new Set(['changePin', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'deletePhoto', 'generateReport', 'requestJoin', 'decideJoin', 'revokeMembership', 'adminSetAbsence', 'adminRotateJoinKey']);
+const STAR = new Set(['changePin', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'deletePhoto', 'generateReport', 'requestJoin', 'decideJoin', 'revokeMembership', 'adminSetAbsence', 'adminRotateJoinKey',
+  // 版1.13.0(§5.4.8)
+  'adminCreateSite', 'adminUpdateSite', 'adminCloseSite', 'adminReopenSite', 'adminAddAssignment', 'adminEndAssignment', 'adminCreateUser']);
 const KEY_ITEMS = ['i2', 'i3', 'i9', 'i11', 'i12', 'i13', 'i15'];
 // 版1.9: 新規の打設前記録は i1〜i16 + i58〜i69 の28項目、出来形は i50〜i57 の8項目(SPEC §2.6.1a)。
 // 既存シードの記録(a1〜c2)は版1.9より前の記録で i1〜i16 の16項目のまま。個々のテストは getRecord.items から項目を取るのが正。

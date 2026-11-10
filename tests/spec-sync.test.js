@@ -1,5 +1,5 @@
 // SPEC同期(SPEC §12.1)の版1.10 の部分: SPEC.md の記述から値を拾い、実装(mock・backend・frontend/i18n.js)と一致することを検査する。
-//   U-CLASS-01 : §8.11.2 の操作の分類が §5.5 の43 action を1回ずつ含み、A(先出し)が6つだけ
+//   U-CLASS-01 : §8.11.2 の操作の分類が §5.5 の51 action(版1.13.0)を1回ずつ含み、A(先出し)が6つだけ
 //   §2.14      : Config キー(keepWarmMinutes を含む)が mock と backend の既定値と一致。keepWarmMinutes は公開Configに出ない
 //   §2.14(1.10.1): reportEngine(既定 html・str・サーバー専用)が SPEC / mock / backend で一致。C-REP-06① appsscript.json に documents スコープ
 //   §9.4       : 版1.10 の新 i18n キーが ja/id の両方にあり、プレースホルダが SPEC の表と一致
@@ -25,7 +25,7 @@ function section(startRe, endRe) {
 const cells = (line) => line.replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
 const ticks = (s) => [...s.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 
-// §5.5 の action 名(43個)
+// §5.5 の action 名(51個。版1.13.0)
 const ACTIONS_55 = (() => {
   const lines = section(/^### 5\.5 /, /^\*\*★/).filter((l) => /^(公開|セッション|記録|写真|PDF|参加|名簿|管理):/.test(l));
   return lines.flatMap(ticks);
@@ -43,17 +43,17 @@ describe('U-CLASS-01 操作の分類(SPEC §8.11.2)', () => {
   const block = section(/^#### 8\.11\.2 /, /^#### /);
   const rows = block.filter((l) => /^\|\s*[ABC]\s/.test(l)).map((l) => { const c = cells(l); return { cls: c[0][0], name: c[0], actions: ticks(c[1]) }; });
 
-  it('§5.5 は43 action(重複なし)', () => {
-    assert.equal(ACTIONS_55.length, 43);
-    assert.equal(new Set(ACTIONS_55).size, 43);
+  it('§5.5 は51 action(重複なし)', () => {
+    assert.equal(ACTIONS_55.length, 51);
+    assert.equal(new Set(ACTIONS_55).size, 51);
   });
-  it('分類表の action 名の集合が §5.5 の43 action と完全に一致し、同じ名前が2回出ない', () => {
+  it('分類表の action 名の集合が §5.5 の51 action と完全に一致し、同じ名前が2回出ない', () => {
     assert.ok(rows.length >= 6, '分類表の行を読み取れた: ' + rows.length);
     const all = rows.flatMap((r) => r.actions);
     const dup = all.filter((a, i) => all.indexOf(a) !== i);
     assert.deepEqual(dup, [], '2回出る action: ' + dup.join(','));
     assert.deepEqual([...all].sort(), [...ACTIONS_55].sort());
-    assert.equal(all.length, 43);
+    assert.equal(all.length, 51);
   });
   it('A(先出し)は saveDraft saveQaDraft addNote uploadPhotoChunk deletePhoto setLang の6つだけ', () => {
     const a = rows.filter((r) => r.cls === 'A').flatMap((r) => r.actions);
@@ -65,11 +65,11 @@ describe('U-CLASS-01 操作の分類(SPEC §8.11.2)', () => {
     const a = new Set(rows.filter((r) => r.cls === 'A').flatMap((r) => r.actions));
     for (const x of ['submitRecord', 'submitVerdict', 'recordPrimeSign', 'changePin', 'claimReview', 'releaseClaim', 'takeoverReview', 'stopPour', 'createRecord', 'lookupInvite', 'registerDevice', 'requestJoin', 'decideJoin', 'revokeMembership']) assert.ok(!a.has(x), `${x} は先出しにしない`);
   });
-  it('C(参照)は書き込みでない12個', () => {
+  it('C(参照)は書き込みでない13個(版1.13.0 で adminGetSite)', () => {
     const c = rows.filter((r) => r.cls === 'C').flatMap((r) => r.actions);
-    assert.equal(c.length, 12);
+    assert.equal(c.length, 13);
   });
-  it('backend の ACTIONS が §5.5 の43 action と一致する(keepWarm 系を含まない)', () => {
+  it('backend の ACTIONS が §5.5 の51 action と一致する(keepWarm 系を含まない)', () => {
     const ctx = loadBackend();
     const keys = Object.keys(ctx.ACTIONS);
     assert.deepEqual([...keys].sort(), [...ACTIONS_55].sort());

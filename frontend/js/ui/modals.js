@@ -1,4 +1,4 @@
-/* ui/modals.js: モーダル M1〜M9(PIN・カメラ・写真拡大・打設停止・元請サイン・PDF・確認・招待コード・参加承認) */
+/* ui/modals.js: モーダル M1〜M9(PIN・カメラ・写真拡大・打設停止・元請サイン・PDF・確認・招待コード・参加承認)・M11(新しい人の登録。版1.13.0) */
 (function (root) {
   'use strict';
   var KW = root.KW;
@@ -488,6 +488,59 @@
         C.banner('warn', t('scr.M8.once')),
         h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn', on: { click: function () { m.close(); } } }, t('act.close')))
       ];
+    });
+  };
+
+  /* ---- M11 新しい人の登録(版1.13.0。SPEC §9.2d)----
+   * o.users: 同じ氏名の注意に使う一覧。o.submit(params) は Promise<res> を返す(成功なら閉じて res を返す)。
+   * 役割は職長/品質管理者の2択(初期値なし)。代行資格は品質管理者のときだけ出す。 */
+  M.newUser = function (o) {
+    return new Promise(function (resolve) {
+      var decided = false;
+      function fin(v) { if (decided) return; decided = true; resolve(v); }
+      sheet(function (m) {
+        var name = h('input', { type: 'text', class: 'inp', maxlength: '20', 'aria-label': t('scr.S16.name') });
+        var kana = h('input', { type: 'text', class: 'inp', maxlength: '40', 'aria-label': t('scr.S16.kana') });
+        var company = h('input', { type: 'text', class: 'inp', maxlength: '40', 'aria-label': t('scr.S16.company') });
+        var role = null, lang = 'ja';
+        var qual = h('input', { type: 'checkbox' });
+        var qualBox = h('label', { class: 'row', hidden: true }, qual, h('span', null, t('scr.S16.qa_qualified')));
+        var roleBox = h('div'), langBox = h('div');
+        function drawRole() {
+          KW.clear(roleBox).appendChild(C.seg(['foreman', 'qa'].map(function (v) { return { v: v, label: t('role.' + v) }; }), role, function (v) { role = v; qualBox.hidden = v !== 'qa'; if (v !== 'qa') qual.checked = false; drawRole(); }));
+        }
+        function drawLang() {
+          KW.clear(langBox).appendChild(C.seg(['ja', 'id'].map(function (v) { return { v: v, label: t('lang.name.' + v) }; }), lang, function (v) { lang = v || 'ja'; drawLang(); }));
+        }
+        drawRole(); drawLang();
+        var same = h('div');
+        name.addEventListener('input', function () {
+          var v = name.value.trim();
+          KW.clear(same);
+          if (v && (o.users || []).some(function (u) { return u.name === v; })) same.appendChild(C.msg('warn', t('scr.S16.same_name')));
+        });
+        var err = h('div');
+        var ok = h('button', { type: 'button', class: 'btn' }, t('scr.S16.create'));
+        ok.addEventListener('click', C.guard(ok, function () {
+          KW.clear(err);
+          var p = { name: name.value.trim(), role: role || '', lang: lang, qaQualified: role === 'qa' && qual.checked };
+          if (kana.value.trim()) p.nameKana = kana.value.trim();
+          if (company.value.trim()) p.company = company.value.trim();
+          return o.submit(p).then(function (res) {
+            if (res && res.ok) { fin(res); m.close(); return; }
+            if (o.showFail) o.showFail(err, res);
+          });
+        }));
+        return [
+          h('h2', null, t('scr.S16.new_user')),
+          h('label', { class: 'lbl' }, t('scr.S16.name')), name, same,
+          h('label', { class: 'lbl' }, t('scr.S16.kana')), kana,
+          h('label', { class: 'lbl' }, t('scr.S16.role')), roleBox, qualBox,
+          h('label', { class: 'lbl' }, t('scr.S16.company')), company, h('p', { class: 'sub' }, t('scr.S16.company_note')),
+          h('label', { class: 'lbl' }, t('scr.S16.lang')), langBox, err,
+          h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn ghost', on: { click: function () { fin(null); m.close(); } } }, t('act.cancel')), ok)
+        ];
+      }, { onClose: function () { fin(null); } });
     });
   };
 

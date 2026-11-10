@@ -160,7 +160,7 @@ test('ST-06 addMissingSeedItems: 足りない行だけ末尾に追加・既存�
   assert.deepEqual(JSON.parse(JSON.stringify(r2.added)), []);
   assert.equal(Repo.fresh('Items').length, 69);
   // Webの action ではない
-  assert.equal(Object.keys(h.ctx.ACTIONS).length, 43);
+  assert.equal(Object.keys(h.ctx.ACTIONS).length, 51);
   assert.ok(!('addMissingSeedItems' in h.ctx.ACTIONS));
   // setupSheets() は既存シートに行を足さない(Items が空でないので何もしない)
   sheet.deleteRow(after.find((r) => r.itemId === 'i69')._r);

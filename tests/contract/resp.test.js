@@ -279,7 +279,7 @@ describe('C-RESP 書き込み応答の record(§5.1a)', () => {
 describe('C-KEEP keepWarm(HTTPから見える部分)', () => {
   beforeEach(() => h.reset());
 
-  it('C-KEEP-01(①): action は43のまま。keepWarm 系を action に送ると BAD_REQUEST', async () => {
+  it('C-KEEP-01(①): action は §5.5 の数(51)のまま。keepWarm 系を action に送ると BAD_REQUEST', async () => {
     const t = await h.login('u_tanaka');
     for (const action of ['installKeepWarmTrigger', 'removeKeepWarmTrigger', 'keepWarm']) {
       const r = await t.call(action, {});
@@ -289,9 +289,9 @@ describe('C-KEEP keepWarm(HTTPから見える部分)', () => {
     }
   });
 
-  h.mockOnly(it, 'C-KEEP-01(①, mock-only/harness): ACTIONS のキー数は43で keepWarm 系を含まない。Config に keepWarmMinutes=5(int)がある', async () => {
+  h.mockOnly(it, 'C-KEEP-01(①, mock-only/harness): ACTIONS のキー数は51で keepWarm 系を含まない。Config に keepWarmMinutes=5(int)がある', async () => {
     const meta = await h.mock('meta', {});
-    assert.equal(meta.actions.length, 43);
+    assert.equal(meta.actions.length, 51);
     for (const a of ['installKeepWarmTrigger', 'removeKeepWarmTrigger', 'keepWarm']) assert.ok(!meta.actions.includes(a), a);
     assert.ok(meta.configKeys.includes('keepWarmMinutes'), 'SPEC §2.14 のキー');
     const row = (await h.stateRows('Config')).find((r) => r.key === 'keepWarmMinutes');

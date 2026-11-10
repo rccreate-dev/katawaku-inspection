@@ -1,4 +1,4 @@
-/* ui/s16.js: S16 ユーザー管理 / S17 不在登録 / S18 QR表示(責任者) */
+/* ui/s16.js: S16 ユーザー管理(版1.13.0: 新しい人の登録 M11)/ S17 不在登録 / S18 QR表示(責任者) */
 (function (root) {
   'use strict';
   var KW = root.KW;
@@ -19,9 +19,41 @@
           KW.clear(el);
           el.appendChild(h('h2', null, t('scr.S16.title')));
           if (!res.ok) { el.appendChild(C.banner('warn', res.network ? t('err.network') : KW.errText(res.error))); return; }
+          el.appendChild(newUserButton(res.data.users));
           var users = res.data.users.slice().sort(function (a, b) { return (a.status === 'locked' ? 0 : 1) - (b.status === 'locked' ? 0 : 1); });
           users.forEach(function (u) { el.appendChild(userCard(u)); });
         });
+      }
+      /* 版1.13.0(§9.2d): 登録 → 続けて招待コード(first)→ M8。コードの発行だけ失敗したら案内 */
+      function newUserButton(all) {
+        var b = h('button', { type: 'button', class: 'btn' }, t('scr.S16.new_user'));
+        b.addEventListener('click', C.guard(b, function () {
+          var cid = KW.newClientId();
+          return KW.modal.newUser({
+            users: all,
+            submit: function (p) {
+              if (!KW.isOnline()) return Promise.resolve({ ok: false, network: true });
+              return KW.api.call('adminCreateUser', p, { clientId: cid }).then(function (res) { if (!res.network) cid = KW.newClientId(); return res; });
+            },
+            showFail: function (box, res) {
+              KW.clear(box);
+              if (res.network) { box.appendChild(C.msg('', t('err.network'))); return; }
+              var e = res.error || {};
+              if (e.code === 'VALIDATION_FAILED' && e.data && e.data.violations) {
+                e.data.violations.forEach(function (v) { box.appendChild(C.msg('', t('rule.' + v.rule) + (v.path ? '(' + v.path + ')' : ''))); });
+              } else box.appendChild(C.msg('', KW.errText(e)));
+            }
+          }).then(function (res) {
+            if (!res) return null;
+            var u = res.data.user;
+            return KW.api.call('adminIssueInvite', { userId: u.userId, purpose: 'first' }).then(function (r2) {
+              if (r2.ok) KW.modal.inviteCode({ name: u.name, code: r2.data.code, expiresAt: r2.data.expiresAt });
+              else C.toast(t('scr.S16.invite_after_fail'), 'warn');
+              load();
+            });
+          });
+        }, { quiet: true }));
+        return h('div', { class: 'stack' }, b);
       }
       function userCard(u) {
         var msg = h('div');

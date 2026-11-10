@@ -31,6 +31,8 @@
     [/^\/admin\/users$/, 'S16'],
     [/^\/admin\/absences$/, 'S17'],
     [/^\/admin\/qr$/, 'S18'],
+    [/^\/admin\/sites$/, 'S22'],
+    [/^\/admin\/site\/([^/]+)$/, 'S23'],
     [/^\/settings$/, 'S19'],
     [/^\/outbox$/, 'S20'],
     [/^\/perf$/, 'S21']

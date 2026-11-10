@@ -1,4 +1,4 @@
-// 全43 actionのハンドラ。engine.js の C(コア関数群)を受け取って登録する。
+// 全43 actionのハンドラ(版1.13.0 の8 action は siteadmin.js)。engine.js の C(コア関数群)を受け取って登録する。
 // 呼び出し時点で authorize(権限・状態)は通過済み。ここでは入力検証→PIN→更新→Events の順で行う。
 'use strict';
 

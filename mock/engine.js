@@ -11,8 +11,10 @@ const ROLES_ALL = ['foreman', 'qa', 'lead'];
 const ROLES_QL = ['qa', 'lead'];
 const SAMPLE_JPEG = Buffer.from(SAMPLE_JPEG_B64, 'base64');
 
-const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
-const VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED', 'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'QA_OVER_TOL_COMMENT_REQUIRED', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG', 'VERDICT_MAJOR_NEEDS_MAJOR_ITEM', 'VERDICT_MINOR_HAS_MAJOR_ITEM', 'COMMENT_REQUIRED', 'PRIME_SIGNER_REQUIRED', 'REASON_REQUIRED'];
+const ERROR_CODES = ['BAD_REQUEST', 'CLIENT_OUTDATED', 'UNAUTHENTICATED', 'DEVICE_REVOKED', 'USER_LOCKED', 'USER_DISABLED', 'PIN_REQUIRED', 'PIN_INVALID', 'INVITE_REQUIRED', 'INVITE_INVALID', 'INVITE_EXPIRED', 'FORBIDDEN_ROLE', 'FORBIDDEN_SITE', 'FORBIDDEN_TEAM', 'NOT_FOUND', 'VALIDATION_FAILED', 'STATE_CONFLICT', 'RECORD_LOCKED', 'ALREADY_EXISTS', 'ALREADY_CLAIMED', 'NOT_CLAIMER', 'NOT_CLAIMED', 'TAKEOVER_NOT_ALLOWED', 'STAGE_NOT_ENABLED', 'SITE_CLOSED', 'PHOTO_INVALID', 'PHOTO_LIMIT', 'PHOTO_TOO_LARGE', 'CHUNK_MISSING', 'JOIN_KEY_INVALID', 'ALREADY_MEMBER', 'JOIN_PENDING', 'REPORT_NOT_ALLOWED', 'APPROVER_NOT_ALLOWED', 'SITE_HAS_OPEN_RECORDS', 'CLOSE_CONFIRM_REQUIRED', 'IDEMPOTENCY_CONFLICT', 'LOCK_TIMEOUT', 'DRIVE_ERROR', 'RATE_LIMITED', 'INTERNAL'];
+const VIOLATION_RULES = ['FIELD_INVALID', 'ANSWER_MISSING', 'PHOTO_REQUIRED', 'NOTE_REQUIRED', 'SEVERITY_REQUIRED', 'MEASURE_REQUIRED', 'MEASURE_OVER_TOL_OK', 'QA_OVER_TOL_COMMENT_REQUIRED', 'POUR_PLAN_REQUIRED', 'VERDICT_OK_WITH_NG', 'VERDICT_NEEDS_NG', 'VERDICT_MAJOR_NEEDS_MAJOR_ITEM', 'VERDICT_MINOR_HAS_MAJOR_ITEM', 'COMMENT_REQUIRED', 'PRIME_SIGNER_REQUIRED', 'REASON_REQUIRED',
+  // 版1.13.0(§5.3.1。責任者の現場管理)
+  'FLOOR_IN_USE', 'ZONE_IN_USE', 'SITE_NAME_DUPLICATE', 'ASSIGN_ROLE_MISMATCH', 'ASSIGN_DUPLICATE', 'QA_MAIN_EQ_SUB', 'LAST_QA_MAIN', 'LAST_QA_SUB'];
 
 class ApiError extends Error {
   constructor(code, message, data) { super(message || code); this.code = code; this.data = data; }
@@ -617,6 +619,15 @@ const ACTIONS = {
   adminGetJoinInfo: A(['lead'], { siteId: 's' }),
   adminRotateJoinKey: A(['lead'], { siteId: 's' }, { write: true, star: true }),
   adminValidateRoster: A(['lead'], {}),
+  // 版1.13.0(§5.4.8。責任者の現場管理。オンライン専用)
+  adminGetSite: A(['lead'], { siteId: 's' }),
+  adminCreateSite: A(['lead'], { name: 's', floors: 'a', zones: 'a?', primeContractor: 's?', address: 's?', startDate: 's?', endDate: 's?', qaMainUserId: 's', qaSubUserIds: 'a' }, { write: true, star: true }),
+  adminUpdateSite: A(['lead'], { siteId: 's', name: 's?', floors: 'a?', zones: 'a?', primeContractor: 's?', address: 's?', startDate: 's?', endDate: 's?' }, { write: true, star: true }),
+  adminCloseSite: A(['lead'], { siteId: 's', acceptQaOk: 'b?' }, { write: true, star: true }),
+  adminReopenSite: A(['lead'], { siteId: 's' }, { write: true, star: true }),
+  adminAddAssignment: A(['lead'], { siteId: 's', userId: 's', assignRole: 's', team: 's?' }, { write: true, star: true }),
+  adminEndAssignment: A(['lead'], { assignId: 's' }, { write: true, star: true }),
+  adminCreateUser: A(['lead'], { name: 's', nameKana: 's?', role: 's', company: 's?', lang: 's', qaQualified: 'b', email: 's?' }, { write: true, star: true }),
 };
 
 function shapeViolations(spec, obj, prefix = '') {
@@ -629,7 +640,8 @@ function shapeViolations(spec, obj, prefix = '') {
     const ok = ty === 's' ? typeof v === 'string'
       : ty === 'i' ? Number.isInteger(v)
         : ty === 'a' ? Array.isArray(v)
-          : ty === 'o' ? (typeof v === 'object' && !Array.isArray(v)) : true;
+          : ty === 'o' ? (typeof v === 'object' && !Array.isArray(v))
+            : ty === 'b' ? typeof v === 'boolean' : true;
     if (!ok) out.push({ rule: 'FIELD_INVALID', path: prefix + key });
   }
   return out;
@@ -1166,6 +1178,7 @@ const C = {
   ROLES_QL, ISOK: okRes,
 };
 handlers = require('./actions')(C);
+require('./siteadmin')(C, handlers); // 版1.13.0(§5.4.8)
 
 resetState({});
 

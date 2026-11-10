@@ -409,8 +409,8 @@ test('C-REP-04 doc 方式の間は reportEngine を読み直す: doc → html �
   assert.equal(detailOf(reportEvents(id)[1]).fallbackFrom, undefined);
 });
 
-test('C-REP-05 ACTIONS は43のまま。checkReportEngine は action ではなく、HTTP で送ると BAD_REQUEST', () => {
-  assert.equal(Object.keys(h.ctx.ACTIONS).length, 43);
+test('C-REP-05 ACTIONS は §5.5 の数(51)のまま。checkReportEngine は action ではなく、HTTP で送ると BAD_REQUEST', () => {
+  assert.equal(Object.keys(h.ctx.ACTIONS).length, 51);
   assert.equal(Object.prototype.hasOwnProperty.call(h.ctx.ACTIONS, 'checkReportEngine'), false);
   const r = h.call('checkReportEngine', {});
   assert.equal(r.ok, false);
