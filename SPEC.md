@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.12.0 / 作成日: 2026-10-07(最終改訂 2026-11-04) / 作成: 設計担当
+- 版: 1.13.0 / 作成日: 2026-10-07(最終改訂 2026-11-10) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -11,7 +11,7 @@
 ## 0. 共通規約(全担当が従う)
 
 ### 0.1 確定している変更不可の決定(CLAUDE.md §2 の再掲。ここから逸脱しない)
-参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は 承認者の「合格」「打設可」(出来形では「出来形確認済」)と1次検査者の「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長(1次検査者)コメントと管理者(承認者)コメントは別フィールド・上書き禁止 / 提出後は1次検査者(職長・管理者・責任者)も編集不可(差し戻し時のみ可) / **1次検査者は自分の記録を承認できない(責任者だけ例外)。管理者・責任者が1次検査をした記録は責任者だけが承認・元請提出する(版1.12.0。§6.9)** / 重大不適合=打設不可・3者サインが揃うまで打設可にならない(段階が出来形の記録では、最終状態の表示が「出来形確認済」になり、打設を止める操作は無い。§6.8) / 役割はサーバー名簿で決まる / 合否は人が決める。
+参加はQR→主担当QA承認 / 個人スマホ・氏名+4桁PIN・端末登録 / PIN再入力は 承認者の「合格」「打設可」(出来形では「出来形確認済」)と1次検査者の「提出」のみ / 保存先はSheets+Drive / 元請はアカウントなしPDFのみ / ja・id切替 / 兼任なし / 職長(1次検査者)コメントと管理者(承認者)コメントは別フィールド・上書き禁止 / 提出後は1次検査者(職長・管理者・責任者)も編集不可(差し戻し時のみ可) / **1次検査者は自分の記録を承認できない(責任者だけ例外)。管理者・責任者が1次検査をした記録は責任者だけが承認・元請提出する(版1.12.0。§6.9)** / 重大不適合=打設不可・3者サインが揃うまで打設可にならない(段階が出来形の記録では、最終状態の表示が「出来形確認済」になり、打設を止める操作は無い。§6.8) / 役割はサーバー名簿で決まる(本人は選べない。責任者が登録のときに決める。版1.13.0) / 合否は人が決める。
 
 ### 0.2 列挙値(これ以外を作らない)
 
@@ -179,7 +179,7 @@ oauthScopes: spreadsheets, drive, script.scriptapp, script.send_mail, **document
 - 列表記: 「必」=必須。「PK」=主キー(重複不可)。`json` 列は `JSON.stringify` した文字列。
 - `setupSheets()`(Setup相当の関数。GASエディタから手動実行): シート作成・ヘッダ書込・全列を `@` 書式に設定・Config初期値投入・Items初期値投入(§2.6)・先頭行固定・ヘッダ保護。既存シートは破壊しない(不足列のみ追加でなく、**列不一致ならエラー終了**)。
 - 追記専用シート(**更新・削除しない**): `Events` / `Notes` / `Reports` / `Idem`(Idemのみ保守で古い行の削除可)。`Photos` は論理削除のみ(`deleted`)。
-- 直接編集してよいシート(名簿の暫定運用=A案): `Users`(行追加・`name`/`role`/`status`/`lang`/`email`/`qaQualified`/`note`のみ)、`Sites`、`Assignments`、`Items`、`Config`、`Absences`。**`pinSalt`/`pinHash`/`failedCount`/`lockedAt` と他シート(Records系・Devices・Memberships等)は手編集禁止**(権限・ロック解除はアプリ経由)。
+- 直接編集してよいシート(名簿の暫定運用=A案): `Users`(行追加・`name`/`role`/`status`/`lang`/`email`/`qaQualified`/`note`のみ)、`Sites`、`Assignments`、`Items`、`Config`、`Absences`。**`pinSalt`/`pinHash`/`failedCount`/`lockedAt` と他シート(Records系・Devices・Memberships等)は手編集禁止**(権限・ロック解除はアプリ経由)。**版1.13.0**: `Sites`・`Assignments`・`Users`(新しい人)の追加・変更は、責任者がアプリからもできる(§5.4.8・§6.10)。シートの直接編集も引き続き可。
 - **直接編集の反映遅延(版1.4)**: `Config` / `Items` / `Sites` を直接編集した内容は、アプリ(API)へ **最大60秒遅れて**反映されてよい(参照シートの読み取りキャッシュ。§2.15)。`Users` / `Assignments` / `Absences`(と `Devices` / `Memberships`)の直接編集は遅れず、次のリクエストから反映される。
 
 ### 2.1 Users(ユーザー名簿)  PK=`userId`
@@ -588,7 +588,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | clientId | str | | |
 | detail | json | | 種別ごとの補足(**PIN・トークン・招待コード平文を含めない**。長さ≤40,000文字、超過は注記を切り詰める) |
 
-`kind` の値(これ以外を作らない): `record_created` / `submitted` / `resubmitted` / `claimed` / `claim_released` / `claim_taken_over` / `verdict_ok` / `verdict_minor` / `verdict_major` / `prime_signed` / `stopped` / `note_added` / `report_generated` / `escalate_30` / `escalate_60` / `join_requested` / `join_approved` / `join_rejected` / `join_revoked` / `device_registered` / `device_revoked` / `pin_failed` / `pin_locked` / `pin_changed` / `user_unlocked` / `user_status_changed` / `invite_issued` / `absence_set` / `absence_cancelled` / `joinkey_rotated`。
+`kind` の値(これ以外を作らない): `record_created` / `submitted` / `resubmitted` / `claimed` / `claim_released` / `claim_taken_over` / `verdict_ok` / `verdict_minor` / `verdict_major` / `prime_signed` / `stopped` / `note_added` / `report_generated` / `escalate_30` / `escalate_60` / `join_requested` / `join_approved` / `join_rejected` / `join_revoked` / `device_registered` / `device_revoked` / `pin_failed` / `pin_locked` / `pin_changed` / `user_unlocked` / `user_status_changed` / `invite_issued` / `absence_set` / `absence_cancelled` / `joinkey_rotated` / **版1.13.0**: `site_created` / `site_updated` / `site_closed` / `site_reopened` / `assignment_added` / `assignment_ended` / `user_created`。
 (下書き保存・写真追加は高頻度のためEventsに残さない。写真は Photos、下書きは `updatedAt` で追える。)
 
 `detail` の主な内容: `submitted`/`resubmitted` = `{items:[{itemId,result,severity,values,note}],late:bool,pourPlannedAt}`、`verdict_*` = `{verdict,comment,items:[{itemId,result,severity,values,note}],warnings:[...]}`、`prime_signed` = `{signerName,method,evidencePhotoId}`、`stopped` = `{reason,previousStatus}`、`claim_taken_over` = `{from}`、`escalate_*` = `{to:[userId...],mailed:bool}`、`pin_failed` = `{action,remaining}`。
@@ -806,6 +806,7 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | listAssignments | × | ○ | ○ | QA=自分の担当現場のみ。責任者=全て |
 | listAbsences | × | ○ | ○ | |
 | adminListUsers / adminIssueInvite / adminUnlockUser / adminSetUserStatus / adminRevokeDevice / adminSetAbsence / adminCancelAbsence / adminGetJoinInfo / adminRotateJoinKey / adminValidateRoster | × | × | ○ | 責任者のみ |
+| adminGetSite / adminCreateSite / adminUpdateSite / adminCloseSite / adminReopenSite / adminAddAssignment / adminEndAssignment / adminCreateUser | × | × | ○ | 責任者のみ(版1.13.0。§5.4.8・§6.10)。現場スコープ(§4.2 の4)は責任者なので常に通る |
 
 重要な不変条件(テスト対象 §12):
 - 職長は **他現場**の記録を一覧・詳細・写真・PDFで見られない。他班の記録は `masked`(詳細・写真・コメントは見えない)。**唯一の例外として、同じ現場に有効な担当がある職長は、`masked` の打設前(`pre_pour`)の記録に対して `stopPour` だけ実行できる**(`actions` に `stopPour` が入る。それ以外の action は不可。出来形の `masked` 記録の `actions` は常に空)。
@@ -924,6 +925,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **Absence** `{ "absenceId","userId","userName","dateFrom","dateTo","reason","registeredBy","registeredByName","createdAt" }`
 
+**AdminSite**(版1.13.0。§5.4.8 の `site`。責任者だけが受け取る) `{ "siteId","name","status":"active|closed","floors":["1F","2F"],"zones":[],"primeContractor":"","address":"","startDate":"date|null","endDate":"date|null","createdAt","updatedAt" }`(**`joinKey`・`driveFolderId` は含めない**。QRは従来どおり `adminGetJoinInfo`。`floors`/`zones` はシートのカンマ区切りを配列にしたもの)
+
 **Report** `{ "reportId","recordId","version":1,"recordStatus":"qa_ok|approved","url":"https://drive.google.com/file/d/…/view","sha256":"…","generatedBy","generatedByName","generatedAt" }`
 
 **ItemPatch**(`saveDraft`/`saveQaDraft` の `items[]`): `{ "itemId":"i4", "result":"ok|ng|na|null", "severity":"minor|major|null", "values":[2,-1], "note":"…" }`。`itemId` 以外は任意で、**指定したキーだけ更新**(`null` で消去、`values:[]` で消去)。未知のキー・未知の `itemId`・範囲外(`values` は有限数・最大10件、`note` ≤1000文字)は `VALIDATION_FAILED`(`FIELD_INVALID`)。職長は `audience=qa` の項目、QAは `audience=foreman` の項目を書けない(**版1.12.0: 役割ではなく側で決める**。`saveDraft`(1次検査側。1次検査者が QA・責任者でも)は `audience=qa` の項目を書けず、`saveQaDraft`(承認側)は `audience=foreman` の項目を書けない)。
@@ -996,8 +999,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | FORBIDDEN_SITE | その現場に担当がない | × | |
 | FORBIDDEN_TEAM | 他班の記録/他人の写真 | × | |
 | NOT_FOUND | 対象IDなし(権限がなく存在を隠す場合も含む) | × | |
-| VALIDATION_FAILED | 入力不備 | × | `{violations:[{rule,itemId?,path?}]}`(§5.3.1) |
-| STATE_CONFLICT | 遷移できない状態/`round`不一致/打設を止められない段階の記録(出来形への `stopPour`。版1.9) | × | `{status,round}` |
+| VALIDATION_FAILED | 入力不備 | × | `{violations:[{rule,itemId?,path?,value?}]}`(§5.3.1。`value` は版1.13.0 の現場管理の rule だけが付ける) |
+| STATE_CONFLICT | 遷移できない状態/`round`不一致/打設を止められない段階の記録(出来形への `stopPour`。版1.9)/**閉鎖済みの現場の閉鎖・稼働中の現場の再開・終了済みの担当の終了(版1.13.0)** | × | `{status,round}`(現場は `{status}`、担当は無し) |
 | RECORD_LOCKED | 編集不可の状態(提出後等) | × | `{status}` |
 | ALREADY_EXISTS | 同一スロットの記録が既にある | × | `{recordId,mine}` |
 | ALREADY_CLAIMED | 先に確認中にされた | × | `{claimedBy,claimedByName,claimedAt}` |
@@ -1005,7 +1008,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | NOT_CLAIMED | 未claimで操作しようとした | × | |
 | TAKEOVER_NOT_ALLOWED | 引き継ぎ条件未達 | × | `{availableAt}` |
 | STAGE_NOT_ENABLED | 未有効の段階(`Config.enabledStages` に無い値・列挙外の値・その段階の有効項目が0件のときを含む。版1.9) | × | |
-| SITE_CLOSED | 閉鎖現場 | × | |
+| SITE_CLOSED | 閉鎖現場(版1.13.0: 閉鎖中の現場への担当の追加 `adminAddAssignment` も) | × | |
 | PHOTO_INVALID | 画像形式・ハッシュ・サムネ不備、`data` 文字数が上限超過(単発=`photoSingleMaxChars`、分割=`photoChunkChars`)、base64不正、デコード後バイト数と `bytes` の不一致、既存の同一 `photoId` と内容(`recordId`/`itemId`/`side`/`sha256`)または撮影者(`takenBy`)が食い違う | × | |
 | PHOTO_LIMIT | 項目あたり上限超過(ロック内で確定判定する) | × | `{max}` |
 | PHOTO_TOO_LARGE | バイト数超過 | × | `{max}` |
@@ -1015,6 +1018,8 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | JOIN_PENDING | 申請中 | × | `{membershipId}` |
 | REPORT_NOT_ALLOWED | PDF生成不可の状態 | × | `{status}` |
 | APPROVER_NOT_ALLOWED | その記録を承認(確認開始・引き継ぎ・元請サイン記録・PDF生成・元請サイン証跡写真)できない人。1次検査者本人(責任者を除く)、または1次検査者が管理者・責任者の記録に対するQA(版1.12.0。§6.9) | × | `{ownerRole}` |
+| SITE_HAS_OPEN_RECORDS | 閉鎖しようとした現場に、入力中・確認待ち・是正中(`draft`/`submitted`/`fix`)の記録がある(版1.13.0。§6.10) | × | `{draft,submitted,fix}`(件数) |
+| CLOSE_CONFIRM_REQUIRED | 閉鎖しようとした現場に元請待ち(`qa_ok`)の記録があり、`acceptQaOk:true` が無い(版1.13.0。§6.10)。画面は件数を見せて確認し、`acceptQaOk:true` で送り直す | × | `{qaOk}`(件数) |
 | IDEMPOTENCY_CONFLICT | 同一clientIdで内容違い | × | |
 | LOCK_TIMEOUT | ロック待ちタイムアウト | ○(バックオフ) | |
 | DRIVE_ERROR | Drive書込失敗 | ○ | |
@@ -1039,6 +1044,14 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 | COMMENT_REQUIRED | `minor`/`major` 判定に総合コメントがない(`comment` 未指定なら保存済み `qaComment` を使い、両方空のとき。≤2000文字) | |
 | PRIME_SIGNER_REQUIRED | 元請担当者名が空 | |
 | REASON_REQUIRED | 停止理由・取消理由が空 | |
+| FLOOR_IN_USE | 記録で使われている階を `floors` から外そうとした(名前の変更も「外す+足す」になるので同じ)(版1.13.0。`adminUpdateSite`) | `path:"floors"`、`value`(その階) |
+| ZONE_IN_USE | 記録で使われている工区を `zones` から外そうとした(版1.13.0) | `path:"zones"`、`value` |
+| SITE_NAME_DUPLICATE | 同じ現場名(前後の空白を除いて完全一致。閉鎖済みの現場を含む)が既にある(版1.13.0) | `path:"name"` |
+| ASSIGN_ROLE_MISMATCH | 担当の役と、その人の役割・代行資格が合わない(§2.3 の役割整合)、その人が `disabled`、またはその人がいない(存在を区別しない)(版1.13.0) | `path`(`userId`/`qaMainUserId`/`qaSubUserIds`)、`value`(userId) |
+| ASSIGN_DUPLICATE | その人が同じ現場に有効な担当を既に持つ(役が同じでも違っても。班を変えるときは「終了→追加」)(版1.13.0。主担当の交代の例外は §5.4.8) | `path:"userId"`、`value` |
+| QA_MAIN_EQ_SUB | 主担当と代行者が同じ人(`adminCreateSite`)(版1.13.0) | `path:"qaSubUserIds"`、`value` |
+| LAST_QA_MAIN | 現場で最後の有効な主担当を終了しようとした(交代は新しい主担当の追加で行う)(版1.13.0) | `path:"assignId"` |
+| LAST_QA_SUB | 現場で最後の有効な代行者を終了しようとした、または代行者を主担当に上げると代行者が0人になる(版1.13.0) | `path`(`assignId`/`userId`) |
 
 サーバーは違反を **全て列挙して返す**(最初の1件で止めない)。クライアントも同じrule名で事前検証し、同じ辞書キー `rule.<RULE>` で表示する(§9)。
 
@@ -1258,7 +1271,79 @@ params:
 **adminValidateRoster** `{}` → `{ "problems":[ {"level":"error|warn","code","siteId":"…|null","userId":"…|null","message":"日本語"} ] }`
 `code`: `SITE_NO_QA_MAIN`(error)/`SITE_MULTI_QA_MAIN`(error)/`SITE_NO_QA_SUB`(error)/`QA_MAIN_EQ_SUB`(error)/`ROLE_MISMATCH`(error:役割と担当の不整合=兼任)/`QA_NOT_QUALIFIED`(error)/`DUPLICATE_ASSIGNMENT`(warn)/`QA_OVERLOAD`(warn。`qaMaxSitesPerDay` 超過)/`SITE_NO_FLOORS`(error)。
 
-### 5.5 エンドポイント早見表(43 action)
+#### 5.4.8 現場・担当・人の管理(責任者。版1.13.0。ユーザー決定 2026-11-10。REQUIREMENTS §21。規則のまとめは §6.10)
+
+共通:
+- **責任者のみ**(他の役割は `FORBIDDEN_ROLE`)。**オンライン専用**(outbox に積まない。§8.11.2 の B/C)。
+- 書き込み(★)は `clientId` で冪等(§5.2)。スクリプトロック内で対象シートを読み直してから検査・書き込みする。`Sites` はキャッシュを使わず読み直し(§2.15 の3と同じ扱い)、書き込み後に参照キャッシュを破棄する(§2.15 の4。次の `getBootstrap` から即反映)。
+- 応答・Events.detail・Idem に **`joinKey` と招待コード平文を含めない**(§0.5)。
+- 文字列は前後の空白を除いてから検査・保存する。入力不備は `VALIDATION_FAILED` で **全て列挙**(§5.3.1)。
+- 入力の規則(作成・編集で共通。違反は `FIELD_INVALID`、`path` にキー名):
+  - `name`: 1〜40文字。
+  - `floors`: 配列 1〜60要素。各要素 1〜10文字・`,` を含まない・重複なし。並び順=表示順(S05 の選択肢の順)。シートにはカンマ区切りで保存。
+  - `zones`: 配列 0〜20要素。各要素の規則は `floors` と同じ。
+  - `primeContractor`: 0〜40文字。`address`: 0〜100文字。
+  - `startDate`/`endDate`: `date`(`YYYY-MM-DD`)または空文字(空=なし)。両方あれば `startDate<=endDate`(違反は `path:"endDate"`)。
+
+**adminGetSite**(参照) `{ "siteId" }` → `{ "site":<AdminSite>, "usedFloors":["1F"], "usedZones":["東"], "recordCounts":{"draft":0,"submitted":0,"fix":0,"qa_ok":0,"approved":0}, "assignments":[<Assignment>] }`
+- `usedFloors`/`usedZones`: その現場の Records(status・段階を問わない全行)に出てくる `floor`/`zone` の値(空の `zone` は除く)。並びは `site.floors`(`zones`)の順、そこに無い値(シート直接編集の名残)は後ろに文字コード順。
+- `recordCounts`: その現場の Records の status ごとの件数(5つのキーを必ず返す)。
+- `assignments`: その現場の Assignments の全行(`active=FALSE` を含む。形と並びは `listAssignments` と同じ)。
+- エラー: `NOT_FOUND`。
+
+**adminCreateSite** ★ `{ "name", "floors":["1F",…], "zones"?:[…], "primeContractor"?, "address"?, "startDate"?, "endDate"?, "qaMainUserId", "qaSubUserIds":["u_…"] }` → `{ "site":<AdminSite>, "assignments":[<Assignment>] }`
+- `siteId`=`s_`+12桁(§0.3)、`status=active`、`joinKey`=新しい16桁英数(`adminRotateJoinKey` と同じ作り方)、`driveFolderId` は空(最初の写真で自動作成。§7.4)、`createdAt`/`updatedAt`=今。
+- 同じ現場名がある → `SITE_NAME_DUPLICATE`。
+- 担当を同時に作る: `qaMainUserId` を `qa_main`、`qaSubUserIds`(1人以上・重複なし。空は `FIELD_INVALID` `path:"qaSubUserIds"`)を `qa_sub` として Assignments に追加(`team` 空、`validFrom`=今日、`validTo` 空、`active=TRUE`、`createdBy`=実行者)。役割整合(§2.3: `qa_main`=`qa`+資格、`qa_sub`=`qa` または `lead`+資格)に合わない・`disabled`・存在しない → `ASSIGN_ROLE_MISMATCH`。主担当が代行者にも入っている → `QA_MAIN_EQ_SUB`。
+- 職長は作成時には入れない(QR の参加申請、または `adminAddAssignment`)。
+- Events `site_created`(`siteId`、`detail={name,floors,zones,assignIds}`)。
+
+**adminUpdateSite** ★ `{ "siteId", "name"?, "floors"?, "zones"?, "primeContractor"?, "address"?, "startDate"?, "endDate"? }` → `{ "site":<AdminSite> }`
+- **送ったキーだけ**変える。`floors`/`zones` は「新しい並び全体」を送る。
+- 階・工区の規則(ユーザー決定): 足す・並べ替えるのは自由。今の値のうち新しい並びに無いもの(=外すもの)が `usedFloors`/`usedZones` に入っていれば `FLOOR_IN_USE`/`ZONE_IN_USE`(値ごとに1件、`value` にその値)。使われていない値は外してよい。**使われている値の名前の変更は、外すことになるので同じく拒否**。
+- `name` を変えるとき、他の現場と同じ名前 → `SITE_NAME_DUPLICATE`(自分自身は除く)。
+- 閉鎖中の現場も編集できる(`status` は変えない。`status` はこの action のキーではない=送ると `BAD_REQUEST`)。
+- 何も変わらないときも成功(Events は残さない・`updatedAt` も変えない)。変わったら `updatedAt` を更新し、Events `site_updated`(`detail={changed:{キー:{from,to}}}`)。
+- エラー: `NOT_FOUND` / `VALIDATION_FAILED`。
+
+**adminCloseSite** ★ `{ "siteId", "acceptQaOk"?:false }` → `{ "site":<AdminSite>, "endedAssignments":3, "rejectedJoins":0 }`
+- 既に `closed` → `STATE_CONFLICT`(`{status:"closed"}`)。
+- ロック内で記録を数える: `draft`/`submitted`/`fix` が1件以上 → `SITE_HAS_OPEN_RECORDS`(`{draft,submitted,fix}`)。次に `qa_ok` が1件以上で `acceptQaOk` が `true` でない → `CLOSE_CONFIRM_REQUIRED`(`{qaOk}`)。
+- 通れば同じロック内で: ①`Sites.status=closed`、`updatedAt` 更新(`endDate` は変えない。入れるときは編集で) ②その現場の `active=TRUE` の Assignments を全て `active=FALSE`(`validTo` は変えない。期間外の行も含めて無効にする) ③`pending` の Memberships を `rejected`(`decidedBy`=実行者、`decidedAt`=今、`note`=`現場閉鎖`) ④Events `site_closed`(`detail={assignIds:[無効にした assignId],membershipIds:[却下した membershipId],qaOk:件数}`。**再開はこの `assignIds` を使う**)。
+- 記録・写真・PDF・Drive は変えない。閉鎖中は既存の規則で新しい記録・参加申請ができない(`SITE_CLOSED`。§4.1)。
+- エラー: `NOT_FOUND` / `STATE_CONFLICT` / `SITE_HAS_OPEN_RECORDS` / `CLOSE_CONFIRM_REQUIRED`。
+
+**adminReopenSite** ★ `{ "siteId" }` → `{ "site":<AdminSite>, "restoredAssignments":3 }`
+- 既に `active` → `STATE_CONFLICT`(`{status:"active"}`)。
+- `Sites.status=active`、`updatedAt` 更新。その現場の **最も新しい `site_closed` イベント**(`at` が最新)の `detail.assignIds` のうち、今 `active=FALSE` の行を `active=TRUE` に戻す(`updatedAt` 更新。`validTo` は変えない=期間が過ぎた行は戻しても有効にならない。役割整合も従来どおり判定のときに見る)。閉鎖のときに却下した参加申請は戻さない(職長はQRから申請し直す)。
+- `site_closed` イベントが無い(シートで直接 `closed` にした等)→ 担当は戻さず `status` だけ戻す(`restoredAssignments:0`)。
+- Events `site_reopened`(`detail={assignIds:[戻した assignId]}`)。
+- 再開後に主担当・代行者が足りないときは、名簿チェック(`adminValidateRoster`)に出る(画面で案内。§9.2d)。
+- エラー: `NOT_FOUND` / `STATE_CONFLICT`。
+
+**adminAddAssignment** ★ `{ "siteId", "userId", "assignRole":"qa_main|qa_sub|foreman|subforeman", "team"?:"1〜20文字" }` → `{ "assignment":<Assignment>, "ended":[<Assignment>] }`
+- 閉鎖中の現場 → `SITE_CLOSED`。現場が無い → `NOT_FOUND`。
+- `foreman`/`subforeman` は `team` 必須(1〜20文字。`decideJoin` と同じ)。`qa_main`/`qa_sub` は `team` を送らないか空(違反は `FIELD_INVALID` `path:"team"`)。
+- 役割整合(§2.3)に合わない・`disabled`・存在しない → `ASSIGN_ROLE_MISMATCH`。その人が同じ現場に有効な担当(役を問わない)を既に持つ → `ASSIGN_DUPLICATE`(次の「主担当の交代」の例外を除く)。
+- **主担当の交代**: `qa_main` を足すと、その現場の今の有効な `qa_main` は `active=FALSE` になる(主担当を1人に保つ)。足す人がその現場の有効な `qa_sub` なら、その `qa_sub` も `active=FALSE` にする(主担当と代行者を兼ねない。`ASSIGN_DUPLICATE` にしない)。その結果、有効な `qa_sub` が0人になるなら `LAST_QA_SUB`(何も書かない。先に別の代行者を足す)。無効にした行は `ended` に返す。前の主担当を代行者に回すときは、続けて `qa_sub` で追加する。
+- 追加する行: `validFrom`=今日、`validTo` 空、`active=TRUE`、`createdBy`=実行者。**Memberships は作らない**(直接の割り当て)。
+- Events `assignment_added`(`detail={assignId,userId,assignRole,team,ended:[assignId]}`)。
+
+**adminEndAssignment** ★ `{ "assignId" }` → `{ "assignment":<Assignment>, "membership":<Membership|null> }`
+- 行が無い → `NOT_FOUND`。既に `active=FALSE` → `STATE_CONFLICT`(`error.data` 無し)。
+- その行が現場で最後の有効な `qa_main` → `LAST_QA_MAIN`、最後の有効な `qa_sub` → `LAST_QA_SUB`。
+- `active=FALSE`、`updatedAt` 更新(`validTo` は変えない)。`foreman`/`subforeman` の行で、同じ(siteId,userId)に `approved` の Membership があれば `revoked`(`decidedBy`=実行者、`decidedAt`=今、`note`=`責任者が担当を終了`)にして `membership` に返す(**その職長がQRから申請し直せるように**。`requestJoin` の `ALREADY_MEMBER` を避ける)。
+- Events `assignment_ended`(`detail={assignId,userId,assignRole,membershipId|null}`)。
+
+**adminCreateUser** ★ `{ "name":"1〜20文字", "nameKana"?:"0〜40文字", "role":"foreman|qa", "company"?:"0〜40文字", "lang":"ja|id", "qaQualified":false, "email"?:"0〜100文字" }` → `{ "user":<adminListUsers の1行と同じ形。devices は []> }`
+- `userId`=`u_`+12桁、`status=invited`、`failedCount=0`、`pinSalt`/`pinHash`/`lockedAt`/`lastLoginAt` は空、`createdAt`/`updatedAt`=今。
+- `role=lead` はアプリでは作らない(`FIELD_INVALID` `path:"role"`。責任者の追加は従来どおり §3.6.1)。`role=foreman` で `qaQualified=true` → `FIELD_INVALID`(`path:"qaQualified"`)。
+- 同じ氏名の人がいても作れる(§2.1。画面で注意を出す。§9.2d)。
+- Events `user_created`(`detail={userId,name,role,company,lang,qaQualified}`)。
+- **招待コードは返さない**。画面が続けて `adminIssueInvite`(`purpose=first`)を呼び、M8 で1回だけ見せる(コード平文を Idem に残さないため。§0.5)。
+
+
+### 5.5 エンドポイント早見表(51 action。版1.13.0 で8つ追加)
 
 公開: `ping` `lookupInvite` `registerDevice`
 セッション: `me` `setLang` `changePin` `logoutDevice` `getBootstrap`
@@ -1267,9 +1352,9 @@ params:
 PDF: `generateReport` `listReports`
 参加: `requestJoin` `listJoinRequests` `decideJoin` `revokeMembership`
 名簿: `listAssignments` `listAbsences`
-管理: `adminListUsers` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster`
+管理: `adminListUsers` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` `adminGetSite` `adminCreateSite` `adminUpdateSite` `adminCloseSite` `adminReopenSite` `adminAddAssignment` `adminEndAssignment` `adminCreateUser`
 
-**★(clientId必須)**: `changePin` `createRecord` `saveDraft` `submitRecord` `claimReview` `releaseClaim` `takeoverReview` `saveQaDraft` `submitVerdict` `recordPrimeSign` `stopPour` `addNote` `deletePhoto` `generateReport` `requestJoin` `decideJoin` `revokeMembership` `adminSetAbsence` `adminRotateJoinKey`
+**★(clientId必須)**: `changePin` `createRecord` `saveDraft` `submitRecord` `claimReview` `releaseClaim` `takeoverReview` `saveQaDraft` `submitVerdict` `recordPrimeSign` `stopPour` `addNote` `deletePhoto` `generateReport` `requestJoin` `decideJoin` `revokeMembership` `adminSetAbsence` `adminRotateJoinKey` `adminCreateSite` `adminUpdateSite` `adminCloseSite` `adminReopenSite` `adminAddAssignment` `adminEndAssignment` `adminCreateUser`
 **PIN必須**: `submitRecord` `submitVerdict`(okのみ) `recordPrimeSign` + `changePin`(現PIN)
 
 ---
@@ -1435,6 +1520,28 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 **6. 対象外(保留)**: 責任者がスマホで現場・人・担当・検査項目・設定を管理する機能(REQUIREMENTS §20 の保留。第2・第3段階)、他社に使わせる方式。
 
 ---
+
+### 6.10 責任者のスマホでの現場管理(版1.13.0。ユーザー決定 2026-11-10。REQUIREMENTS §21)
+- **誰が**: 責任者だけ(§4.1)。API は §5.4.8、画面は §9.2d。
+- **現場の状態**: `active`(稼働中)⇄ `closed`(閉鎖)。**削除はしない**(従来どおり)。
+
+| | 閉鎖(`adminCloseSite`) | 再開(`adminReopenSite`) |
+|---|---|---|
+| できる条件 | 入力中・確認待ち・是正中の記録が0件。元請待ちの記録は件数を見せて確認すれば可 | いつでも(閉鎖中なら) |
+| `Sites.status` | `closed` | `active` |
+| 担当(Assignments) | 有効な行を全て無効(`active=FALSE`) | **その閉鎖で無効にした行だけ**戻す(`site_closed` の `detail.assignIds`) |
+| 参加申請(申請中) | 却下(`note`=現場閉鎖) | 戻さない(QRから申請し直す) |
+| 記録・写真・PDF・Drive | 変えない | 変えない |
+| 新しい記録・参加申請 | できない(`SITE_CLOSED`) | できる |
+
+- **閉鎖中の見え方**: 担当が無効になるので、管理者・職長の画面からその現場と記録が消える(従来の手順 docs/OPERATIONS.md §7-2 と同じ)。責任者は全現場が見える(`closed` の印)。
+- **閉鎖後の元請待ちの記録**: 元請サインの記録(`recordPrimeSign`)・PDF作成(`generateReport`)は、担当QAが無効になるため **責任者だけ**ができる(`canApprove` は責任者に常に真。§4.2)。状態の規則は変えない。
+- **作成**: 主担当(必須)と代行者(1人以上)を同時に決める(§2.3 の名簿制約を作成の時点で満たす)。職長は QR の参加申請(従来どおり)か、責任者の直接の割り当て。
+- **階・工区**: 足す・並べ替えるのは自由。外すのは記録で使われていない値だけ。使われている値の名前は変えられない(記録の `floor`/`zone` は文字列で持つので、名前を変えると記録の場所がずれるため)。
+- **担当**: 追加と終了だけ(行は消さない。`active=FALSE`)。主担当の交代=新しい主担当の追加(前の主担当は自動で外れる)。主担当・最後の代行者は終了できない。職長の班の変更=終了→追加。職長の担当を終了すると、その参加(Membership)も取り消し、QR から申請し直せる。
+- **新しい人**: 職長か管理者を `invited` で作り、続けて招待コード(`first`)を発行する。役割は登録のときに責任者が決め、本人は選べない。登録後の役割の変更・氏名の修正はアプリでは行わない(保留。シートまたは Claude に依頼)。
+- **変えないもの**: 状態・遷移(§6.2)、PIN の要る操作、兼任なし(役割整合 §2.3)、QR 参加申請と主担当の承認(`decideJoin`)、`adminValidateRoster` の検査内容。
+
 
 ## 7. 写真
 
@@ -1635,7 +1742,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 4. 待つ操作(PIN・先着・状態の取り合い・参加・端末登録・ログイン)は **先出ししない**。サーバーが拒否したら従来どおりエラーを表示し、画面は進まない。
 5. 認可はサーバーで検査する(先出しでも変わらない)。先出しは見た目だけで、サーバーが拒否すれば §8.11.4 の失敗の扱いになる。
 
-#### 8.11.2 操作の分類(正本。全43 actionを1回ずつ載せる。U-CLASS-01 が検査する)
+#### 8.11.2 操作の分類(正本。全51 actionを1回ずつ載せる。U-CLASS-01 が検査する。版1.13.0 で8つ追加)
 
 | 分類 | action | 画面の動き | 理由 |
 |---|---|---|---|
@@ -1647,8 +1754,8 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | B 待つ(PIN) | `submitRecord` `submitVerdict` `recordPrimeSign` `changePin` | PIN入力→『送信中…』を出して応答を待つ。成功したら応答の `record` で次の画面を描く。`submitVerdict` の `minor`/`major` はPINなしで確認ダイアログのあと、同じく待つ | 確定・電子サインの代わり。PIN誤り・ロックはその場で見せる |
 | B 待つ(先着・状態) | `claimReview` `releaseClaim` `takeoverReview` `stopPour` `createRecord` | 『送信中…』を出して応答を待つ。拒否(`ALREADY_CLAIMED` `STATE_CONFLICT` `RECORD_LOCKED` `ALREADY_EXISTS` 等)はそのまま表示 | 先着・状態の取り合い・停止の確定。`createRecord` は同じ場所の記録の先着(P-47)。圏外の `stopPour`・`createRecord` だけは従来どおりキューに積む(§8.1) |
 | B 待つ(参加・端末・ログイン) | `lookupInvite` `registerDevice` `logoutDevice` `requestJoin` `decideJoin` `revokeMembership` | 同上 | 認証・参加の確定 |
-| B 待つ(管理・出力) | `generateReport` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` | 同上(`generateReport` は最大120秒) | 責任者の管理操作・PDF。結果が画面の内容そのもの |
-| C 参照 | `ping` `me` `getBootstrap` `listRecords` `getRecord` `getPhotoThumbs` `getPhoto` `listReports` `listJoinRequests` `listAssignments` `listAbsences` `adminListUsers` | 先出しの対象外(書き込みではない)。キャッシュで先に描く規則は §8.11.9 | — |
+| B 待つ(管理・出力) | `generateReport` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` `adminCreateSite` `adminUpdateSite` `adminCloseSite` `adminReopenSite` `adminAddAssignment` `adminEndAssignment` `adminCreateUser` | 同上(`generateReport` は最大120秒) | 責任者の管理操作・PDF。結果が画面の内容そのもの |
+| C 参照 | `ping` `me` `getBootstrap` `listRecords` `getRecord` `getPhotoThumbs` `getPhoto` `listReports` `listJoinRequests` `listAssignments` `listAbsences` `adminListUsers` `adminGetSite` | 先出しの対象外(書き込みではない)。キャッシュで先に描く規則は §8.11.9 | — |
 
 - 分類の追加・変更は、本表を先に直す(実装が表と食い違うときは実装の誤り)。A に入れる条件は §8.11.1 の1。
 
@@ -1762,7 +1869,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人。②③④の各行に段階名)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド(**版1.9: 1つの階のセルに段階ごとのチップを並べる**。段階名つきで `打設前 確認待ち` / `出来形 未着手` のように出す。段階内の代表ステータスは S04 と同じ規則)。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
 | S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット・段階、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「図面を追加」・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示(**版1.11.1: 管理者が許容超の値に OK を付けた項目はコメントが必須**。§9.2b)。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信(`major` の確認文は、出来形では「打設」の語を含まない `scr.S10.confirm_major@post_demold`)。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
 | S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・段階・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
-| S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17 |
+| S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17。**版1.13.0: 責任者には案内の代わりに「現場の管理」(→S22)を出す。QAには「担当表の変更は責任者が行います」**(§9.2d) |
 | S13 | `#/join?site=&k=&n=` | 職長 | `requestJoin` | 「『{n}』に参加申請しますか」。承認後に有効になる旨 | 「申請する」→`requestJoin`→「承認待ち」表示。未登録端末は `pendingJoin` を保存しS01→登録後ここへ戻る。アプリ内読み取り(`BarcodeDetector`対応端末)と、URL/合言葉の貼り付け入力の両方を用意。標準カメラでQRを読んでURLを開く方法も案内(P-27) |
 | S14 | `#/joins` | QA・責任者 | `listJoinRequests`,`decideJoin`,`revokeMembership` | 全申請(状態別)。承認済みの取消(理由必須) | S09の参加申請から「すべて見る」で遷移 |
 | S16 | `#/admin/users` | 責任者 | `adminListUsers`,`adminIssueInvite`,`adminUnlockUser`,`adminSetUserStatus`,`adminRevokeDevice` | ユーザー一覧(役割・状態チップ・`locked`を強調・最終ログイン)。ユーザーごとに端末一覧 | 「招待コードを発行」(`first`/`pinReset`)→M8(コード・期限を1回だけ表示、再表示不可)。「ロック解除」。「無効化/有効化」。端末の「登録解除」(確認ダイアログ) |
@@ -1847,6 +1954,22 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 - 読み替えは画面側の表示だけ(API・列名は変えない)。`ev.*`(履歴)は語を変えない代わりに、`ev.submitted` の ja を「職長が提出」から **「提出」**(id `Dikirim`)へ、`ev.verdict_ok` の ja を「品質管理者が合格」から **「合格」**(id `Diluluskan`)へ変える(実行者の氏名は履歴の行に別に出ているため。全ての記録で同じ語)。
 - コメントの種類 `note.foreman`/`note.manager` の表示も、`ownerRole` が `qa`/`lead` の記録では `lbl.first_res`/`lbl.approver_res` を使う。
 
+### 9.2d 責任者の現場管理(版1.13.0。§6.10。上の表(§9.2)と食い違うときは本節が優先)
+入口: 管理メニュー(S19 の「管理」。今の S16/S17/S18/S14/S12 の並び)の先頭に「現場の管理」(`scr.S22.title`)を足す。S12 の責任者向けの案内からも開く。全て責任者だけ(他の役割がルートを開いたらホームへ戻す。権限はサーバーが判定する)。**オンライン専用**: 圏外では保存ボタンを押せない(`err.network` を出す。outbox に積まない)。
+
+| ID | ルート | 使うaction | 表示 | 操作・制御 |
+|---|---|---|---|---|
+| S22 | `#/admin/sites` | `getBootstrap`(現場一覧。責任者は全現場) | 「稼働中」「閉鎖済み」の2つの見出しで現場を並べる。各行=現場名・状態チップ・主担当(`site.qa.main`)・階の数 | 「新しい現場」(→S23 新規)。行→S23。0件は `scr.S22.empty` |
+| S23 | `#/admin/site/new`(新規)・`#/admin/site/:siteId`(編集) | `adminGetSite`,`adminCreateSite`,`adminUpdateSite`,`adminCloseSite`,`adminReopenSite`,`adminAddAssignment`,`adminEndAssignment`,`adminListUsers`,`adminValidateRoster` | ①基本: 現場名・元請・住所・開始日・終了日 ②階: 1行ずつ(上へ/下へ/外す)と「階を足す」。`usedFloors` の行は「使用中」と出し「外す」を押せない ③工区: 階と同じ ④(新規のみ)主担当(必須。`role=qa`・資格あり・`disabled` 以外から選ぶ)と代行者(1人以上。`role∈{qa,lead}`・資格あり。主担当に選んだ人は出さない) ⑤(編集のみ)担当: 有効な担当を役ごとに(主担当・代行者・職長(班)・副職長(班))、各行に「終了」。「担当を追加」(人・役・班名。役の選択肢はその人の役割に合うものだけ。`qa_main` を選ぶと「今の主担当({name})は外れます」を出す) ⑥(編集のみ)記録の件数(`recordCounts`。状態チップの語)、「参加用QRを開く」(→S18)、「閉鎖する」または「再開する」 | 「保存する」→新規は `adminCreateSite`(成功で S23 編集へ置き換え、`scr.S23.created`)、編集は変わったキーだけ `adminUpdateSite`。`VALIDATION_FAILED` は欄ごとに `rule.<RULE>`(`value` があれば並べて出す)。**閉鎖**: M7 で `scr.S23.close_confirm` → `adminCloseSite`。`SITE_HAS_OPEN_RECORDS` なら `scr.S23.close_blocked`(件数)を出して止める。`CLOSE_CONFIRM_REQUIRED` なら M7 で `scr.S23.close_qaok`(件数)→ はいで `acceptQaOk:true` で送り直す。**再開**: M7 で `scr.S23.reopen_confirm` → `adminReopenSite` → `scr.S23.reopened`(件数)。保存・追加・終了・閉鎖・再開のあとは `adminGetSite` で描き直し、`adminValidateRoster` にこの現場の `error` があれば上部に `scr.S23.roster_warn` と内容を出す |
+| S16(追加) | `#/admin/users` | `adminCreateUser`,`adminIssueInvite` | 一覧の上に「新しい人を登録」(`scr.S16.new_user`)。押すと M11 | M11 で登録 → 続けて `adminIssueInvite(first)` → M8 でコードを1回だけ表示 → 一覧を読み直す。招待コードの発行だけ失敗したら `scr.S16.invite_after_fail`(一覧の「招待コードを発行」から発行し直す) |
+
+モーダル(追加):
+
+| ID | 内容 |
+|---|---|
+| M11 | 新しい人の登録(版1.13.0)。氏名(必須・20文字まで)、ふりがな(任意)、役割(職長/品質管理者の2択。初期値なし=必ず選ぶ)、会社名(任意。職長は端末登録のときに入力・修正できる旨の注記)、言語(日本語/インドネシア語)、代行資格(役割が品質管理者のときだけ出すチェック)。同じ氏名の人が一覧にいれば `scr.S16.same_name` を出す(登録は止めない)。「登録して招待コードを発行」で送信中表示(§8.11.8) |
+
+
 ### 9.3 画面ごとの空状態・エラー表示
 - 一覧が空: `scr.<ID>.empty` の文言。通信エラー: 画面上部にバナー(`err.network`)+キャッシュ表示。サーバーエラー: `err.<CODE>`(§5.3の全コードに辞書キー必須)。`VALIDATION_FAILED` は `rule.<RULE>` を該当項目の下に表示。
 - 読み込み中はスケルトンまたはスピナー。操作ボタンは二重押下防止(送信中は無効)。 **待つ操作の進行中表示(『送信中…』と8秒後の `msg.slow_wait`)は §8.11.8**。
@@ -1890,6 +2013,88 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | `scr.S09.major`(重大不適合・打設停止中) | 重大不適合 | Ketidaksesuaian berat |
 
 - 版1.9 で足す通常のキー: `scr.S05.stage_hint_post_demold`=「出来形検査は、脱型・解体のあとに行う検査です。打設予定日時は要りません」/ id「Pemeriksaan hasil pekerjaan dilakukan setelah bongkar bekisting. Rencana waktu pengecoran tidak diperlukan」。段階名の表示は既存の `stage.*`、ステータスは `st.*`、`lbl.stage` を使う(段階とステータスを並べる表示は `t('stage.x')` と `t('st.y')` をつなげて作る)。
+- **版1.13.0 で足すキー**(ja/id の両方。インドネシア語は暫定訳 P-22。`@` を含まない通常のキー。§9.2d。`err.*`・`rule.*`・`ev.*` は §5.3・§5.3.1・§2.11 の追加分。`rule.*` にプレースホルダは入れない(`value` は画面が後ろに並べる)):
+
+| キー | ja | id(暫定) |
+|---|---|---|
+| `err.SITE_HAS_OPEN_RECORDS` | 入力中・確認待ち・是正中の記録が残っているため閉鎖できません | Tidak dapat ditutup karena masih ada catatan yang belum selesai |
+| `err.CLOSE_CONFIRM_REQUIRED` | 元請待ちの記録があります。確認してから閉鎖してください | Ada catatan menunggu kontraktor. Konfirmasi dulu sebelum menutup |
+| `rule.FLOOR_IN_USE` | 記録で使われている階は外せません | Lantai yang dipakai catatan tidak bisa dihapus |
+| `rule.ZONE_IN_USE` | 記録で使われている工区は外せません | Zona yang dipakai catatan tidak bisa dihapus |
+| `rule.SITE_NAME_DUPLICATE` | 同じ名前の現場があります | Sudah ada lokasi dengan nama yang sama |
+| `rule.ASSIGN_ROLE_MISMATCH` | この人はこの担当になれません(役割・代行資格を確認してください) | Orang ini tidak bisa diberi tugas ini (periksa peran/kualifikasi) |
+| `rule.ASSIGN_DUPLICATE` | この人はすでにこの現場の担当です(班を変えるときは、終了してから追加) | Orang ini sudah ditugaskan di lokasi ini (untuk ganti regu, akhiri lalu tambah) |
+| `rule.QA_MAIN_EQ_SUB` | 主担当と代行者は別の人にしてください | Pengawas utama dan pengganti harus orang berbeda |
+| `rule.LAST_QA_MAIN` | 主担当は終了できません。交代するときは新しい主担当を追加してください | Pengawas utama tidak bisa diakhiri. Untuk ganti, tambahkan pengawas utama baru |
+| `rule.LAST_QA_SUB` | 代行者が0人になります。先に別の代行者を追加してください | Pengganti akan menjadi 0. Tambahkan pengganti lain dulu |
+| `ev.site_created` | 現場を作成 | Lokasi dibuat |
+| `ev.site_updated` | 現場を変更 | Lokasi diubah |
+| `ev.site_closed` | 現場を閉鎖 | Lokasi ditutup |
+| `ev.site_reopened` | 現場を再開 | Lokasi dibuka kembali |
+| `ev.assignment_added` | 担当を追加 | Penugasan ditambah |
+| `ev.assignment_ended` | 担当を終了 | Penugasan diakhiri |
+| `ev.user_created` | 人を登録 | Pengguna didaftarkan |
+| `scr.S22.title` | 現場の管理 | Kelola lokasi |
+| `scr.S22.new` | 新しい現場 | Lokasi baru |
+| `scr.S22.active` | 稼働中 | Aktif |
+| `scr.S22.closed` | 閉鎖済み | Ditutup |
+| `scr.S22.empty` | 現場がありません | Belum ada lokasi |
+| `scr.S22.floor_count` | 階 {n} | Lantai {n} |
+| `scr.S23.title_new` | 新しい現場 | Lokasi baru |
+| `scr.S23.title_edit` | 現場の編集 | Ubah lokasi |
+| `scr.S23.name` | 現場名 | Nama lokasi |
+| `scr.S23.prime` | 元請 | Kontraktor utama |
+| `scr.S23.address` | 住所 | Alamat |
+| `scr.S23.start` | 開始日 | Tanggal mulai |
+| `scr.S23.end` | 終了日 | Tanggal selesai |
+| `scr.S23.floors` | 階 | Lantai |
+| `scr.S23.zones` | 工区 | Zona |
+| `scr.S23.add_floor` | 階を足す | Tambah lantai |
+| `scr.S23.add_zone` | 工区を足す | Tambah zona |
+| `scr.S23.up` | 上へ | Naik |
+| `scr.S23.down` | 下へ | Turun |
+| `scr.S23.remove` | 外す | Hapus |
+| `scr.S23.in_use` | 使用中 | Dipakai |
+| `scr.S23.qa_main` | 主担当の管理者(必須) | Pengawas utama (wajib) |
+| `scr.S23.qa_sub` | 代行者(1人以上) | Pengganti (minimal 1) |
+| `scr.S23.save` | 保存する | Simpan |
+| `scr.S23.created` | 現場を作りました | Lokasi dibuat |
+| `scr.S23.saved` | 保存しました | Tersimpan |
+| `scr.S23.assign` | 担当 | Penugasan |
+| `scr.S23.assign_add` | 担当を追加 | Tambah penugasan |
+| `scr.S23.person` | 人 | Orang |
+| `scr.S23.assign_role` | 役 | Tugas |
+| `scr.S23.team` | 班名 | Nama regu |
+| `scr.S23.assign_end` | 終了 | Akhiri |
+| `scr.S23.assign_end_confirm` | {name}さんの担当({role})を終了します。よろしいですか | Akhiri penugasan {name} ({role})? |
+| `scr.S23.qa_main_swap` | 今の主担当({name})は主担当から外れます | Pengawas utama saat ini ({name}) akan dilepas |
+| `scr.S23.counts` | 記録の件数 | Jumlah catatan |
+| `scr.S23.qr` | 参加用QRを開く | Buka QR bergabung |
+| `scr.S23.close` | この現場を閉鎖する | Tutup lokasi ini |
+| `scr.S23.close_confirm` | 閉鎖すると、新しい記録と参加申請ができなくなり、担当は無効になります(記録・写真・PDFは残ります)。閉鎖しますか | Jika ditutup, catatan baru dan permintaan bergabung tidak bisa dibuat, dan penugasan dinonaktifkan (catatan, foto, PDF tetap ada). Tutup? |
+| `scr.S23.close_qaok` | 元請待ちの記録が{n}件あります。閉鎖後は、元請サインの記録とPDF作成は責任者だけができます。閉鎖しますか | Ada {n} catatan menunggu kontraktor. Setelah ditutup, hanya penanggung jawab yang bisa mencatat tanda tangan kontraktor dan membuat PDF. Tutup? |
+| `scr.S23.close_blocked` | 入力中{draft}件・確認待ち{submitted}件・是正中{fix}件の記録があるため閉鎖できません | Tidak bisa ditutup: draf {draft}, menunggu {submitted}, perbaikan {fix} |
+| `scr.S23.closed_done` | 閉鎖しました | Lokasi ditutup |
+| `scr.S23.reopen` | この現場を再開する | Buka kembali lokasi ini |
+| `scr.S23.reopen_confirm` | 再開すると、閉鎖のときに無効にした担当が戻ります。再開しますか | Jika dibuka kembali, penugasan yang dinonaktifkan saat penutupan akan dipulihkan. Buka kembali? |
+| `scr.S23.reopened` | 再開しました(担当{n}件を戻しました) | Dibuka kembali ({n} penugasan dipulihkan) |
+| `scr.S23.roster_warn` | 名簿チェックで問題があります | Ada masalah pada pemeriksaan daftar |
+| `scr.S12.lead_edit` | 現場の管理 | Kelola lokasi |
+| `scr.S12.qa_note` | 担当表の変更は責任者が行います | Perubahan penugasan dilakukan oleh penanggung jawab |
+| `scr.S16.new_user` | 新しい人を登録 | Daftarkan orang baru |
+| `scr.S16.name` | 氏名 | Nama |
+| `scr.S16.kana` | ふりがな(任意) | Cara baca nama (opsional) |
+| `scr.S16.role` | 役割 | Peran |
+| `scr.S16.company` | 会社名(任意) | Nama perusahaan (opsional) |
+| `scr.S16.company_note` | 職長は端末登録のときに会社名を入力・修正できます | Mandor dapat mengisi/mengubah nama perusahaan saat mendaftarkan perangkat |
+| `scr.S16.lang` | 言語 | Bahasa |
+| `scr.S16.qa_qualified` | 代行者になれる(資格あり) | Dapat menjadi pengganti (berkualifikasi) |
+| `scr.S16.create` | 登録して招待コードを発行 | Daftarkan dan terbitkan kode undangan |
+| `scr.S16.same_name` | 同じ氏名の人がいます。別の人なら、ふりがなや会社名で区別してください | Ada orang dengan nama sama. Jika orang berbeda, bedakan dengan cara baca atau perusahaan |
+| `scr.S16.invite_after_fail` | 登録しました。招待コードの発行に失敗したので、一覧の「招待コードを発行」から発行してください | Terdaftar. Kode undangan gagal diterbitkan, terbitkan dari daftar |
+
+  `scr.S12.edit_note`(担当表の編集はスプレッドシートで行います)は使わなくなるが辞書には残す。
+
 - **版1.12.0 で足すキー**(ja/id の両方。インドネシア語は暫定訳 P-22。`@` を含まない通常のキー。§9.2c の「語の読み替え」の8キーもこの版で足す):
 
 | キー | ja | id(暫定) |
@@ -2247,7 +2452,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - 遅延注入 `--latency N`(各リクエストの先頭でNミリ秒待つ)。
 
 ### 11.3 ロジック(§1.6のdispatcher順を同一に実装)
-- 全43 actionを実装し、権限(§4。`authorize` と同名関数)・検証(§5.3.1)・状態遷移(§6)・エラーコード/`error.data`(§5.3)を本書通りに返す。
+- 全51 action(版1.13.0。以前は43)を実装し、権限(§4。`authorize` と同名関数)・検証(§5.3.1)・状態遷移(§6)・エラーコード/`error.data`(§5.3)を本書通りに返す。
 - **段階(版1.9。§6.8)**: `createRecord` は `enabledStages` に無い値・その段階の有効項目0件で `STAGE_NOT_ENABLED`、`pourPlannedAt` は `pre_pour` のみ保存。`stopPour` と `allowedActions` の `stopPour` は `stage=pre_pour` のみ(出来形は `STATE_CONFLICT`)。`computeTiming` は `post_demold` で全て `null`/`false`(`warnings` なし)。エスカレーションは段階を見ない。メール件名は出来形のとき末尾に ` 出来形`。PDFは段階名・ステータス表示名・打設予定日時の有無が §10 のとおり。
 - **ロック**: 更新系は1本のFIFOミューテックスで直列化し、「冪等キー確認→authorize→PIN→更新→Events→Idem保存」を原子的に行う(同時claimで先着のみ成功する)。`--latency` は直列化の前に適用する(並行到着を再現)。**例外 `uploadPhotoChunk`(版1.4)**: 認証・検証・仮想Drive保存はミューテックスの **外**、再認証〜既存行確認〜上限確認〜Photos追記〜touchだけをミューテックスの **内** で行い(§5.4.4)、ミューテックスの前後で必ずイベントループに制御を返す(`await`)こと(別リクエストが間に割り込める。`/__mock/interleave` もこの境界で適用する)。仮想Driveに作ったファイルは、ロック内で `Photos` 行にならなかった場合に削除(ゴミ箱扱い)する。
 - **冪等キー**: §5.2 通り(`replayed:true`、`IDEMPOTENCY_CONFLICT`、RecordDetail系の再構築)。
@@ -2411,6 +2616,19 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-OWN-07(通知。mock-only): 佐藤の1次検査の `submitRecord` のメール宛先は責任者だけ(佐藤・鈴木を含まない。実行者を除く)。30分経過(`escalationTick`)の宛先も責任者。田中の記録の提出は従来どおり主担当QA。
 - C-REP-09(PDF の欄名。HTML方式は mock の `lastHtml` が無いので harness。doc 方式は harness-only): `ownerRole="qa"` の記録(`qa_ok`)の PDF に `1次検査結果`・`承認結果`・`1次検査コメント`・`承認者コメント`・サイン欄 `1次検査`・`承認` が出て、`職長結果` が出ない。職長の記録の PDF の HTML は版1.11.2 と同じ見出し(`職長結果` ほか)。
 
+**責任者の現場管理(版1.13.0。§5.4.8・§6.10。mock・backend harness の両方。シードは §11.5)**
+- C-SITE-01(権限): 田中(職長)・佐藤(QA)の `adminGetSite`・`adminCreateSite`・`adminUpdateSite`・`adminCloseSite`・`adminReopenSite`・`adminAddAssignment`・`adminEndAssignment`・`adminCreateUser` → 全て `FORBIDDEN_ROLE`。責任者の契約外キー(例 `adminUpdateSite` に `status`)→ `BAD_REQUEST`。★の action で `clientId` 欠落 → `BAD_REQUEST`。
+- C-SITE-02(作成): 責任者が `adminCreateSite`(名前 `D現場`、floors `["1F","2F"]`、主担当 u_sato、代行者 u_suzuki)→ `site.status="active"`、`siteId` が `^s_[a-z0-9]{12}$`、応答に `joinKey`・`driveFolderId` のキーが無い、`assignments` が2行(`qa_main`/`qa_sub`)。続けて責任者と佐藤の `getBootstrap` の `sites` にすぐ出る(キャッシュの待ちなし)。`adminGetJoinInfo` で得た `joinKey` で田中の `requestJoin` → `pending`。同じ `clientId` の再送は同じ `siteId` を返し、Sites・Assignments の行は増えない。Events に `site_created` が1件(detail に `joinKey` が無い)。
+- C-SITE-03(作成の検証): ①代行者なし → `FIELD_INVALID`(`qaSubUserIds`)②主担当に u_tanaka(職長)・u_lead(責任者)→ `ASSIGN_ROLE_MISMATCH`(`value`)③主担当と代行者が同じ → `QA_MAIN_EQ_SUB` ④既存と同じ名前(` A現場(仮) ` の前後空白つき)→ `SITE_NAME_DUPLICATE` ⑤floors が空・11文字・`,` を含む・重複 → `FIELD_INVALID`(`floors`)⑥`startDate>endDate` → `FIELD_INVALID`(`endDate`)。違反は全て列挙され、何も書かれない。
+- C-SITE-04(階・工区): s_c の `2F`/`東` に記録を作ったあと、`adminGetSite(s_c)` の `usedFloors=["2F"]`・`usedZones=["東"]`。`adminUpdateSite` で ①floors から `2F` を外す → `FLOOR_IN_USE`(`value:"2F"`)②`2F` を `2階` に変える → 同じ ③`西` を外す・`3F` を足す・`["2F","1F","3F"]` に並べ替える → 成功(`site.floors` がその順。S05 の選択肢もその順)④名前を `B現場(仮)` に → `SITE_NAME_DUPLICATE`、自分の名前のまま → 成功 ⑤何も変えない送信 → 成功で `updatedAt` が変わらず、Events を足さない。閉鎖中の現場も編集できる。
+- C-SITE-05(閉鎖): ①s_a に `draft` の記録がある → `SITE_HAS_OPEN_RECORDS`(`{draft:1,submitted:0,fix:0}`)。②その記録を `qa_ok` まで進めると → `CLOSE_CONFIRM_REQUIRED`(`{qaOk:1}`)③`acceptQaOk:true` で成功: `status="closed"`、s_a の有効だった担当が全て `active=FALSE`(`endedAssignments` がその数)、申請中の参加申請が `rejected`(`note="現場閉鎖"`)。④閉鎖後: 田中の `createRecord`・`requestJoin` → `SITE_CLOSED`。佐藤・田中の `getBootstrap` に s_a が出ず、`listRecords` にも出ない。責任者は qa_ok の記録に `recordPrimeSign`(PIN)・`generateReport` ができる。⑤もう一度閉鎖 → `STATE_CONFLICT`(`{status:"closed"}`)。記録・写真・Reports の行は変わらない。
+- C-SITE-06(再開): C-SITE-05 のあと `adminReopenSite` → `status="active"`、閉鎖で無効にした行だけ `active=TRUE`(`restoredAssignments` がその数)。閉鎖の前から `active=FALSE` だった行(`/__mock/patch` で用意)は戻らない。却下した参加申請は `rejected` のまま。佐藤・田中の `getBootstrap` に s_a が戻る。もう一度再開 → `STATE_CONFLICT`。Sites を `/__mock/patch` で直接 `closed` にした現場の再開は `restoredAssignments:0`。
+- C-SITE-07(担当の追加): ①s_b に u_tanaka を `foreman`・`team` なし → `FIELD_INVALID`(`team`)②QA の佐藤を `foreman` → `ASSIGN_ROLE_MISMATCH` ③s_c に田中を `foreman`(`田中班`)→ 成功、Memberships は増えない、田中の `getBootstrap` に s_c が出て `createRecord` できる ④同じ田中を s_c に `subforeman` → `ASSIGN_DUPLICATE` ⑤閉鎖中の現場 → `SITE_CLOSED` ⑥**主担当の交代**: s_a(主担当 佐藤・代行者 鈴木だけ)に鈴木を `qa_main` → `LAST_QA_SUB`(何も変わらない)。先に責任者を `qa_sub` に足してから鈴木を `qa_main` → 成功、`ended` に佐藤の `qa_main` と鈴木の `qa_sub` の2行、`adminValidateRoster` に s_a の error が無い。
+- C-SITE-08(担当の終了): ①s_a の唯一の `qa_main` → `LAST_QA_MAIN` ②唯一の `qa_sub` → `LAST_QA_SUB` ③QR で参加承認済みの田中(s_a)の `foreman` を終了 → 成功、`membership.status="revoked"`、田中の `getBootstrap` から s_a が消え、田中の `requestJoin`(s_a)が `ALREADY_MEMBER` ではなく `pending` になる ④もう一度終了 → `STATE_CONFLICT`。
+- C-SITE-09(新しい人): ①`adminCreateUser`(`role:"qa"`,`qaQualified:true`)→ `user.status="invited"`、`devices:[]`、`pinHash` 等のキーが無い。`adminListUsers` に出る。②続けて `adminIssueInvite(first)` → `lookupInvite` で氏名が出て、`registerDevice` → `active`。③`role:"lead"` → `FIELD_INVALID`(`role`)、`role:"foreman"` で `qaQualified:true` → `FIELD_INVALID`(`qaQualified`)、名前21文字 → `FIELD_INVALID`(`name`)。④同じ氏名でも作れる。⑤作った QA を `adminAddAssignment(qa_sub)` で現場に足せる。Idem の `responseJson` と Events に招待コード平文・PIN が無い(harness は Idem シートを見る)。
+- C-SITE-10(Events と冪等): 8 action の書き込み(★)が Events の `site_created`/`site_updated`/`site_closed`/`site_reopened`/`assignment_added`/`assignment_ended`/`user_created` をそれぞれ1件だけ残し、同じ `clientId` の再送で増えない。内容違いの同じ `clientId` は `IDEMPOTENCY_CONFLICT`。
+
+
 **状態遷移**
 - C-STATE-01(正常系): 田中 `createRecord`→`saveDraft`→写真→`submitRecord`(PIN)→佐藤 `claimReview`→`saveQaDraft`→`submitVerdict(ok,PIN)`→`recordPrimeSign`(PIN)→`approved`。各段で status・`round`・`signatures`・`actions` が §6 通り。Events の `kind` 列が期待順。
 - C-STATE-02(軽微): `minor`→`fix`、`claimedBy` 空、田中が是正→`submitRecord`→`round=2`、QA列・判定列が空、`submitted`。
@@ -2444,7 +2662,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-RESP-03(重さ): どの `record` にも `dataUrl`・`thumb` というキーが無く、base64 の本体を含まない(`PhotoMeta` のみ)。エラー応答には `record` が付かない。
 - C-RESP-04(version): 同じ記録に `saveDraft` → `addNote` → `uploadPhotoChunk` → `submitRecord` を順に行うと、各応答の `record`(Detail の応答)の `version` が単調に増える。`uploadPhotoChunk` 単発3本を `Promise.all` で送った場合、各応答の `record.version` は「その写真の追加直後の版」以上で、最終的な `getRecord.version` = 開始 + 3、**3本のうち `version` が最大の応答の `record` には3枚とも載っている**(遅れて届く応答に古い状態があっても、クライアントが `version` で採否を決められる)。
 - C-RESP-05(冪等再生): `submitRecord`(PIN)を同じ `clientId` で再送 → `meta.replayed=true`・`record` は RecordDetail・`record` を除く `data`(`warnings`)は初回と同一・`record.version` は初回以上・Events の件数は1回分。`addNote` の再送も同様で Notes は重複しない。(mock-only/harness)`Idem.responseJson` に `items` を含む RecordDetail が保存されておらず、45,000文字以内。
-- C-KEEP-01(harness-only。GASエディタ専用の関数。§6.7a): ①`ACTIONS` のキー数は43のままで、`installKeepWarmTrigger`・`removeKeepWarmTrigger`・`keepWarm` を含まない。HTTP でこれらを `action` に送ると `BAD_REQUEST`。②`installKeepWarmTrigger()` を2回実行しても、ハンドラ `keepWarm` の時間主導トリガーは1本で間隔は5分。`Config.keepWarmMinutes` を 10 にして実行すると10分。1・7・数でない値・欠落のときは5(`1` のときは `Logger` に理由が出る)。③`removeKeepWarmTrigger()` で `keepWarm` のトリガーが0本になり、`escalationTick`・`dailyMaintenance` のトリガーは残る。`setupTriggers()` を実行しても `keepWarm` のトリガーは消えない。④`keepWarmMinutes` の行が無い既存の Config に対し `setupSheets()` が1行だけ追記し、既存の行・値を変えない。
+- C-KEEP-01(harness-only。GASエディタ専用の関数。§6.7a): ①`ACTIONS` のキー数は §5.5 の数(版1.13.0 で51)のままで、`installKeepWarmTrigger`・`removeKeepWarmTrigger`・`keepWarm` を含まない。HTTP でこれらを `action` に送ると `BAD_REQUEST`。②`installKeepWarmTrigger()` を2回実行しても、ハンドラ `keepWarm` の時間主導トリガーは1本で間隔は5分。`Config.keepWarmMinutes` を 10 にして実行すると10分。1・7・数でない値・欠落のときは5(`1` のときは `Logger` に理由が出る)。③`removeKeepWarmTrigger()` で `keepWarm` のトリガーが0本になり、`escalationTick`・`dailyMaintenance` のトリガーは残る。`setupTriggers()` を実行しても `keepWarm` のトリガーは消えない。④`keepWarmMinutes` の行が無い既存の Config に対し `setupSheets()` が1行だけ追記し、既存の行・値を変えない。
 - C-KEEP-02(harness-only): `keepWarm()` の実行の前後で、全シートのセルの内容・Drive のファイル・ScriptProperties・送信メール・`Events`・`Idem` が完全に同じ(書き込み0回)。ロックを取らない。`Users`/`Devices`/`Assignments`/`Memberships`/`Absences` を読まない(shims の読み取り記録で確認)。読み込みを失敗させても例外を投げない。
 
 **写真**
@@ -2492,7 +2710,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-REP-02(harness-only。方式の切替。§10.5.1。`/__mock/patch` で Config を書く): ①`reportEngine` の行が無い/空/`html`/`HTML`/`xyz`/`docs` のとき**HTML方式**(`state.lastHtml` が更新され、`/__mock/docShim` の `counts.created=0`)。②`doc`・` Doc `・`DOC` のとき**doc方式**(`counts.created=1` かつ `lastHtml` は `null` のまま)。③どちらでも `url`・`version`・PDFが `%PDF-` で始まる・PDF名(§10.2a)・`Reports` の列と値の形・メール添付(`Reports.driveFileId` の同じファイル)が**同じ形**。④`getBootstrap.config` に `reportEngine` が**ない**。⑤C-REP-01(既定=html)は引き続き全項目を満たす。
 - C-REP-03(harness-only。doc方式の中身。§10.5.2〜10.5.6。`reportEngine=doc`、写真(`kind=photo`)6枚(うち1枚は `side=prime` で項目なし)+図面1枚(印2個)+NG項目あり+職長コメントと管理者コメントあり、の `qa_ok` 記録): `/__mock/docShim` の `lastDoc` で次を確認。①**用紙**: `pageWidth=595.28`・`pageHeight=841.89`(±0.01)、四辺の余白 `34.02`(±0.05)。②`fontFamily` が `Noto Sans JP`。③**画像の数**: `images.length` = 写真6 + 図面1 = 7。写真の画像は幅 ≤ 224.33pt かつ 高さ ≤ 162.64pt(±0.5)で縦横比が元画像と±1%以内、図面は幅 ≤ 521.57pt かつ 高さ ≤ 476.71pt(±0.5)。④**改ページ数**: `pageBreaks` = 図面の枚数(1)+「写真」見出しの前(1)+ `floor((写真枚数−1)/4)`(=1)= **3**。写真4枚の記録では 図面の数+1、写真0枚でも 図面の数+1、写真5枚で+1、8枚で+1、9枚で+2。**最後の写真ブロックの後に改ページがない**(写真が4の倍数のときも)。⑤**表**: 写真ブロックの表の数 = 写真の枚数(6)、各表は2列・列幅 83×184/186 = 232.75pt / 103×184/186 = 288.83pt(±0.5。合計 521.57pt)・最低行高 175.75pt(±0.5。縮めない)。項目表は7列・列幅 **8/40/14/18/46/30/30mm**(版1.11.0。旧 8/62/14/18/24/30/30)の各値に 184/186 を掛けて pt 換算した値(±0.5)・最低行高 17.0pt。基本情報表は4列(30/63/30/63mm ×184/186)、サイン表は3列(62mm×3 ×184/186)、図面の凡例表は**6列**(**24/76/28/24/17/17mm** ×184/186。版1.11.0。旧5列 24/82/24/28/28)。**全ての表(基本情報・サイン・結果サマリ・項目・凡例・図面画像・写真ブロック)で列幅の合計 = 521.57pt(±0.5)**。**keepWithNext(版1.11.2 で撤回)**: 検査しない。代わりに、shim の `Paragraph` に `setKeepWithNext` が無い(`typeof p.setKeepWithNext === 'undefined'`)ことを確認し、ReportDoc.gs が doc 方式を最後まで通せる(`fallbackFrom` なし)こと⑥**内容**: `text` に subject・段階名・職長コメント全文・管理者コメント全文・スタンプ文字が含まれ、職長コメントと管理者コメントは別のセル(別の列/別の段落)。項目に紐づかない写真(`side=prime`)のブロックのセルには項目No.・コメントのラベルが出ない。NG行の全セルの背景が `#FDE8E8`(`cellBackgrounds`)。⑦**フッタ**: `footerText` に記録IDと64桁のハッシュ(`reportSnapshotHash_` と同じ値)が含まれ、ページ番号がない。本文末尾に同じハッシュの段落が**ない**。⑧**後始末**: 変換後に一時文書が `trashed=true`、`counts.trashed=counts.created`、`/__mock/drive` に一時文書が残らない(`/__mock/driveLog` に `create` と `trash` が1組出る)。⑨`report_generated` の `detail.engine='doc'`・`fallbackFrom` なし。
 - C-REP-04(harness-only。フォールバック。§10.5.8): `reportEngine=doc` で `failMode` を `create` / `image` / `convert` / `slow` の各場合に設定して `generateReport`: ①いずれも `ok:true` で、PDF(HTML方式)ができ、`Reports` に1行増え、PDF名・保存先・共有・メール添付が通常と同じ。②Events `report_generated` の `detail` が `engine='html'`・`fallbackFrom='doc'`・`fallbackReason`(空でない文字列、200文字以内)を持つ。③PDF の Drive ファイルの説明が `engine=html (fallback from doc: …)` で始まる(成功した doc 方式は `engine=doc`、通常の html は `engine=html`)。④`create` 以外では一時文書が作られていたら必ずゴミ箱に入っている(`counts.created=counts.trashed`)。⑤`Logger` に理由が出る(shim の `Logger` 記録で確認)。⑥`REPORT_NOT_ALLOWED`(`submitted` の記録)はフォールバックせずそのエラーのまま、`counts.created=0`。⑦HTML方式も失敗させた場合(Drive 保存の失敗)は従来どおり `DRIVE_ERROR`。
-- C-REP-05(harness-only。ACTIONS と編集関数): ①`ACTIONS` のキー数は43のままで `checkReportEngine` を含まない。HTTP でこれを `action` に送ると `BAD_REQUEST`。②`checkReportEngine()` を呼ぶと文字列 `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` を返し、`lastDoc` の用紙が A4、一時文書はゴミ箱、全シートの内容・Events・Reports・ScriptProperties は変わらない。`failMode=convert` のときは例外(メッセージを握りつぶさない)。
+- C-REP-05(harness-only。ACTIONS と編集関数): ①`ACTIONS` のキー数は §5.5 の数(版1.13.0 で51)のままで `checkReportEngine` を含まない。HTTP でこれを `action` に送ると `BAD_REQUEST`。②`checkReportEngine()` を呼ぶと文字列 `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` を返し、`lastDoc` の用紙が A4、一時文書はゴミ箱、全シートの内容・Events・Reports・ScriptProperties は変わらない。`failMode=convert` のときは例外(メッセージを握りつぶさない)。
 - C-REP-06(ユニット/静的検査。`tests/unit`): ①`backend/appsscript.json` の `oauthScopes` に `https://www.googleapis.com/auth/documents` が含まれ、既存の4つ(spreadsheets / drive / script.scriptapp / script.send_mail)も残っている。②`setupSheets()` が `reportEngine` の行が無い既存の Config に**1行だけ**追記し(値 `html`、type `str`)、既存の行・値を変えない。③spec-sync: §2.14 の Config キー(`reportEngine` を含む)と mock の `configKeys` が一致。
 - C-REP-07(版1.11.0。実測の表示=HTML方式。§10.2d・§10.2b-A/B。**harness**(`/__mock/lastReportHtml`)。**データ**: `pre_pour` の `qa_ok` 記録。`saveDraft`/`saveQaDraft` で次の値を入れる(`itemId` は seed。項目番号 N は `getRecord` の項目の並びの1始まりで求める): i4(許容5)職長 `[-5,-5,-2,-5,3,-1,5,-5]` / i6(許容2)職長 `[1,-3,2,-2.5]`(職長の結果は **`ng`**・備考・重さ `minor`・写真あり。許容超の `ok` は §5.3.1 で提出できないため)かつ管理者 `[2,3]` / i5(許容5)職長 `[1,2]`・管理者 `[7]`(職長・管理者とも結果 `ok`。**管理者の許容超の `ok` は `qaNote` が非空なら通る**=§5.3.1 版1.11.1) / i8(許容なし)職長 `[2,-1,0]` / i7(許容5)は値なし。管理者の結果は全項目 `ok`(判定 `ok` で `qa_ok`)。**管理者の値が許容超の i5(`[7]`)・i6(`[2,3]`)は `saveQaDraft` で `qaNote` に非空の文(例 `図面で確認済み`)を入れる**(版1.11.1: 入れないと `submitVerdict` が §5.3.1 の `QA_OVER_TOL_COMMENT_REQUIRED` で拒否される)。i6 と i8 に `kind=photo` の写真を1枚ずつ付ける): ①**項目表の実測セルの文字列**(タグを除いたテキスト): i4=`職長: -5、 -5、 -2、 -5、 +3、 -1、 +5、 -5` と `n=8 最小-5/最大+5/許容±5mm`(**境界の ±5 は許容内**=`▲` なし)。i6=`職長: +1、 ▲-3、 +2、 ▲-2.5` と `n=4 最小-3/最大+2/許容±2mm ▲許容超2件`(` `=半角スペース1つ)、続けて `管理者: +2、 ▲+3` と `n=2 最小+2/最大+3/許容±2mm ▲許容超1件`(**職長の2行→管理者の2行の順。混ぜた要約がない**)。i5=`職長: +1、 +2` と `n=2 最小+1/最大+2/許容±5mm`、続けて `管理者: ▲+7` と `n=1 許容±5mm ▲許容超1件`。i8=`職長: +2、 -1、 0` と `n=3 最小-1/最大+2`(**`許容`・`▲` を含まない**)。i7(値なし)のセルは**空**。②**マークアップ**: i6 の `▲-3`・`▲-2.5`・`▲+3`、i5 の `▲+7` と要約の `▲許容超2件`/`▲許容超1件` が `class="over"` かつ `font-weight:bold;color:#cc0000` の `<span>` の中にあり、`+1`・`+2` と i4 の値は `over` の外。③**旧形式の廃止**: HTML に ` / 許容±` と値の ` | ` 連結が出ない。④**注記**: `実測の ▲ は許容(±)を超えた値の目安です` を含む段落が項目表の直後に1つ。全項目の許容ありの実測を空にした記録(i8 だけ値あり)では**この注記が出ない**。⑤**判定への非影響**: **i5 の行(許容超の `▲+7` があるが職長・管理者とも `ok`)に NG の赤背景 `#fde8e8` が付かない**(i6 の行は職長 `ng` なので赤で正しい)。結果サマリの件数は実測の有無で変わらない。実測セル・注記に `不合格`・`不適合` の語がない。⑥**写真ブロック**(§10.2b-B の3): i6 の写真の情報欄に `実測(職長): +1、 ▲-3、 +2、 ▲-2.5`・その要約・`実測(管理者): …`・その要約が同じ書式で出る。i8 の写真は `実測(職長): +2、 -1、 0` と `n=3 最小-1/最大+2`。旧形式 `実測: ` で始まる行がない。値のない項目の写真に `実測` が出ない。⑦**出来形(`post_demold`)にも同じ規則**: `post_demold` の記録で i56(許容10)職長 `[-10,11,4]` → `-10、 ▲+11、 +4` と `n=3 最小-10/最大+11/許容±10mm ▲許容超1件`、i57(許容3)職長 `[3,-3]` → `+3、 -3` と `n=2 最小-3/最大+3/許容±3mm`。⑧**レイアウト制約**: `display:flex`/`display:grid`/`calc(` を含まない(§10.2b 共通)。
 - C-REP-08(版1.11.0。実測の表示=doc方式。**harness-only**。`reportEngine=doc`。C-REP-07 と**同じデータ**。`lastDoc` の追加観測=§11.4): ①項目表(7列)の `cellTexts` の実測列(5列目): C-REP-07 ① と**同じ文字列**(段落の区切りは `\n`。i7 は `""`)。②`coloredTexts['#CC0000']` に `▲-3`・`▲-2.5`・`▲+3`・`▲+7`・`▲許容超2件`・`▲許容超1件` が含まれ、`+1`・`+2`・`-5` など許容内の値は含まれない。`boldTexts` にも同じ文字列が含まれる(許容超の部分だけが太字)。③項目表の直後の本文段落に C-REP-07 ④ と同じ注記(注記が出ない記録では出ない)。旧注記 `管理者コメントの全文は` が本文に**ない**。④管理者コメント(200文字)が項目表の `cellTexts` に**全文**ある。⑤i6 の写真ブロックの右セルの `cellTexts` に `実測(職長): +1、 ▲-3、 +2、 ▲-2.5` と要約・`実測(管理者): …` と要約が出る。⑥`post_demold` でも C-REP-07 ⑦ と同じ文字列。⑦NG行以外の背景が変わらない(**i5 の行(`▲+7` あり・`ok`)は背景 `null`**)。⑧C-REP-03 のその他の項目(列幅・改ページ。keepWithNext は版1.11.2 で撤回)は新しい幅で通る。
@@ -2508,7 +2726,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-OUTBOX-04(送信可否規則 §8.4。フロントは `outbox.js` に純関数 `selectSendable(rows, {now, photoParallel})`(送る行の `seq` 配列を返す。**契約として確定。テストが直接呼ぶ**)を置く。`claimSendable`・`normParallel` などの内部関数は実装の自由でSPEC外(テストは依存しない)。データ駆動 `tests/fixtures/outbox-schedule-cases.json`): ①写真の行3件(先行の非写真の行なし)で `photoParallel=3` → 3件、`=2` → 2件、`=9` → 6件を上限、設定なし/`null`/0以下 → 1件(入力は整数のみ。小数・文字列の丸めは検査しない) ②同じ記録に先行する `createRecord`(`pending`/`sending`/`failed`/`blocked`)があるうちは写真の行を選ばない(完了して行が消えたら選ぶ) ③`seq` が 写真A・写真B・`saveDraft`・写真C の順 → A,B は同時に選ばれ、`saveDraft` は A,B が両方消えるまで選ばれず(`sending` 中・`failed` でも)、C は `saveDraft` が消えるまで選ばれない ④別の記録の `saveDraft` 2件 → 同時に1件だけ ⑤別の記録の写真の行と非写真の行は同時に選べる ⑥同じ `photoId` の行が2件 → 1件だけ ⑦写真Aが `failed` でも同じ記録の写真B,Cは選ばれ続け、後続の `saveDraft` は選ばれない(確定失敗の通知で `blocked`)。非写真の行が `failed` なら同じ記録の後続の写真の行も `blocked` ⑧`stopPour` は写真の行の完了を待たず最優先で選ばれる。写真の行・非写真の行(`saveDraft` 等)が `failed` になっても、同じ記録の `pending` の `stopPour` は `blocked` にならず選ばれる(`stopPour` 自身が `failed` のときだけ後続が `blocked`) ⑨写真の行が backoff 待ちでも他の写真の行は選ばれる ⑩連続通信失敗カウントは並行する要求を通算し、成功1件でリセット(3回でオフライン)。
 - U-OUTBOX-05(写真の送信状態。§8.11.5): `KW.outbox.photoState(row)` が データ駆動(`tests/fixtures/photo-state-cases.json`)で、`null`→`saved`、`pending`(`tries=0`)→`queued`、`pending`(`tries=2`)→`queued`、`sending`→`sending`、`failed`→`failed`、`failed`(`lastError.code='EXPIRED'`)→`failed`、`blocked`(`blockReason='record'`)→`failed`。
 - U-OUTBOX-06(保存状態。§8.11.6): `KW.outbox.saveStateOf(rows, online)` が、0件→`synced`、`sending` あり→`sending`、`pending` のみ+オンライン→`queued`、`pending` のみ+圏外→`offline`、`failed` または `blocked` あり→`failed`(`sending` と混在しても `failed`)を返し、`n`=全行数・`m`=`failed`+`blocked` の数になる。
-- U-CLASS-01(操作の分類。§8.11.2): SPEC の §8.11.2 の表(`#### 8.11.2` から次の `####` まで)にバッククォートで書かれた action 名の集合が、§5.5 の43 action と完全に一致し、同じ名前が2回出ない。`spec-sync.test.js` に加える。
+- U-CLASS-01(操作の分類。§8.11.2): SPEC の §8.11.2 の表(`#### 8.11.2` から次の `####` まで)にバッククォートで書かれた action 名の集合が、§5.5 の51 action(版1.13.0。以前は43)と完全に一致し、同じ名前が2回出ない。C(参照)は13個。`spec-sync.test.js` に加える。
 - U-RESP-01(応答の反映。§5.1a の3): `KW.data.putDetail` に、`version` が小さい詳細→捨てて既存を残す/同じ→反映/大きい→反映、を渡す。`masked` 形は既存の詳細を上書きしない。`drafts`・`outbox`・`photoBlobs` は変わらない。応答に `record` が無い(または `items` が無い)ときは `getRecord` にフォールバックする(`loadDetail` のモック呼び出しで確認)。反映から15秒以内の `loadDetail(recordId, {maxAgeMs:15000})` は API を呼ばず、16秒後は呼ぶ。
 
 - U-PHOTO-01: base64分割(分割モードに入ったときのみ): 連結=元、各チャンク≤90,000文字かつ4の倍数、`total=ceil(len/90000)`、最大12(超えたら `err.photo_too_large`)。
@@ -2543,6 +2761,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - E-27 未送信の可視化(版1.10): 圏外で下書きを入力 → ヘッダのバッジが黄色『未送信 {n}』、保存状態行『圏外のため端末に保存中({n}件)…』。復帰して自動送信 → バッジが 0 になり『送信済み ✓』。S04 の該当の記録の行に『未送信』バッジが付き、送信後に消える。375px・ja/id で横スクロールなし、バッジ・[再送][破棄]・[確認する]のタップ領域が44px以上(E-07 の巡回にも含める)。
 - E-28 getRecord を省く(版1.10): 提出(S07)・合格/軽微/重大(S10)・元請サイン(M5)・打設停止(M4)・確認中にする(S10)の成功直後(15秒以内)に開く S08/S10 の描画のために `getRecord` が呼ばれない(リクエスト監視)。描かれた内容は `getRecord` の結果と一致する。Playwright の `route` で応答から `record` を取り除いた場合は、従来どおり `getRecord` で取り直して同じ画面になる(後方互換)。
 - E-29 読み取り側の待ち短縮(仮置き P-45 の承認後のみ): 起動で `me` と `getBootstrap` が同時に送られる。`deviceToken` とキャッシュがある端末は、応答を待たずにホームが描かれる(`--latency 2000` で 500ms以内)。応答が `UNAUTHENTICATED`/`USER_LOCKED` ならS01/S02 へ遷移する。キャッシュのある記録の S08/S10 は先に描かれ、裏の `getRecord` で `version` が大きければ差し替わる。**承認までは実装・実行しない**。
+- E-32 責任者の現場管理(版1.13.0。§9.2d。mock。ja と id、375px): ①責任者で 設定→管理→「現場の管理」(S22)→「新しい現場」→ 現場名・階 `1F`/`2F`・主担当 佐藤・代行者 鈴木 → 保存 → S23 編集に変わり、S22 の「稼働中」に出る ②階 `3F` を足して `1F` の上へ移し保存 → S05(新しい記録)の階の選択肢がその順 ③記録のある階の「外す」は押せず「使用中」と出る ④「担当を追加」で田中を職長(`田中班`)に → 担当の一覧に出る ⑤入力中の記録がある現場で「閉鎖する」→ 件数つきで止まる。元請待ちだけの現場では件数つきの確認 → 閉鎖 → S22 の「閉鎖済み」へ。「再開する」で戻り、担当が戻る ⑥S16 で「新しい人を登録」→ M11(管理者を選ぶと代行資格のチェックが出る)→ M8 に6桁のコード ⑦佐藤・田中では `#/admin/sites` を開いてもホームに戻る ⑧横スクロールが出ない。
 - E-31 1次検査者と承認者(版1.12.0。§9.2c。mock。ja と id、375px): ①佐藤で S04 を開くと各階に「1次検査を始める」が出て、S05→S06 で入力→S07→PIN→`submitted`。S09 の「自分の1次検査」に出て、「確認待ち」には出ない。S10 を開いても「確認中にする」が出ず、『この記録は責任者が確認します』が出る。②鈴木のボードの「確認待ち」にもその記録が出ない。③責任者のボードの「確認待ち」に、バッジ『管理者の1次検査』つきで出る。責任者が確認中にし、全項目を入力して合格(PIN)→元請サイン記録(M5)→打設可。S08 の3者サイン欄の見出しが『1次検査(提出)』『承認者』『元請サイン』になる。④田中で S04 を開くとその記録の行が『他班が入力中』にならず、タップで S08(読み取り。編集ボタンなし)に行き、写真・1次検査のコメントが見える。⑤職長の記録の S08・S10 の見出しは従来の語(『職長』『管理者のコメント』)のまま。⑥キー文字列が露出せず、横スクロールなし(E-07)。
 - E-30 管理者の許容超 OK とコメント必須(版1.11.1。§9.2b。mock。ja と id、375px): 職長が i4(許容5)に実測 `3` を入れて提出 → 佐藤が S10 で確認中にし、i4 の管理者の実測に `6` を入れて `OK` を押す → ①コメント欄の直上にヒント(ja: `許容を超えた値があります。OKにする場合は、理由を管理者のコメントに書いてください(必須)`)が出て、コメント欄が赤枠(`aria-invalid="true"`)で `placeholder` が `理由・確認した内容を書いてください(必須)`。②「合格」「軽微な不適合」「重大な不適合」の3つが無効で、各ボタンの下と「やること」に `許容を超えた値にOKを付けるには、コメントを書いてください`(項目番号つき)。この間に `submitVerdict` のリクエストが出ない(Playwright のリクエスト監視)。③`saveQaDraft` は送られる(コメント空でも下書きは保存される)。④コメントに空白だけを入れても同じ。⑤コメントに文を入れる → ヒントの赤枠が消え、「合格」が有効 → PIN → 成功して S08 に遷移し、管理者コメントが表示され、職長のコメントは変わらない。⑥実測を `5` に直す(または結果を `NG` に変える)とヒントが消え、コメント無しで「合格」が有効(NG にしたときは備考と重さが要る)。⑦キー文字列(`rule.`/`scr.`)が画面に露出せず、id でも同じ流れ(辞書キーが ja/id で揃う)。⑧職長の S06 では、許容超に OK を付けて提出すると従来どおり `許容を超えているためOKにできません` が出る。⑨全画面の横スクロールなし(E-07)。
 
@@ -2676,6 +2895,12 @@ katawaku-inspection/
 - フロント: ①S04「1次検査を始める」・S05〜S07 を QA・責任者でも使う導線 ②S09「自分の1次検査」と「確認待ち」の除外・バッジ ③S08/S10 の「語の読み替え」(§9.2c)と `scr.S10.lead_only` ④`err.APPROVER_NOT_ALLOWED` ほか新しい i18n キー(§9.4 の版1.12.0 の表と §9.2c の8キー。ja/id)、`ev.submitted`/`ev.verdict_ok` の語の変更 ⑤`sw.js` の `SW_VERSION` を上げる。
 - モック+テスト: ①mock の Records 列・権限・`canApprove`・通知・`/__mock/meta` のエラーコード ②C-OWN-01〜07・C-PERM-04 の改訂・C-REP-09・E-31・U-I18N-01 ③spec-sync(列・エラーコード・i18n)。
 
+版1.13.0 の責務(SPEC §5.4.8・§6.10・§9.2d。責任者の現場管理。action 43→51、エラーコード2つ・rule 8つ・Events の kind 7つを追加。**シートの列は変えない**=`setupSheets` 不要):
+- バックエンド: ①新しいファイル `backend/SiteAdmin.gs`(8 action。`Admin.gs` を肥大させない。本番の連結順は `Admin` の直後)②`Code.gs` の `ACTIONS`・契約キー表・★の一覧 ③`Authz.gs` の役割表(責任者のみ)④`Schema.gs` の Events kind・エラーコード ⑤`Sites` の書き込み後の参照キャッシュ破棄(`Repo` 経由なら自動)と、管理 action での `Repo.fresh('Sites')`。
+- フロント: ①`js/ui/s22.js`(一覧)・`js/ui/s23.js`(作成・編集・担当・閉鎖/再開)の新設 ②S16 に「新しい人を登録」と M11 ③管理メニューと S12 の導線 ④`i18n.js` に §9.4 版1.13.0 のキー ⑤`sw.js` のキャッシュ対象に新しいファイルを足し `SW_VERSION` を上げる。
+- モック+テスト: ①mock の 8 action(同じ検証・同じエラー)と `/__mock/meta` のエラーコード ②C-SITE-01〜10・E-32、U-CLASS-01(51・C=13)・C-KEEP-01・C-REP-05 の数、U-I18N-01 ③spec-sync(action・エラーコード・rule・i18n)。
+
+
 ### 13.3 契約変更の手順
 1. 実装者が食い違い・不足を見つけたら、**実装を直す前に**設計担当(親エージェント)へ報告する(契約外のフィールド/エンドポイントを勝手に足さない)。
 2. 設計担当が SPEC.md を直し、末尾「変更履歴」に1行追記する。
@@ -2710,7 +2935,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-13 | 実測値 | 「設計値との差(mm)」の数値配列(最大10点)。`measure` は初期 `optional`(必須化はマスタ編集)。要件の「各面2箇所以上」は `minMeasures=2`+`measure=required` で運用化 |
 | P-14 | 班スコープ | 職長は自班(`team` 一致)または自分の記録のみ詳細閲覧可。他班は `masked`(要約のみ)。`team` 空は本人のみ |
 | P-15 | 責任者のQA兼務 | 責任者は `qa_sub` になれ、全現場でQA操作を最終代行できる(PIN必須。Eventsに残る)。職長との兼任は構造上不可 |
-| P-16 | 名簿管理 | A案(スプレッドシート直接編集)。アプリで行うのは招待・ロック解除・端末解除・不在・QR・参加承認のみ。PC管理画面は後日 |
+| P-16 | 名簿管理 | **版1.13.0(ユーザー決定 2026-11-10)**: 責任者がアプリで現場の作成・編集・閉鎖・再開、担当の追加・終了、新しい人の登録(招待コードの発行まで)を行う(§5.4.8・§6.10)。シートの直接編集も引き続き可(§2)。検査項目・設定・役割の変更・氏名の修正はアプリでは行わない(Claude に依頼。REQUIREMENTS §14)。PC管理画面は作らない(スマホで行う) |
 | P-17 | PDFの日本語描画と用紙 | `HtmlService`→PDF変換で試した結果、**用紙がレターサイズになる**ことが実機で確認された(版1.10.1)。Googleドキュメント(`DocumentApp`)でA4を明示して作る方式を `reportEngine=doc` として追加(§10.5。P-48)。HTML方式は残す |
 | P-18 | 保管10年 | 自動削除なし。Events等の肥大化対策(年次アーカイブ)はv2 |
 | P-19 | QAの担当過多(1人2〜3現場) | `adminValidateRoster` の警告のみ(`qaMaxSitesPerDay=3`) |
@@ -2745,6 +2970,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-48 | 元請PDFの生成方式(版1.10.1。ユーザー了承 2026-10-17 の方針。**既定の変更は未決**) | 実機で HTML方式がレターサイズになる(`@page` が無視される)ため、Googleドキュメント方式(`reportEngine=doc`)を追加。**既定は `html` のまま**。ユーザーが §10.6 で見た目を確認して良ければ既定を `doc` に変える(別の版)。doc 方式の失敗時は自動で `html`。フォント `Noto Sans JP`、写真ページ 4枚/ページの収まり、所要時間は**実機未確認**(§10.5 の予備値・§12.7) |
 | P-49 | 元請PDFの実測の見せ方の細部(版1.11.0。ユーザー依頼 2026-10-20 の方向+設計判断。**細部はユーザー未確認**) | ①許容超は 値の絶対値>許容(境界は許容内)・許容は0より大きい数のときだけ「あり」(§10.2d-1)②表示は「▲+値」(赤太字)と要約 `n=… 最小/最大/許容±…`、許容超が1件以上なら `▲許容超n件`(§10.2d-2〜3)③職長と管理者は別の系列で混ぜない(§10.2d-1)④実測が無い項目は空欄・許容が無い項目は値と最小/最大だけ(§10.2d-5)⑤出来形にも同じ規則(§10.2d-7)⑥項目表は全列折り返し・実測列を24→46mm・旧注記は廃止(§10.2b-A)⑦図面の凡例は項目ごとの見出し行+番号行・6列・系列Sは図面を書いた側(§10.2c-3)。 | 本書の値で実装する。ユーザーが見て直すなら設計担当が SPEC を直してから実装 |
 | P-50 | 1次検査者と承認者の細部(版1.12.0。方針はユーザー決定 2026-11-04、**細部①〜⑤もユーザー確認済み 2026-11-04**。⑥はインドネシア語の暫定訳のみ未確認) | ①管理者・責任者の1次検査の記録は `team` を空にし、編集は本人だけ(同じ現場の他の管理者は1次検査側を書けない)②提出・30分経過の通知は責任者全員へ(QAへは送らない)③QA のボードの「確認待ち」から承認できない記録を除く ④職長に見せる範囲は詳細まで(承認者の下書きは `draft`/`submitted` のあいだ見せない=従来の職長と同じ)⑤PDF の欄名は管理者・責任者の記録だけ変える(職長の記録は従来どおり)⑥履歴の語 `ev.submitted`・`ev.verdict_ok` を役割を含まない語に変える(§6.9・§9.2c・§10.2e) |
+| P-51 | 責任者の現場管理の細部(版1.13.0。方針はユーザー決定 2026-11-10。細部①〜⑩も **2026-11-10 にユーザー確認済み**(「この案で実装へ」)。§14.2 の20) | ①代行者は作成時に1人以上必須(責任者自身も代行者に選べる)②主担当の交代=新しい主担当の追加で前の人は自動で外れる。主担当・最後の代行者は終了できない ③職長の班の変更=終了→追加。職長の担当の終了で参加も取り消し(QRから申請し直せる)④閉鎖で申請中の参加申請は却下(再開でも戻さない)⑤閉鎖後の元請待ちの記録は責任者だけが元請サイン記録・PDF作成。閉鎖中は管理者・職長にその現場が見えない ⑥現場名の重複は不可(閉鎖済みを含む)⑦アプリで登録できる役割は職長・管理者だけ。同じ氏名は注意のみ ⑧閉鎖で終了日を自動で入れない ⑨上限: 現場名40・階60個・工区20個・各10文字 ⑩インドネシア語は暫定訳 |
 
 ### 14.2 ユーザー確認が必要な事項(最後にまとめて報告するもの)
 1. **P-03 初回PIN設定の招待コード方式**で良いか(氏名選択だけでPINを設定できる案は、先に名前を選んだ他人に乗っ取られるため不採用)。
@@ -2774,6 +3000,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 17. **版1.11.1の確認**(管理者の許容超 `ok` とコメント必須。方針はユーザー決定 2026-10-20「管理者が許容を超えた実測値に『合』を付けられる。ただし許容を超えた場合は管理者のコメントを必須にする」。以下は設計担当の**解釈**で、念のための確認): ①**職長側は変えない**(職長は許容超に `ok` を付けて提出できないまま。ユーザーが指定したのは管理者側だけ)。職長にも許したいなら別の依頼。②**必須のコメントは項目ごとの管理者コメント(`qaNote`)**。総合コメントでは代用できない。③**総合判定が軽微・重大でも**、`ok` のまま残る許容超の項目にはコメントが要る。④**管理者の `qaValues` が許容超のときだけ**対象。管理者が値を入れず、職長の値だけが許容超の項目に `ok` を付けても、コメントは要らない(職長の値を見て管理者が合にするのは従来どおり)。この場合にもコメントを要るようにするか。⑤**内容の質は検査しない**(空白だけは不可。1文字でも通る)。⑥**新しいエラーコードは作らず**、`VALIDATION_FAILED` の `violations[].rule=QA_OVER_TOL_COMMENT_REQUIRED` にした。⑦**画面の語**は `OK`(現行の `result.ok`)のまま。⑧インドネシア語の新しい3文言は暫定訳(P-22)。⑨許容の定義は PDF(§10.2d-1)と同じ(0より大きい数のときだけ。境界は許容内)。
 18. **版1.11.2の確認**(実機の所見。方針はユーザー報告のとおり): ①**h2 見出しの孤立防止は不可**: doc 方式では見出しだけがページ末に残ることがあるのを許容する(代替なし。§10.5.3)。許容できない場合は html 方式を既定のままにする(`reportEngine=html`)。②**doc 方式が `DocumentApp` の未知のメソッド違いでまだ落ちうる**: `ReportDoc.gs` が使う `DocumentApp` のメソッドを、実機で**全部は確認できていない**(`setKeepWithNext` も実機で初めて分かった)。落ちたら html にフォールバックする既存の安全網(§10.5.8。`report_generated.detail.fallbackReason` に例外メッセージが残る)でカバーする。実機で doc 方式を使う前に、Events の `fallbackReason` を見て、`is not a function` が出ていないかを確認する運用とする。落ちた方法が出るたびに、そのメソッドを使わない形へ直す(SPEC を先に直す)。③値の区切り `、 `(§10.2d-2)は実PDF(HTML方式)の再確認が必要(REAL-PDF-06)。
 19. **版1.12.0の確認**(1次検査者と承認者の分離。方針はユーザー決定 2026-11-04。以下は設計担当の判断=P-50。**①〜⑤は 2026-11-04 にユーザー確認済み(このとおりで確定)。残りは⑥のみ**): ①管理者が1次検査をした記録は、同じ現場の他の管理者も1次検査側を直せない(本人だけ)で良いか ②提出・30分経過の通知を責任者全員に送る(主担当・代行者には送らない)で良いか ③管理者のボードの「確認待ち」に、自分が承認できない記録(自分の1次検査・ほかの管理者の1次検査)を出さない、で良いか ④PDF の欄名「1次検査/承認」は、管理者・責任者が1次検査をした記録だけに使い、職長の記録は従来の「職長/品質管理者」のままで良いか ⑤履歴の「職長が提出」「品質管理者が合格」を、全ての記録で「提出」「合格」に変えて良いか ⑥インドネシア語の新しい文言は暫定訳(P-22)。
+20. **版1.13.0の確認**(責任者の現場管理。方針はユーザー決定 2026-11-10。以下は設計担当の判断=P-51。**①〜⑩は 2026-11-10 にユーザー確認済み**): ①作成時の代行者は1人以上必須(名簿の決まり §2.3。責任者自身も代行者に選べる)②主担当の交代は「新しい主担当を追加」で行い、前の主担当は自動で外れる(代行者に残すなら続けて追加)。主担当と最後の代行者は「終了」できない ③職長の班を変えるときは「終了→追加」。職長の担当を終了するとその参加も取り消し、QRから申請し直せる ④閉鎖のとき、申請中の参加申請は却下する(再開しても戻らない)⑤閉鎖後、元請待ちの記録の元請サイン記録・PDF作成は責任者だけ。閉鎖中は管理者・職長の画面からその現場が消える(従来の手順 OPERATIONS §7-2 と同じ)⑥同じ現場名は登録できない(閉鎖済みを含む)⑦アプリで登録できる役割は職長と管理者だけ(責任者の追加は従来どおり)。同じ氏名は注意を出すが登録できる ⑧閉鎖で終了日は自動で入れない(編集で入れる)⑨入力の上限: 現場名40文字・階60個・工区20個・各10文字 ⑩インドネシア語の新しい文言は暫定訳(P-22)。
 
 ### 14.3 設計上の差分メモ(prototype・要件との整合)
 - 判定値: prototype の `critical` は本書の `major`(CLAUDE.md §3の `ok/minor/major`)。項目結果は `ok/ng/na`(要件の合/NG/該当なし)。NGの重さ(`minor`/`major`)は QA が項目ごとに付ける。
@@ -2855,3 +3082,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-10-20 | 1.11.1 | ユーザー決定(2026-10-20): 「管理者(QA)が許容を超えた実測値に『合』を付けられるようにする。ただし許容を超えた場合は管理者のコメントを必須にする」。**職長側は変更しない**(許容超の `ok` は `MEASURE_OVER_TOL_OK` のまま)。既存の列名・action名・エラーコード・action数(43)・Config・シートは変更なし(violations の rule を1つ追加)。①**§5.3.1**: `MEASURE_OVER_TOL_OK` を「職長提出のみ」に限定し、新 rule `QA_OVER_TOL_COMMENT_REQUIRED`(管理者の `qaResult=ok` で `qaValues` に許容超 `|値|>tol`(tol>0)があるのに `qaNote` が空)を追加。QA判定の検査ルールの「測定・許容超過は職長側と同じルール」を撤回し、4条件・見る列(`qaValues`/`qaNote` のみ。職長の値・コメントは見ない)・コメントの出どころ(`saveQaDraft` 保存済み)・`ng`/`na` は従来どおり・総合判定に依らない・`saveQaDraft` では検査しない・通ったあとの Notes を明記。新しいエラーコードは作らず `VALIDATION_FAILED` + `violations` にした。②**§5.4.3** `submitVerdict`/`saveQaDraft` に注記。③**§9.2b 新設・§9.2 S10 の行**: 許容超の OK でコメント必須を送信前に示す画面の挙動(ヒント・赤枠・`placeholder`・判定ボタン3つの無効化と理由・OK ボタンは押せる・職長側は変更なし)。④**§9.4**: 新キー `rule.QA_OVER_TOL_COMMENT_REQUIRED`・`scr.S10.over_tol_hint`・`scr.S10.over_tol_note_ph`(ja/id。id は暫定)。⑤**§10.2d-9**: 「管理者の `ok` に許容超を許すか未確認」を確定に書き換え(許容超の `ok` 行は赤背景にしない=従来どおり、▲は出る、管理者コメント列に理由が出る)。**矛盾の解消**: §10.2d-9 と §12.3 C-REP-07 の「管理者側に検査なし」、§14.2 の16 ①、§5.3.1 の「QAも職長と同じ許容超ルール」が実装(管理者側も拒否)と食い違っていたのを、本決定で揃えた。⑥**§12**: C-VERD-01〜03・E-30 を追加、U-VALID-01 に QA 側のケース、C-REP-07 のデータ(許容超の管理者値に `qaNote` を入れる)、§12.2 に対応行。⑦§13.2 の版1.11.1 の責務、§14.2 の17(解釈の確認)。REQUIREMENTS.md §18 を追加し §17 の該当を確定に更新。 |
 | 2026-10-20 | 1.11.2 | 実機(本番GAS)の所見による修正。API契約・列名・action・エラーコード・action数(43)・Config・ハッシュは変更なし(PDFの内部の作り方のみ)。①**§10.5.3 の h2 `setKeepWithNext(true)`(版1.10.2)を撤回**: 本番 `DocumentApp` の `Paragraph` に `setKeepWithNext` が無く、`p.setKeepWithNext is not a function` で doc 方式が html にフォールバックした(`report_generated.detail.fallbackReason`)。見出しの孤立防止は `DocumentApp` では実現できず、代替なし(許容)と明記。連動して §11.4 `lastDoc.paragraphs` の `keepWithNext` 項目、§12.3 C-REP-03 の keepWithNext 検査(§12.3 C-REP-08 ⑧の言及)を撤回し、§13.2 の版1.10.2 の関連記述を整合(版1.10.2 の履歴行は当時の記録として残す)。②**§10.2d-2 値の区切りを `、`→`、 `(読点+半角スペース)に変更**: 負数 `、-3` は `-`(UAX#14 の HY)の前で改行できず、HTML方式の実PDFで項目17の10個の値がセルからはみ出したため。`valuesText`・HTML方式 `measureValuesHtml_`・doc方式 `docMeasureLines_` の runs に適用。図面の凡例は影響なし。U-MEAS-01・C-REP-07・C-REP-08 の期待文字列(例 `職長: -3、 +1`、▲付きも)を全て更新。③§13.2 に版1.11.2 の責務、§14.2 の18(doc 方式が `DocumentApp` の未確認メソッドで落ちうる点を未確定事項に)。 |
 | 2026-11-04 | 1.12.0 | ユーザー決定(2026-11-04。REQUIREMENTS §20): 管理者(QA)・責任者も1次検査ができる。1次検査者は自分の記録を承認できない(責任者だけ例外)。管理者・責任者の1次検査は責任者だけが承認・元請提出。職長にも詳細を見せる。action数(43)・status・Events の kind は変更なし。①§2.7: 列 `ownerRole`(末尾。空は `foreman`)、`ownerUserId` を1次検査者に ②§4.1・§4.2: QA・責任者の `createRecord`/`saveDraft`/`submitRecord`、本人スコープ、`canApprove`・`ownerRoleOf`・`canViewDetail`、承認者の条件 ③§5.1: `RecordSummary.ownerRole`、承認者の下書きを承認できない人に隠す ④§5.3: `APPROVER_NOT_ALLOWED` 追加、§5.4.3/5.4.5 のエラー ⑤§6.2・§6.3・§6.4・§6.6: 実行者と通知先 ⑥§6.9 新設(まとめ)⑦§9.2c 新設・§9.4 キー追加・`ev.submitted`/`ev.verdict_ok` の語 ⑧§10.2e 新設(PDF の欄名)⑨§12: C-OWN-01〜07・C-PERM-04 改訂・C-REP-09・E-31 ⑩§13.2・§14(P-50、§14.2 の19)。§0.1 の再掲も更新。 |
+| 2026-11-10 | 1.13.0 | ユーザー決定(2026-11-10。REQUIREMENTS §21): 責任者がスマホのアプリで、現場の作成・編集・閉鎖・再開、担当の割り当て、新しい人の登録(招待コードの発行まで)をできる。**シートの列は変更なし**。①§5.4.8 新設: 8 action(`adminGetSite`(参照)・`adminCreateSite`・`adminUpdateSite`・`adminCloseSite`・`adminReopenSite`・`adminAddAssignment`・`adminEndAssignment`・`adminCreateUser`。全て責任者のみ・オンライン専用・書き込みは★)。action数 43→51(§5.5・§8.11.2・§4.1)②§5.1 `AdminSite`(`joinKey` を含めない)③§5.3 `SITE_HAS_OPEN_RECORDS`・`CLOSE_CONFIRM_REQUIRED` を追加、`STATE_CONFLICT`・`SITE_CLOSED` の意味を拡張、`violations[].value` ④§5.3.1 rule 8つ(`FLOOR_IN_USE` ほか)⑤§2.11 Events の kind 7つ ⑥§6.10 新設(閉鎖・再開・階と工区・担当・新しい人の規則)⑦§9.2d 新設(S22 現場の管理・S23 現場の作成/編集・S16 の新しい人・M11)、§9.2 S12、§9.4 キー ⑧§12: C-SITE-01〜10・E-32、U-CLASS-01・C-KEEP-01・C-REP-05 の数 ⑨§13.2 責務 ⑩§14 P-16 を更新・P-51、§14.2 の20 ⑪§0.1・§2 の直接編集の注記。 |
