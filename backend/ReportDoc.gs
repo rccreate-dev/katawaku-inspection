@@ -301,7 +301,7 @@ function docCount_(rows, side) {
 
 /** 確認箇所(図面)の1ページ(SPEC §10.5.4) */
 function docDrawingPage_(body, ph, rows, seq, t0) {
-  body.appendPageBreak();
+  docSpacer_(body, true);   // 版1.14.3: 改ページは 1pt の空段落の中に入れる(既定の高さの改ページ段落を作らない)
   docBodyPara_(body, '確認箇所(図面)', REPORT_DOC_H2);
   docBodyPara_(body, (ph.side === 'qa' ? RPT_L_.qa : RPT_L_.self) + ': ' + userName_(ph.takenBy) + ' / ' + dtShort_(ph.takenAt));
 
@@ -499,10 +499,11 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   docBodyPara_(body, '提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length);
 
   // 11. 写真(SPEC §10.5.5 版1.14.0: 項目の番号順・最大60枚(選ぶときだけNG優先)・1ページ3枚・本体の画像)
-  body.appendPageBreak();
-  docBodyPara_(body, '写真', h2);
+  // 版1.14.3: 「写真」の見出しは出さない(各ブロックに No.・項目名がある)。改ページは 1pt の空段落の中に入れる
+  // (body.appendPageBreak は既定の高さ(約14pt)の段落を作り、写真の1ページ目があふれて白紙のページが出たため)。写真0枚なら改ページもしない
   var order = reportPhotoOrder_(rows, photos, REPORT_PHOTOS_MAX);
   var shown = order.shown;
+  if (shown.length) docSpacer_(body, true);
   var loadPhoto = reportPhotoLoader_();
   shown.forEach(function (ph, idx) {
     docPhotoBlock_(body, ph, order.rowOf, order.seq, loadPhoto);

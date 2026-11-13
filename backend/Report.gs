@@ -488,9 +488,10 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('<p>提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length + '</p>');
 
   // 写真(SPEC §10.2b-B 版1.14.0): 項目の番号順・最大60枚(選ぶときだけNG優先)・1ページ3枚・左=写真(本体)・右=情報欄
-  h.push('<h2 style="page-break-before:always">写真</h2>');
+  // 版1.14.3: 「写真」の見出しは出さない(doc 方式と同じ)。写真があるときだけ新しいページから始める
   var order = reportPhotoOrder_(rows, photos, REPORT_PHOTOS_MAX);
   var shown = order.shown, rowOf = order.rowOf, seq = order.seq;
+  if (shown.length) h.push('<div style="page-break-before:always"></div>');
   var loadPhoto = reportPhotoLoader_();
   function resChip_(res, sev, over) {
     var t = (RESULT_LABEL_[res] || '-') + (res === 'ng' && sev ? '(' + (sev === 'major' ? '重大' : '軽微') + ')' : '');

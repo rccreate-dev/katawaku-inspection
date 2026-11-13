@@ -242,7 +242,7 @@ test('C-REP-10 doc方式: 番号順・本体の画像・枠の中で最大・3�
     assert.ok(im.w <= BW + 0.5 && im.h <= BH + 0.5, `枠内 ${im.w}x${im.h}`);
     assert.ok(Math.abs(im.w - BW) <= 0.5 || Math.abs(im.h - BH) <= 0.5, `枠の中で最大 ${im.w}x${im.h}`);
   });
-  assert.equal(d.pageBreaks, 1 + 1, '写真見出し前1 + 3枚目の後1(最後の後は無し)');
+  assert.equal(d.pageBreaks, 1 + 1, '写真の前1 + 3枚目の後1(最後の後は無し)');
   blocks.forEach((t) => assert.ok(!t.cellTexts[0][1].includes('実測(')));
 });
 

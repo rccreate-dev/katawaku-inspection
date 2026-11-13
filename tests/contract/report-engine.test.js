@@ -182,7 +182,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     for (const k of ['top', 'bottom', 'left', 'right']) near(d.margins[k], 34.02, 0.05, 'margin.' + k);
     assert.equal(d.fontFamily, 'Noto Sans JP');
     assert.equal(d.images.length, nPhoto + nDrawing, '画像の数');
-    const expectBreaks = nDrawing + 1 + Math.floor((nPhoto - 1) / 3);   // 版1.14.0: 3枚/ページ
+    const expectBreaks = nDrawing + (nPhoto > 0 ? 1 + Math.floor((nPhoto - 1) / 3) : 0);   // 版1.14.0: 3枚/ページ。版1.14.3: 写真0枚なら写真の前の改ページなし
     assert.equal(d.pageBreaks, expectBreaks, '改ページ数');
     // 写真ブロックの表(版1.14.1: 2列・308.46/213.12pt(=110・76mm×184/186)・最低行高229.61pt(81mm))の数 = 写真の枚数
     const mm = (x) => x * 72 / 25.4;

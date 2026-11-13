@@ -148,7 +148,7 @@ function createDocShim(state, hooks) {
   class Body {
     constructor(doc) {
       this.doc = doc; this.kind = 'b'; this.children = [new Paragraph(this, doc)];
-      this.pageWidth = null; this.pageHeight = null; this.margins = {}; this.fontFamily = null; this.pageBreaks = 0;
+      this.pageWidth = null; this.pageHeight = null; this.margins = {}; this.fontFamily = null; this.pageBreaks = 0; this.bodyBreakParas = 0;
     }
     getParagraphs() { return this.children.filter((c) => c.kind === 'p'); }
     appendParagraph(t) { this.doc._ck(); const p = new Paragraph(this, this.doc); p.text = String(t || ''); this.children.push(p); return p; }
@@ -159,7 +159,7 @@ function createDocShim(state, hooks) {
       if (ds.failMode === 'slow' && !ds.slowDone) { ds.slowDone = true; hooks.advanceMs(90000); }
       const t = new Table(this, grid, this.doc); this.children.push(t); return t;
     }
-    appendPageBreak() { this.doc._ck(); this.pageBreaks++; this.children.push({ kind: 'pb', parent: this }); return this; }
+    appendPageBreak() { this.doc._ck(); this.pageBreaks++; this.bodyBreakParas++; this.children.push({ kind: 'pb', parent: this }); return this; }
     setPageWidth(v) { this.doc._ck(); this.pageWidth = v; return this; }
     setPageHeight(v) { this.doc._ck(); this.pageHeight = v; return this; }
     setMarginTop(v) { this.doc._ck(); this.margins.top = v; return this; }
@@ -212,7 +212,7 @@ function createDocShim(state, hooks) {
       });
       return {
         title: this.title, pageWidth: b.pageWidth, pageHeight: b.pageHeight, margins: Object.assign({}, b.margins),
-        fontFamily: b.fontFamily, text: this.fullText(), pageBreaks: b.pageBreaks, images,
+        fontFamily: b.fontFamily, text: this.fullText(), pageBreaks: b.pageBreaks, bodyBreakParas: b.bodyBreakParas, images,
         // SPEC §11.4(版1.10.2): 本文直下の段落ごとの観測(表のセル内は含めない)
         paragraphs: b.children.filter((c) => c.kind === 'p').map((c) => ({ text: c.text })),
         tables: tables.map((t) => ({

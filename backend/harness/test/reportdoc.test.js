@@ -208,8 +208,10 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.ok(dr[0].w <= MMK(186) + 0.5 && dr[0].h <= MMK(170) + 0.5);
   near(dr[0].w / dr[0].h, 1600 / 900, 0.02, '図面の比率');
   assert.ok(Math.abs(dr[0].w - MMK(186)) < 0.5 || Math.abs(dr[0].h - MMK(170)) < 0.5, '枠いっぱいに収める');
-  // ④ 改ページ: 図面1 + 「写真」見出し前1 + floor((6-1)/3)=1(版1.14.0: 3枚/ページ)
+  // ④ 改ページ: 図面1 + 写真の前1 + floor((6-1)/3)=1(版1.14.0: 3枚/ページ)
   assert.equal(d.pageBreaks, 3);
+  // 版1.14.3: 改ページは全て 1pt の空段落の中(body.appendPageBreak の改ページ段落を作らない)
+  assert.equal(d.bodyBreakParas, 0, 'body.appendPageBreak を使わない');
   // ⑤ 表
   const blocks = d.tables.filter((t) => t.cols === 2);
   assert.equal(blocks.length, 6);
@@ -227,9 +229,10 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   // 版1.11.2: 実GASの Paragraph に setKeepWithNext は無い。keepWithNext は使わず、観測にも出さない
   assert.equal(d.keepWithNextTexts, undefined);
   assert.ok(Array.isArray(d.paragraphs) && d.paragraphs.every((p) => typeof p.text === 'string' && !('keepWithNext' in p)));
-  ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '写真', '確認箇所(図面)'].forEach((hd) => {
+  ['サイン欄(3者)', '結果サマリ', '項目表', 'NG・是正の経過', '確認箇所(図面)'].forEach((hd) => {
     assert.equal(d.paragraphs.filter((p) => p.text === hd).length, 1, 'h2は1つ: ' + hd);
   });
+  assert.equal(d.paragraphs.filter((p) => p.text === '写真').length, 0, '版1.14.3: 「写真」の見出しは出さない');
   assert.equal(d.paragraphs.filter((p) => p.text.startsWith('管理者コメントの全文は')).length, 0, '旧注記は廃止(版1.11.0)');
   assert.equal(d.paragraphs.length, model.body.children.filter((c) => c.kind === 'p').length, '表のセル内の段落は含めない');
   assert.ok(!d.paragraphs.some((p) => p.text.indexOf('撮影') === 0), '写真ブロックのセル内の段落は含めない');
@@ -291,15 +294,16 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.ok(h.control('drive', {}).data.paths.some((p) => p.startsWith('reports/') && p.endsWith('.pdf')));
 });
 
-test('C-REP-03④ 改ページ数(版1.14.0: 3枚/ページ): 写真0/1/3/4/6/7/9枚。最後の写真ブロックの後に改ページを入れない', () => {
+test('C-REP-03④ 改ページ数(版1.14.3): 写真0/1/3/4/6/7/9枚。写真0枚なら改ページなし。最後の写真ブロックの後に改ページを入れない', () => {
   setEngine('doc');
-  const cases = [[0, 1], [1, 1], [3, 1], [4, 2], [6, 2], [7, 3], [9, 3]]; // [写真枚数, 図面なしの pageBreaks = 1(写真見出し前) + floor((n-1)/3)]
+  const cases = [[0, 0], [1, 1], [3, 1], [4, 2], [6, 2], [7, 3], [9, 3]]; // [写真枚数, 図面なしの pageBreaks = (写真があれば)1(写真の前) + floor((n-1)/3)]
   cases.forEach(([n, breaks]) => {
     const id = makeQaOk({ photos: n });
     h.control('docShim', { reset: true });
     gen(id);
     const d = docShim().lastDoc;
     assert.equal(d.pageBreaks, breaks, `写真${n}枚`);
+    assert.equal(d.bodyBreakParas, 0, `写真${n}枚: 改ページは空段落の中`);
     assert.equal(d.tables.filter((t) => t.cols === 2).length, n, `写真${n}枚の表の数`);
     if (n > 0 && n % 3 === 0) assert.equal(d.pageBreaks, 1 + (n / 3 - 1), '3の倍数でも最後の後に改ページなし');
   });
