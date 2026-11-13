@@ -196,6 +196,8 @@
     return new Promise(function (resolve) {
       var layer = document.getElementById('overlay');
       var stream = null, result = null, done = false;
+      // 版1.14.4(§7.1): 傾きの読み取り。iPhone の許可はタップの中で聞く必要があるので、ここで同期に始める
+      var motion = KW.photo.watchMotion(KW.config);
       var video = h('video', { autoplay: true, playsinline: true, muted: true });
       video.muted = true;
       var prev = h('img', { class: 'prev', alt: '', hidden: true });
@@ -219,6 +221,7 @@
       function finish(v) {
         if (done) return; done = true;
         KW.photo.stopCamera(stream);
+        motion.stop();
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(v);
       }
@@ -276,6 +279,7 @@
         var c = document.createElement('canvas');
         c.width = video.videoWidth; c.height = video.videoHeight;
         c.getContext('2d').drawImage(video, 0, 0);
+        c = KW.photo.uprightCapture(c, motion);   // 版1.14.4: 画面の向きロックで横倒しに写ったものを、傾きで正しい向きに回す
         processSource(c, c.width, c.height);
       });
       retake.addEventListener('click', function () {

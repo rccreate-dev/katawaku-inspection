@@ -67,3 +67,39 @@ describe('U-PHOTO-03 モード選択', () => {
     assert.equal(locked.total, Math.ceil(b64.length / 90000));
   });
 });
+
+describe('U-PHOTO-04 撮った画像の向き(版1.14.4 §7.1)', () => {
+  it('deviceAngle: 重力の向きから端末の向き。平らに近い・不正な値は null', () => {
+    assert.equal(photo.deviceAngle({ x: 9.8, y: 0 }), 90);
+    assert.equal(photo.deviceAngle({ x: -9.8, y: 0 }), 270);
+    assert.equal(photo.deviceAngle({ x: 0, y: 9.8 }), 0);
+    assert.equal(photo.deviceAngle({ x: 0, y: -9.8 }), 180);
+    assert.equal(photo.deviceAngle({ x: 1, y: 2 }), null, '3.0 未満');
+    assert.equal(photo.deviceAngle({ x: 'a', y: 0 }), null);
+    assert.equal(photo.deviceAngle({ x: null, y: 9.8 }), null);
+    assert.equal(photo.deviceAngle(null), null);
+  });
+  it('screenAngle: screen.orientation.angle を優先し、無ければ window.orientation、両方無ければ 0', () => {
+    assert.equal(photo.screenAngle(90, undefined), 90);
+    assert.equal(photo.screenAngle(-90, undefined), 270);
+    assert.equal(photo.screenAngle(270, 0), 270);
+    assert.equal(photo.screenAngle(undefined, -90), 270);
+    assert.equal(photo.screenAngle(undefined, undefined), 0);
+  });
+  it('captureRotation: 時計回りの角度 (画面 − 端末) mod 360。端末が null なら 0', () => {
+    assert.equal(photo.captureRotation(90, 0), 270);
+    assert.equal(photo.captureRotation(270, 0), 90);
+    assert.equal(photo.captureRotation(90, 90), 0);
+    assert.equal(photo.captureRotation(180, 0), 180);
+    assert.equal(photo.captureRotation(0, 0), 0);
+    assert.equal(photo.captureRotation(null, 0), 0);
+  });
+  it('motionSign: iPhone/iPad は −1、それ以外は 1、設定 MOTION_SIGN があれば優先', () => {
+    assert.equal(photo.motionSign('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)'), -1);
+    assert.equal(photo.motionSign('Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)'), -1);
+    assert.equal(photo.motionSign('Mozilla/5.0 (Linux; Android 14)'), 1);
+    assert.equal(photo.motionSign('Mozilla/5.0 (iPhone)', { MOTION_SIGN: 1 }), 1);
+    assert.equal(photo.motionSign('Mozilla/5.0 (Linux)', { MOTION_SIGN: -1 }), -1);
+    assert.equal(photo.motionSign('Mozilla/5.0 (iPhone)', { MOTION_SIGN: 2 }), -1, '1/−1 以外は無視');
+  });
+});

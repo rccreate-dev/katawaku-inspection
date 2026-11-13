@@ -213,6 +213,80 @@
   /* 測定値チップの番号(丸数字1〜20、21以上は通常数字。図面の枝番 k と同じ) */
   function pointNo(k) { return drawingNo(k); }
 
+  /* ---- 撮った画像の向きを傾きで直す(SPEC §7.1 版1.14.4) ---- */
+  var MOTION_MIN = 3.0;        // これ未満の傾き(m/s²)は平らに近いとみなし、判定しない
+  var MOTION_MAX_AGE_MS = 1500; // これより古い傾きは使わない
+
+  /* 重力の符号。仕様(W3C)では縦持ちで y=+9.8。iPhone/iPad の Safari は逆なので −1。cfg.MOTION_SIGN(1/−1)があれば優先。純関数 */
+  function motionSign(ua, cfg) {
+    var v = cfg && Number(cfg.MOTION_SIGN);
+    if (v === 1 || v === -1) return v;
+    return /iPhone|iPad|iPod/.test(String(ua || '')) ? -1 : 1;
+  }
+  /* 端末の向き(screen.orientation.angle と同じ定義: 縦持ちから反時計回りの角度)。g は仕様の向きの重力 {x,y}。判定できなければ null。純関数 */
+  function deviceAngle(g) {
+    if (!g) return null;
+    var x = Number(g.x), y = Number(g.y);
+    if (g.x == null || g.y == null || !isFinite(x) || !isFinite(y)) return null;
+    var ax = Math.abs(x), ay = Math.abs(y);
+    if (Math.max(ax, ay) < MOTION_MIN) return null;
+    if (ax > ay) return x > 0 ? 90 : 270;
+    return y > 0 ? 0 : 180;
+  }
+  function norm360(a) { a = Math.round(Number(a) / 90) * 90; return ((a % 360) + 360) % 360; }
+  /* 画面の向き。so = screen.orientation.angle、wo = window.orientation(古い iOS)。どちらも無ければ 0。純関数 */
+  function screenAngle(so, wo) {
+    if (typeof so === 'number' && isFinite(so)) return norm360(so);
+    if (typeof wo === 'number' && isFinite(wo)) return norm360(wo);
+    return 0;
+  }
+  /* 撮った画像を時計回りに何度回すか。dev が null なら 0(回さない)。純関数 */
+  function captureRotation(dev, scr) {
+    if (dev == null) return 0;
+    return norm360((scr || 0) - dev);
+  }
+  /* canvas を時計回りに deg(90/180/270)回した新しい canvas。0 は元のまま */
+  function rotateCanvas(src, deg) {
+    deg = norm360(deg);
+    if (!deg) return src;
+    var w = src.width, hgt = src.height;
+    var c = deg === 180 ? canvasOf(w, hgt) : canvasOf(hgt, w);
+    var g = c.getContext('2d');
+    g.translate(c.width / 2, c.height / 2);
+    g.rotate(deg * Math.PI / 180);
+    g.drawImage(src, -w / 2, -hgt / 2);
+    return c;
+  }
+  /* M2 を開いている間の傾きの読み取り。iPhone は requestPermission をタップの中で呼ぶ(呼び出し側は同期で呼ぶこと)。
+   * 戻り値 { gravity(): 仕様の向きの {x,y} または null, stop() } */
+  function watchMotion(cfg) {
+    var last = null, on = false;
+    var now = function () { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); };
+    function onMotion(e) {
+      var g = e && e.accelerationIncludingGravity;
+      if (g && g.x != null && g.y != null) last = { x: g.x, y: g.y, t: now() };
+    }
+    function start() { if (on || typeof window === 'undefined') return; on = true; window.addEventListener('devicemotion', onMotion); }
+    var D = typeof DeviceMotionEvent !== 'undefined' ? DeviceMotionEvent : null;
+    try {
+      if (D && typeof D.requestPermission === 'function') {
+        D.requestPermission().then(function (st) { if (st === 'granted') start(); }, function () { /* 許可なし: 回さない */ });
+      } else if (D) start();
+    } catch (e) { /* 対応しない端末: 回さない */ }
+    var sign = motionSign(typeof navigator !== 'undefined' ? navigator.userAgent : '', cfg);
+    return {
+      gravity: function () { return (!last || now() - last.t > MOTION_MAX_AGE_MS) ? null : { x: last.x * sign, y: last.y * sign }; },
+      stop: function () { if (on) window.removeEventListener('devicemotion', onMotion); on = false; }
+    };
+  }
+  /* 今の傾きと画面の向きから、撮った canvas を正しい向きに回す(回さないときは元の canvas) */
+  function uprightCapture(canvas, motion) {
+    var so = (typeof screen !== 'undefined' && screen.orientation) ? screen.orientation.angle : undefined;
+    var wo = typeof window !== 'undefined' ? window.orientation : undefined;
+    var rot = captureRotation(deviceAngle(motion && motion.gravity()), screenAngle(so, wo));
+    return rotateCanvas(canvas, rot);
+  }
+
   /* 図面を横向きにするか(§7.7-1 版1.14.2)。縦長(高さ>幅)なら true。正方形・不正な値は false。純関数 */
   function drawingNeedsLandscape(w, h) {
     w = Number(w); h = Number(h);
@@ -253,6 +327,7 @@
 
   var api = {
     drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, encodeDrawing: encodeDrawing,
+    motionSign: motionSign, deviceAngle: deviceAngle, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,
