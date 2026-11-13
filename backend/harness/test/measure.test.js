@@ -306,7 +306,7 @@ test('C-REP-07 ⑤ 判定への非影響: ▲があっても ok の行は赤背�
   assert.deepEqual(cells('管理者'), [totalQa, 0, 0]);
 });
 
-test('C-REP-07 ⑥ 写真ブロック: 実測(職長)/(管理者) を同じ書式で。旧形式なし。値のない項目には出さない', () => {
+test('C-REP-07 ⑥(版1.14.0) 写真ブロック: 実測の行を出さず、結果の後ろに側ごとの ▲許容超n件', () => {
   const { id, N } = buildPrePour();
   gen(id);
   const html = h.state.lastHtml;
@@ -315,21 +315,16 @@ test('C-REP-07 ⑥ 写真ブロック: 実測(職長)/(管理者) を同じ書�
   const b6 = of(N.i6);
   assert.ok(b6.length >= 1);
   const t6 = strip(b6[0]).split('\n');
-  const i = t6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
-  assert.ok(i >= 0, t6.join(' / '));
-  assert.equal(t6[i + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件');
-  assert.equal(t6[i + 2], '実測(管理者): +2、 ▲+3');
-  assert.equal(t6[i + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
-  assert.ok(b6[0].includes(OVER('▲-3')) && b6[0].includes(OVER('▲許容超2件')));
+  assert.ok(t6.includes('職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件'), t6.join(' / '));
+  assert.ok(b6[0].includes(OVER('▲許容超2件')) && b6[0].includes(OVER('▲許容超1件')), '▲許容超n件 は over の span');
   const t8 = strip(of(N.i8)[0]).split('\n');
-  const j = t8.indexOf('実測(職長): +2、 -1、 0');
-  assert.ok(j >= 0 && t8[j + 1] === 'n=3 最小-1/最大+2', t8.join(' / '));
-  assert.ok(!t8.some((l) => l.startsWith('実測(管理者)')), '管理者の値がない側は出さない');
-  blocks.forEach((b) => assert.ok(!/(^|\n)実測: /.test(strip(b)), '旧形式 実測: で始まる行がない'));
-  // 値のない項目の写真には「実測」を出さない(i7 は値なし。重点項目の写真で確認)
-  const keyBlocks = blocks.filter((b) => !/No\.(\d+) /.test(strip(b)) || ![N.i4, N.i5, N.i6, N.i8].includes(Number(/No\.(\d+) /.exec(strip(b))[1])));
-  assert.ok(keyBlocks.length > 0);
-  keyBlocks.forEach((b) => assert.ok(!strip(b).includes('実測'), '値のない項目の写真に実測が出ない'));
+  assert.ok(t8.includes('職長: 合 / 管理者: 合'), '許容なしの項目は ▲ なし: ' + t8.join(' / '));
+  blocks.forEach((b) => {
+    const t = strip(b);
+    assert.ok(!t.includes('実測('), '写真ブロックに 実測( が無い');
+    assert.ok(!/(^|\n)n=/.test(t), '写真ブロックに要約(n=)が無い');
+    assert.ok(!t.includes('+1、 ▲-3'), '写真ブロックに値の並びが無い');
+  });
 });
 
 test('C-REP-07 ⑦ 出来形(post_demold)にも同じ規則(i56 許容10・i57 許容3)', () => {
@@ -381,13 +376,15 @@ test('C-REP-08 ①〜⑦ doc方式の実測: 項目表の文字列・色/太字�
   assert.ok(d.coloredTexts['#444444'].includes(NOTE));
   // ④ 管理者コメント 200 文字が全文
   assert.ok(items.cellTexts.some((row) => row[6] === LONG), '管理者コメントが項目表に全文');
-  // ⑤ 写真ブロック右セル
+  // ⑤ 写真ブロック右セル(版1.14.0: 実測の行なし。結果の後ろに側ごとの ▲許容超n件)
   const blocks = d.tables.filter((t) => t.cols === 2).map((t) => t.cellTexts[0][1]);
   const b6 = blocks.find((b) => b.includes('No.' + N.i6 + ' '));
-  assert.ok(b6.includes('実測(職長): +1、 ▲-3、 +2、 ▲-2.5\nn=4 最小-3/最大+2/許容±2mm ▲許容超2件\n実測(管理者): +2、 ▲+3\nn=2 最小+2/最大+3/許容±2mm ▲許容超1件'), b6);
+  assert.ok(b6.split('\n').includes('職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件'), b6);
+  assert.ok(d.coloredTexts['#CC0000'].includes('▲許容超2件') && d.coloredTexts['#CC0000'].includes('▲許容超1件'));
+  assert.ok(d.boldTexts.includes('▲許容超2件') && d.boldTexts.includes('▲許容超1件'));
   const b8 = blocks.find((b) => b.includes('No.' + N.i8 + ' '));
-  assert.ok(b8.includes('実測(職長): +2、 -1、 0\nn=3 最小-1/最大+2') && !b8.includes('実測(管理者)'), b8);
-  blocks.filter((b) => b.includes('実測')).forEach((b) => assert.ok(!/(^|\n)実測: /.test(b)));
+  assert.ok(b8.split('\n').includes('職長: 合 / 管理者: 合'), b8);
+  blocks.forEach((b) => assert.ok(!b.includes('実測(') && !/(^|\n)n=/.test(b), '写真ブロックに実測の行が無い: ' + b.slice(0, 60)));
   // ⑦ 背景: i5 の行(▲+7・ok)は null、i6(職長NG)は赤、見出し行は #EEEEEE
   const bg = (n) => items.cellBackgrounds[Number(n)];
   assert.ok(bg(N.i5).every((c) => c === null), 'i5 は背景なし');

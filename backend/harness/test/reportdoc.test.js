@@ -187,8 +187,14 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.equal(d.images.length, 7);
   const inBlock = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 2);
   assert.equal(inBlock.length, 6);
-  inBlock.forEach((im) => { assert.ok(im.w <= MMK(80) + 0.5 && im.h <= MMK(58) + 0.5, `写真は枠内: ${im.w}x${im.h}`); });
-  // 縦横比(サムネ実寸と±1%)。順序は写真の並び(NG項目優先)で変わるので比率の集合で確認
+  // 版1.14.0: 枠 305.62×235.28pt の中で最大(幅か高さが枠に一致)
+  const BW = MMK(110) - 2 * MM(0.5), BH = MM(83);
+  inBlock.forEach((im) => {
+    assert.ok(im.w <= BW + 0.5 && im.h <= BH + 0.5, `写真は枠内: ${im.w}x${im.h}`);
+    assert.ok(Math.abs(im.w - BW) <= 0.5 || Math.abs(im.h - BH) <= 0.5, `写真は枠の中で最大: ${im.w}x${im.h}`);
+  });
+  near(BW, 305.62, 0.01, '枠の幅'); near(BH, 235.28, 0.01, '枠の高さ');
+  // 縦横比(Photos.width/height と±1%)。比率の集合で確認
   const want = [[400, 300], [200, 400], [300, 300], [800, 200], [100, 100], [160, 90]].map(([w, hh]) => w / hh).sort();
   const got = inBlock.map((im) => im.w / im.h).sort();
   got.forEach((r, i) => assert.ok(Math.abs(r - want[i]) / want[i] <= 0.01, `縦横比 ${r} vs ${want[i]}`));
@@ -197,15 +203,15 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.ok(dr[0].w <= MMK(186) + 0.5 && dr[0].h <= MMK(170) + 0.5);
   near(dr[0].w / dr[0].h, 1600 / 900, 0.02, '図面の比率');
   assert.ok(Math.abs(dr[0].w - MMK(186)) < 0.5 || Math.abs(dr[0].h - MMK(170)) < 0.5, '枠いっぱいに収める');
-  // ④ 改ページ: 図面1 + 「写真」見出し前1 + floor((6-1)/4)=1
+  // ④ 改ページ: 図面1 + 「写真」見出し前1 + floor((6-1)/3)=1(版1.14.0: 3枚/ページ)
   assert.equal(d.pageBreaks, 3);
   // ⑤ 表
   const blocks = d.tables.filter((t) => t.cols === 2);
   assert.equal(blocks.length, 6);
   blocks.forEach((t) => {
     assert.equal(t.rows, 1);
-    near(t.colWidths[0], MMK(83), 0.5); near(t.colWidths[1], MMK(103), 0.5);
-    near(t.minRowHeights[0], 175.75, 0.5);
+    near(t.colWidths[0], 308.46, 0.5); near(t.colWidths[1], 213.12, 0.5);   // 版1.14.0: 110/76mm ×184/186
+    near(t.minRowHeights[0], 238.11, 0.5);   // 84mm(縮めない)
     assert.equal(t.borderWidth, 0.75);
   });
   const items = d.tables.find((t) => t.cols === 7);
@@ -280,9 +286,9 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.ok(h.control('drive', {}).data.paths.some((p) => p.startsWith('reports/') && p.endsWith('.pdf')));
 });
 
-test('C-REP-03④ 改ページ数: 写真0/4/5/8/9枚。最後の写真ブロックの後に改ページを入れない', () => {
+test('C-REP-03④ 改ページ数(版1.14.0: 3枚/ページ): 写真0/1/3/4/6/7/9枚。最後の写真ブロックの後に改ページを入れない', () => {
   setEngine('doc');
-  const cases = [[0, 1], [1, 1], [4, 1], [5, 2], [8, 2], [9, 3], [12, 3]]; // [写真枚数, 図面なしの pageBreaks = 1(写真見出し前) + floor((n-1)/4)]
+  const cases = [[0, 1], [1, 1], [3, 1], [4, 2], [6, 2], [7, 3], [9, 3]]; // [写真枚数, 図面なしの pageBreaks = 1(写真見出し前) + floor((n-1)/3)]
   cases.forEach(([n, breaks]) => {
     const id = makeQaOk({ photos: n });
     h.control('docShim', { reset: true });
@@ -290,10 +296,10 @@ test('C-REP-03④ 改ページ数: 写真0/4/5/8/9枚。最後の写真ブロッ
     const d = docShim().lastDoc;
     assert.equal(d.pageBreaks, breaks, `写真${n}枚`);
     assert.equal(d.tables.filter((t) => t.cols === 2).length, n, `写真${n}枚の表の数`);
-    if (n > 0 && n % 4 === 0) assert.equal(d.pageBreaks, 1 + (n / 4 - 1), '4の倍数でも最後の後に改ページなし');
+    if (n > 0 && n % 3 === 0) assert.equal(d.pageBreaks, 1 + (n / 3 - 1), '3の倍数でも最後の後に改ページなし');
   });
-  // 図面あり: 図面の数 + 1 + floor((写真-1)/4)
-  const id = makeQaOk({ photos: 5, drawings: [{ side: 'self', w: 800, h: 600 }] });
+  // 図面あり: 図面の数 + 1 + floor((写真-1)/3)
+  const id = makeQaOk({ photos: 4, drawings: [{ side: 'self', w: 800, h: 600 }] });
   h.control('docShim', { reset: true });
   gen(id);
   assert.equal(docShim().lastDoc.pageBreaks, 1 + 1 + 1);

@@ -171,14 +171,14 @@ describe('E-26 写真の状態表示', () => {
     const { page } = s;
     await E.loginFast(s, '田中');
     await page.goto(s.base + '/#/record/' + A3 + '/edit');
-    await page.locator('#drawings [data-act=add-drawing]').waitFor();
+    await page.locator('#drawings [data-act=pick-drawing]').waitFor();
     await E.settle(s, 300);
     const b64 = await page.evaluate(() => new Promise((res) => {
       const c = document.createElement('canvas'); c.width = 900; c.height = 600;
       const g = c.getContext('2d'); g.fillStyle = '#e8e4d8'; g.fillRect(0, 0, 900, 600); g.strokeRect(30, 30, 840, 540);
       c.toBlob((b) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.readAsDataURL(b); }, 'image/jpeg', 0.9);
     }));
-    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=add-drawing]').click()]);
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=pick-drawing]').click()]);
     await fc.setFiles({ name: 'z.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(b64, 'base64') });
     await page.locator('.dedit').waitFor();
     await page.locator('.dedit .dnum[data-no="1"]').click();

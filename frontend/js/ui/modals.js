@@ -188,7 +188,11 @@
   /* ---- M2 アプリ内カメラ ----
    * camera({siteName, floor, zone, count, max}) -> Promise<photo|null>
    * photo = { full, thumb, width, height, bytes, sha256, stampText, mime, takenAt } */
+  /* ---- M2 アプリ内カメラ。o.mode='drawing' は図面モード(SPEC §7.7-1 版1.14.0):
+   *   スタンプ・枚数表示・横向きの案内なし、縮小なし。「使う」で { blob(JPEG 0.92), width, height } を返す。
+   *   カメラが使えないときは案内だけ出し、ファイル選択は出さない(「写真から選ぶ」を使う) ---- */
   M.camera = function (o) {
+    var drawingMode = o && o.mode === 'drawing';
     return new Promise(function (resolve) {
       var layer = document.getElementById('overlay');
       var stream = null, result = null, done = false;
@@ -205,7 +209,8 @@
       var lastSrc = null; // 回転の元(直近に処理した画像: {source,w,h})
       var use = h('button', { type: 'button', class: 'cambtn primary', hidden: true }, t('photo.use'));
       var cancel = h('button', { type: 'button', class: 'cambtn' }, t('act.cancel'));
-      var count = h('span', null, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
+      var count = h('span', { hidden: drawingMode }, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
+      if (drawingMode) hint.hidden = true;
       var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, use);
       var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, bar);
       layer.appendChild(box);
@@ -224,7 +229,28 @@
         msg.hidden = false; KW.clear(msg).appendChild(document.createTextNode(t(code)));
         shutter.disabled = true;
       }
+      /* 図面モード: そのままの寸法で JPEG(0.92)にする(縮小・圧縮は M10 の取り込みで行う。§7.7-3) */
+      function processDrawing(source, w, hgt) {
+        lastSrc = { source: source, w: w, h: hgt };
+        shutter.disabled = true; rotate.disabled = true; use.disabled = true;
+        msg.hidden = false; KW.clear(msg).appendChild(document.createTextNode(t('photo.processing')));
+        var c = source;
+        if (!(source instanceof HTMLCanvasElement)) {
+          c = document.createElement('canvas'); c.width = w; c.height = hgt;
+          c.getContext('2d').drawImage(source, 0, 0, w, hgt);
+        }
+        c.toBlob(function (b) {
+          if (!b) { showErr('err.INTERNAL'); shutter.disabled = false; rotate.disabled = false; use.disabled = false; return; }
+          result = { blob: b, width: w, height: hgt };
+          prev.src = C.blobUrl(b);
+          prev.hidden = false; video.hidden = true;
+          shutter.hidden = true; retake.hidden = false; rotate.hidden = false; use.hidden = false;
+          msg.hidden = true;
+          rotate.disabled = false; use.disabled = false;
+        }, 'image/jpeg', 0.92);
+      }
       function processSource(source, w, hgt) {
+        if (drawingMode) return processDrawing(source, w, hgt);
         var ms = KW.time.nowMs(KW.state.skewMs);
         lastSrc = { source: source, w: w, h: hgt };
         shutter.disabled = true;
@@ -278,6 +304,10 @@
         var p = video.play(); if (p && p.catch) p.catch(function () { /* 無視 */ });
       }, function () {
         showErr('err.camera_denied');
+        if (drawingMode) {   // 図面: 「写真から選ぶ」を案内する(M2 の中にファイル選択は出さない)
+          msg.appendChild(h('br')); msg.appendChild(document.createTextNode(t('drawing.camera_fallback')));
+          return;
+        }
         if (KW.config.ALLOW_FILE_PHOTO) {
           fileIn = h('input', { type: 'file', accept: 'image/*', class: 'cambtn', 'aria-label': t('photo.pick_file') });
           fileIn.addEventListener('change', function () {

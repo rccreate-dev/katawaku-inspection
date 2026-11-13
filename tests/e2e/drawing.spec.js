@@ -26,10 +26,10 @@ async function makeJpeg(page, w = 1200, h = 800) {
   return Buffer.from(b64, 'base64');
 }
 
-/** 「図面を追加」→ファイル選択 → M10 を開く */
+/** 「写真から選ぶ」→ファイル選択 → M10 を開く(版1.14.0。旧「図面を追加」) */
 async function pickDrawing(s, file) {
   const { page } = s;
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=add-drawing]').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=pick-drawing]').click()]);
   await fc.setFiles(file);
 }
 const marks = (s) => s.page.locator('.dedit [data-testid=drawing-mark]');
@@ -69,7 +69,7 @@ describe('E-14 図面の書き込み', () => {
     assert.deepEqual(await page.locator('#it-i4 .val').evaluateAll((els) => els.map((e) => e.textContent.replace('×', '').trim())), ['①+2', '②-3']);
 
     // --- 取り込み → M10 ---
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), false);
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').isDisabled(), false);
     await pickDrawing(s, { name: 'zumen.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(page) });
     await page.locator('.dedit').waitFor();
     assert.equal(await numBtn(s, 4).count(), 1, '項目番号④のボタンがある');
@@ -197,7 +197,8 @@ describe('E-14 図面の書き込み', () => {
     await page.goto(s.base + '/#/record/' + rid + '/edit');
     await page.locator('#drawings').waitFor();
     assert.equal(await page.locator('#drawings .thumb').count(), 1);
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), true, '提出後は図面を追加できない');
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').isDisabled(), true, '提出後は図面を追加できない');
+    assert.equal(await page.locator('#drawings [data-act=shoot-drawing]').isDisabled(), true, '提出後は図面を撮影できない');
     assert.equal(await page.locator('#drawings .thumbwrap .x').count(), 0, '提出後は削除×が出ない');
     s.assertClean(); await s.close();
 
@@ -209,7 +210,7 @@ describe('E-14 図面の書き込み', () => {
     await q.page.locator('#drawings').waitFor();
     await q.page.locator('#drawings [data-side=self] .thumb').first().waitFor();
     assert.equal(await q.page.locator('#drawings [data-side=self] .x').count(), 0, '職長の図面は削除できない');
-    await q.page.waitForFunction(() => { const b = document.querySelector('#drawings [data-act=add-drawing]'); return b && !b.disabled; });
+    await q.page.waitForFunction(() => { const b = document.querySelector('#drawings [data-act=pick-drawing]'); return b && !b.disabled; });
     await pickDrawing(q, { name: 'zumen2.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(q.page, 900, 1200) });
     await q.page.locator('.dedit').waitFor();
     await numBtn(q, 2).click();
@@ -244,7 +245,7 @@ describe('E-14 図面の書き込み', () => {
     await pickDrawing(s, { name: 'x.heic', mimeType: 'image/heic', buffer: Buffer.from('not an image at all') });
     await page.locator('.toast.bad', { hasText: s.t('err.drawing_unreadable') }).waitFor();
     assert.equal(await page.locator('.dedit').count(), 0, 'エディタは開かない');
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), false);
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').isDisabled(), false);
 
     // 印なしでも登録できる(markers=[])
     for (let n = 0; n < 5; n++) {
@@ -256,13 +257,61 @@ describe('E-14 図面の書き込み', () => {
     await E.settle(s);
     assert.equal(await page.locator('#drawings .thumb').count(), 5);
     assert.match(await page.locator('#drawings .dside h4').innerText(), /5\/5/);
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), true, '5枚で追加不可');
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').isDisabled(), true, '5枚で追加不可');
+    assert.equal(await page.locator('#drawings [data-act=shoot-drawing]').isDisabled(), true, '5枚で撮影も不可');
     await page.locator('#drawings .thumbwrap .x').last().click();
     await E.settle(s);
     assert.equal(await page.locator('#drawings .thumb').count(), 4);
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').isDisabled(), false, '削除後は再び追加できる');
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').isDisabled(), false, '削除後は再び追加できる');
     const rid = (await E.stateRows('Records')).find((r) => r.lot === 'DR2').recordId;
     assert.equal((await E.stateRows('Photos')).filter((p) => p.recordId === rid && p.kind === 'drawing' && !p.deleted).length, 4);
+    s.assertClean(); await s.close();
+  });
+
+  it('版1.14.0: 「撮影する」と「写真から選ぶ」の2つのボタン。撮影はアプリ内カメラ(スタンプ・枚数表示なし)→M10→登録。カメラが使えなければ案内だけ', async () => {
+    const s = await E.newSession(env);
+    const { page } = s;
+    await E.login(s, '田中');
+    await newReadyRecord(s, 'DR4');
+    const rid = (await E.stateRows('Records')).find((r) => r.lot === 'DR4').recordId;
+    // 2つのボタンがあり、旧「図面を追加」のボタンは無い
+    assert.equal((await page.locator('#drawings [data-act=shoot-drawing]').innerText()).trim(), s.t('drawing.shoot'));
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').innerText(), s.t('drawing.pick'));
+    assert.equal(await page.locator('#drawings [data-act=add-drawing]').count(), 0, '旧ボタンは無い');
+    assert.equal(await page.locator('#drawings', { hasText: s.t('drawing.add') }).locator('button', { hasText: s.t('drawing.add') }).count(), 0);
+
+    // 撮影する → M2(図面モード)。スタンプのプレビュー・枚数表示・横向きの案内なし
+    await page.locator('#drawings [data-act=shoot-drawing]').click();
+    await page.locator('.cambox .shutter').waitFor();
+    await page.waitForFunction(() => { const b = document.querySelector('.cambox .shutter'); return b && !b.disabled; });
+    assert.equal(await page.locator('.cambox .camhint:visible').count(), 0, '横向きの案内なし');
+    assert.equal(await page.locator('.cambox .bar2 span:visible', { hasText: '/' }).count(), 0, '枚数表示なし');
+    assert.equal(await page.locator('.cambox .stamp:visible', { hasText: '・' }).count(), 0, 'スタンプのプレビューなし');
+    const frame = await page.evaluate(() => { const v = document.querySelector('.cambox video'); return [v.videoWidth, v.videoHeight]; });
+    await page.locator('.cambox .shutter').click();
+    await page.locator('.cambox .cambtn.primary:visible').click();
+    await page.locator('.cambox').waitFor({ state: 'detached' });
+    // M10 が開く → 番号①を置いて登録
+    await page.locator('.dedit').waitFor();
+    await numBtn(s, 1).click();
+    await tapAt(s, 60, 60);
+    await page.locator('.dedit [data-act=save]').click();
+    await page.locator('.dedit').waitFor({ state: 'detached' });
+    await E.settle(s);
+    assert.equal(await page.locator('#drawings .thumb').count(), 1);
+    const row = (await E.stateRows('Photos')).find((p) => p.recordId === rid && p.kind === 'drawing' && !p.deleted);
+    assert.ok(row, '図面が登録された');
+    const k = Math.min(1, 1800 / Math.max(frame[0], frame[1]));
+    assert.deepEqual([Number(row.width), Number(row.height)], [Math.round(frame[0] * k), Math.round(frame[1] * k)], '縮小しないで撮った画像(M10 で長辺1800px以下)');
+
+    // カメラが使えない → err.camera_denied と「写真から選ぶ」の案内。M2 の中にファイル選択は無い
+    await page.evaluate(() => { navigator.mediaDevices.getUserMedia = () => Promise.reject(new Error('NotAllowedError')); });
+    await page.locator('#drawings [data-act=shoot-drawing]').click();
+    await page.locator('.cambox', { hasText: s.t('drawing.camera_fallback') }).waitFor();
+    assert.ok((await page.locator('.cambox').innerText()).includes(s.t('err.camera_denied')));
+    assert.equal(await page.locator('.cambox input[type=file]').count(), 0, 'M2 にファイル選択なし');
+    await page.locator('.cambox .cambtn', { hasText: s.t('act.cancel') }).click();
+    await page.locator('.cambox').waitFor({ state: 'detached' });
     s.assertClean(); await s.close();
   });
 
@@ -273,8 +322,9 @@ describe('E-14 図面の書き込み', () => {
     await newReadyRecord(s, 'DR3');
     await page.locator('button.lang').click(); // インドネシア語へ
     s.lang = 'id';
-    await page.locator('#drawings [data-act=add-drawing]', { hasText: s.t('drawing.add') }).waitFor();
-    assert.equal(await page.locator('#drawings [data-act=add-drawing]').innerText(), s.t('drawing.add'));
+    await page.locator('#drawings [data-act=pick-drawing]', { hasText: s.t('drawing.pick') }).waitFor();
+    assert.equal(await page.locator('#drawings [data-act=pick-drawing]').innerText(), s.t('drawing.pick'));
+    assert.equal((await page.locator('#drawings [data-act=shoot-drawing]').innerText()).trim(), s.t('drawing.shoot'));
     await s.ctx.setOffline(true);
     s.allowFail = true;
     await pickDrawing(s, { name: 'z.jpg', mimeType: 'image/jpeg', buffer: await makeJpeg(page, 1000, 700) });

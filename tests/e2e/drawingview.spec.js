@@ -26,10 +26,10 @@ async function makeJpeg(page, w = 1200, h = 800) {
   return Buffer.from(b64, 'base64');
 }
 
-/** 「図面を追加」→ファイル選択 → M10 を開く */
+/** 「写真から選ぶ」→ファイル選択 → M10 を開く(版1.14.0。旧「図面を追加」) */
 async function pickDrawing(s, file) {
   const { page } = s;
-  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=add-drawing]').click()]);
+  const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#drawings [data-act=pick-drawing]').click()]);
   await fc.setFiles(file);
 }
 const marks = (s) => s.page.locator('.dedit [data-testid=drawing-mark]');

@@ -294,7 +294,7 @@ test('C-PERM-08/10 班スコープと無効な担当', () => {
   assert.equal(tanaka('listRecords', { siteId: 's_a' }).error.code, 'FORBIDDEN_SITE');
 });
 
-test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表(全列折り返し・8/40/14/18/46/30/30mm)・写真ブロック(4枚ごと改ページ)', () => {
+test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表(全列折り返し・8/40/14/18/46/30/30mm)・写真ブロック(版1.14.0: 3枚ごと改ページ・110/76mm・枠の中で最大)', () => {
   const id = newRecord(tanaka, 's_a', '1F', { lot: 'F9' });
   fillAll(h, tanaka, id, 'self');
   assert.equal(tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' }).ok, true);
@@ -327,13 +327,22 @@ test('C-REP-01 PDFレイアウト(SPEC §10.2a/§10.2b): 件名・項目表(全�
   assert.ok(itemsTbl.includes(longNote), '管理者コメントの長文(200文字)が項目表に全文入る(…で切り詰めない)');
   assert.ok(!html.includes('管理者コメントの全文は'), '旧注記は廃止');
   assert.ok(!/display:\s*(flex|grid)|calc\(/.test(html), 'flex/grid/calc を使わない');
-  assert.ok(!/max-height:58mm/.test(html) && (html.match(/<img style="(width:80mm|height:58mm)"/g) || []).length >= 1, '写真は縦横比を保つ(幅か高さの片方だけ指定)');
+  // 版1.14.0: 写真は枠 109×79mm(HTML方式)の中で最大。width と height の両方を mm で指定。object-fit は使わない
+  const imgs = html.match(/<img style="width:([\d.]+)mm;height:([\d.]+)mm"/g) || [];
+  assert.ok(imgs.length >= 1, '写真に width と height の両方');
+  imgs.forEach((im) => {
+    const [, w, hh] = /width:([\d.]+)mm;height:([\d.]+)mm/.exec(im).map(Number);
+    assert.ok(w <= 109.005 && hh <= 79.005 && (Math.abs(w - 109) < 0.01 || Math.abs(hh - 79) < 0.01), '枠の中で最大: ' + im);
+  });
+  assert.ok(!/object-fit/.test(html), 'object-fit を使わない');
+  assert.ok(/table\.pb\{[^}]*height:80mm/.test(css), 'HTML方式のブロックの高さ 80mm');
+  assert.ok(/<table class="pb"[^>]*><colgroup><col style="width:110mm"><col style="width:76mm"><\/colgroup>/.test(html), '写真ブロックの列幅 110/76mm');
   const blocks = html.match(/<table class="pb"[^>]*>/g) || [];
   assert.ok(blocks.length >= 1, '写真ブロックがある');
   blocks.forEach((b, i) => {
     const brk = /page-break-after:always/.test(b);
     const last = i === blocks.length - 1;
-    assert.equal(brk, (i + 1) % 4 === 0 && !last, `ブロック${i + 1}の改ページ`);
+    assert.equal(brk, (i + 1) % 3 === 0 && !last, `ブロック${i + 1}の改ページ`);
   });
 });
 

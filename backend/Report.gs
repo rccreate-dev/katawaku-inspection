@@ -242,6 +242,95 @@ function reportSubject_(rec, site) {
   return parts.filter(function (x) { return x; }).join(' ');
 }
 
+
+/* ---------- 写真ページ(SPEC §10.2b-B・§10.5.5。版1.14.0。HTML方式・doc 方式で共通) ---------- */
+var REPORT_PHOTOS_PER_PAGE = 3;                // 1ページの写真の枚数(旧4)
+var REPORT_PHOTOS_MAX = 60;                    // 写真ページに出す上限
+var REPORT_PHOTO_MAIN_MAX_BYTES = 20000000;    // 1つのPDFで読む本体の合計の上限。超えた分はサムネ(P-52 ①)
+var REPORT_PHOTO_COLS_MM = [110, 76];          // 写真ブロックの列幅(名目。左=写真 / 右=情報欄)
+var REPORT_HTML_PHOTO_ROW_MM = 80;             // HTML方式のブロックの高さ(レター用紙のため。doc 方式は 84mm)
+var REPORT_HTML_PHOTO_BOX_MM = { w: 109, h: 79 };   // HTML方式の写真の枠(セル余白0.5mm の内側)
+
+/**
+ * 写真の並びと選び方(純関数)。対象は呼び出し側で kind=photo に絞った配列。
+ * 並び: 項目の番号(rows の並び=seq の1始まり)→ 側(self→qa→その他)→ takenAt → photoId。項目に紐づかない写真は最後。
+ * 上限を超えるときは NG 項目の写真を先に選び、残りを並び順に足して max 枚。選んだ写真は並び順のまま返す。
+ * 返り値: { shown:[写真], rest:出さない枚数, seq:{itemId:N}, rowOf:{itemId:row} }
+ */
+function reportPhotoOrder_(rows, photos, max) {
+  var seq = {}, rowOf = {}, ng = {};
+  (rows || []).forEach(function (r, i) {
+    seq[r.itemId] = i + 1; rowOf[r.itemId] = r;
+    if (r.selfResult === 'ng' || r.qaResult === 'ng') ng[r.itemId] = true;
+  });
+  var big = 1e9;
+  var sideNo = function (s) { return s === 'self' ? 0 : (s === 'qa' ? 1 : 2); };
+  var key = function (ph) { return ph.itemId && seq[ph.itemId] ? seq[ph.itemId] : big; };
+  var str = function (x) { return x === null || x === undefined ? '' : String(x); };
+  var cmp = function (a, b) {
+    var d = key(a) - key(b);
+    if (d) return d;
+    if (key(a) !== big) {   // 項目に紐づく写真だけ 側(self→qa)で分ける。項目なしは takenAt の順(§10.2b-B)
+      d = sideNo(a.side) - sideNo(b.side);
+      if (d) return d;
+    }
+    var ta = str(a.takenAt), tb = str(b.takenAt);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    var pa = str(a.photoId), pb = str(b.photoId);
+    return pa < pb ? -1 : (pa > pb ? 1 : 0);
+  };
+  var all = (photos || []).slice().sort(cmp);
+  var lim = max === undefined ? REPORT_PHOTOS_MAX : max;
+  var shown = all;
+  if (all.length > lim) {
+    var isNg = function (ph) { return !!(ph.itemId && ng[ph.itemId]); };
+    var pick = all.filter(isNg).concat(all.filter(function (ph) { return !isNg(ph); })).slice(0, lim);
+    shown = pick.sort(cmp);
+  }
+  return { shown: shown, rest: all.length - shown.length, seq: seq, rowOf: rowOf };
+}
+
+/** 写真を枠(boxW×boxH)の中で最大に(縦横比を保つ。純関数)。幅・高さが正でなければ 4:3 の横長として扱う。返り値 {w,h}(枠と同じ単位) */
+function reportPhotoFit_(w, h, boxW, boxH) {
+  var rw = Number(w), rh = Number(h);
+  if (!(rw > 0 && rh > 0)) { rw = 4; rh = 3; }
+  var s = Math.min(boxW / rw, boxH / rh);
+  return { w: rw * s, h: rh * s };
+}
+
+/** 本体を使うか(純関数)。これまでに読んだ本体の合計 used に size を足して max 以下なら true */
+function reportPhotoUseMain_(used, size, max) {
+  return used + size <= (max === undefined ? REPORT_PHOTO_MAIN_MAX_BYTES : max);
+}
+
+/**
+ * 写真の画像を読む関数を作る(1回の PDF 生成の中で、読んだ本体の合計を数える)。
+ * 本体(driveFileId)を読み、読めない・合計上限を超えるときはサムネ(thumbFileId)。どちらも読めなければ null。
+ * 返り値の関数: ph → Blob|null
+ */
+function reportPhotoLoader_() {
+  var used = 0;
+  var read = function (id) {
+    if (!id) return null;
+    try { return DriveApp.getFileById(id).getBlob(); } catch (e) { return null; }
+  };
+  return function (ph) {
+    var main = used < REPORT_PHOTO_MAIN_MAX_BYTES ? read(ph.driveFileId) : null;   // 上限に達したら本体を読まない(時間の節約)
+    if (main) {
+      var size = 0;
+      try { size = main.getBytes().length; } catch (e) { main = null; }
+      if (main && reportPhotoUseMain_(used, size)) { used += size; return main; }
+    }
+    return read(ph.thumbFileId);
+  };
+}
+
+/** 写真の情報欄の結果の行の部品(SPEC §10.2b-B の情報欄2)。その側の許容超の件数(無ければ 0) */
+function reportOverCount_(row, side) {
+  var v = measureView_(row, side);
+  return v ? v.overCount : 0;
+}
+
 /** 確認箇所(図面)の1ページ分(SPEC §10.2c)。table と mm 固定のみ。印は画像に焼き込み済みなので描き足さない */
 function buildDrawingPageHtml_(ph, rows, seq, resChip) {
   var b64 = '';
@@ -306,9 +395,10 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   h.push('table.items{table-layout:fixed;width:186mm}table.items th,table.items td{white-space:normal;overflow:visible;word-break:break-all;height:6mm;line-height:12px;padding:2px;vertical-align:top}');
   h.push('table.items th.meas,table.items td.meas{word-break:normal}');
   h.push('.ng td{background:#fde8e8}.sign td{height:36px}');
-  // 写真ブロック(SPEC §10.2b-B): 1枚1table・高さ固定・4枚ごとに改ページ
-  h.push('table.pb{table-layout:fixed;width:186mm;height:62mm;margin:0 0 3mm 0;page-break-inside:avoid}table.pb td{overflow:hidden;height:62mm;vertical-align:top;padding:3px 5px}');
-  h.push('table.pb td.pic{width:83mm;text-align:center;vertical-align:middle}');
+  // 写真ブロック(SPEC §10.2b-B 版1.14.0): 1枚1table・高さ80mm(HTML方式はレター用紙のため)・列 110/76mm・3枚ごとに改ページ
+  var prow = REPORT_HTML_PHOTO_ROW_MM;
+  h.push('table.pb{table-layout:fixed;width:186mm;height:' + prow + 'mm;margin:0 0 2mm 0;page-break-inside:avoid}table.pb td{overflow:hidden;height:' + prow + 'mm;vertical-align:top;padding:3px 5px}');
+  h.push('table.pb td.pic{width:' + REPORT_PHOTO_COLS_MM[0] + 'mm;text-align:center;vertical-align:middle;padding:0.5mm}table.pb td.inf{width:' + REPORT_PHOTO_COLS_MM[1] + 'mm}');
   h.push('table.pb .ngc{color:#c00;font-weight:bold}table.pb .lb{color:#555}');
   h.push('.foot{margin-top:10px;font-size:8px;color:#444;word-break:break-all}');
   h.push('</style></head><body>');
@@ -397,42 +487,40 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   });
   h.push('<p>提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length + '</p>');
 
-  // 写真(最大60枚。NG項目の写真を優先)。SPEC §10.2b-B: 1ページ最大4枚、左=写真・右=項目内容とコメント
+  // 写真(SPEC §10.2b-B 版1.14.0): 項目の番号順・最大60枚(選ぶときだけNG優先)・1ページ3枚・左=写真(本体)・右=情報欄
   h.push('<h2 style="page-break-before:always">写真</h2>');
-  var ngItems = {};
-  rows.forEach(function (r) { if (r.selfResult === 'ng' || r.qaResult === 'ng') ngItems[r.itemId] = true; });
-  var rowOf = {}, seq = {};
-  rows.forEach(function (r, i) { seq[r.itemId] = i + 1; rowOf[r.itemId] = r; });
-  var sorted = photos.slice().sort(function (a, b) { return (ngItems[b.itemId] ? 1 : 0) - (ngItems[a.itemId] ? 1 : 0); });
-  var shown = sorted.slice(0, 60);
-  function resChip_(res, sev) {
+  var order = reportPhotoOrder_(rows, photos, REPORT_PHOTOS_MAX);
+  var shown = order.shown, rowOf = order.rowOf, seq = order.seq;
+  var loadPhoto = reportPhotoLoader_();
+  function resChip_(res, sev, over) {
     var t = (RESULT_LABEL_[res] || '-') + (res === 'ng' && sev ? '(' + (sev === 'major' ? '重大' : '軽微') + ')' : '');
-    return res === 'ng' ? '<span class="ngc">' + esc_(t) + '</span>' : esc_(t);
+    var o = res === 'ng' ? '<span class="ngc">' + esc_(t) + '</span>' : esc_(t);
+    return o + (over > 0 ? ' ' + measureOverSpan_('▲許容超' + over + '件') : '');   // §10.2b-B の情報欄2: 許容超の件数(側ごと)
   }
   shown.forEach(function (ph, idx) {
     var b64 = '';
-    try { b64 = photoBytesB64_(ph.thumbFileId); } catch (e) { b64 = ''; }
-    var who = ph.side === 'self' ? L.self : (ph.side === 'qa' ? L.qa : '元請サイン証跡');
+    try { var blob = loadPhoto(ph); b64 = blob ? Util.b64encode(blob.getBytes()) : ''; } catch (e) { b64 = ''; }
+    var who = ph.side === 'self' ? RPT_L_.self : (ph.side === 'qa' ? RPT_L_.qa : '元請サイン証跡');
     var row = ph.itemId ? rowOf[ph.itemId] : null;
     var info = '';
     if (row) {
       var snap = row.snapshot;
       info += '<div><b>No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + esc_(snap.textJa) + '</b></div>';
-      info += '<div><span class="lb">' + esc_(L.self) + ':</span> ' + resChip_(row.selfResult, row.selfSeverity) + ' / <span class="lb">' + esc_(L.qa) + ':</span> ' + resChip_(row.qaResult, row.qaSeverity) + '</div>';
-      var mt = measureBlockHtml_(row, true);   // §10.2b-B の3・§10.2d: 値の並び+要約の2行を側ごとに。実測なしなら行を作らない
-      if (mt) info += mt + '\n';
-      info += '<div><span class="lb">' + esc_(L.selfNote) + ':</span> ' + esc_(row.foremanNote) + '</div>';
-      info += '<div><span class="lb">' + esc_(L.qaNote) + ':</span> ' + esc_(row.qaNote) + '</div>';
+      info += '<div><span class="lb">' + esc_(RPT_L_.self) + ':</span> ' + resChip_(row.selfResult, row.selfSeverity, reportOverCount_(row, 'self')) +
+        ' / <span class="lb">' + esc_(RPT_L_.qa) + ':</span> ' + resChip_(row.qaResult, row.qaSeverity, reportOverCount_(row, 'qa')) + '</div>';
+      info += '<div><span class="lb">' + esc_(RPT_L_.selfNote) + ':</span> ' + esc_(row.foremanNote) + '</div>';
+      info += '<div><span class="lb">' + esc_(RPT_L_.qaNote) + ':</span> ' + esc_(row.qaNote) + '</div>';
     }
-    info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + who + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
+    info += '<div style="margin-top:4px"><span class="lb">撮影:</span> ' + esc_(who) + '</div><div style="font-size:8px;color:#444">' + esc_(ph.stampText) + '</div>';
     info = info.replace(/<\/div><div/g, '</div>\n<div');   // 段落ごとに改行(HTMLの見た目は変わらない。タグを除いたテキストを行で読めるように)
-    var brk = ((idx + 1) % 4 === 0 && idx < shown.length - 1) ? ' style="page-break-after:always"' : '';
-    // 写真は引き伸ばさない: 縦横比を保つため、横長は幅、縦長は高さだけを指定する(width/height は元画像の寸法)
-    var portrait = ph.width && ph.height && Number(ph.height) > Number(ph.width);
-    var imgStyle = portrait ? 'height:58mm' : 'width:80mm';
-    h.push('<table class="pb"' + brk + '><tr><td class="pic">' + (b64 ? '<img style="' + imgStyle + '" src="data:image/jpeg;base64,' + b64 + '">' : '') + '</td><td>' + info + '</td></tr></table>');
+    var brk = ((idx + 1) % REPORT_PHOTOS_PER_PAGE === 0 && idx < shown.length - 1) ? ' style="page-break-after:always"' : '';
+    // 写真は枠の中で最大(縦横比を保つ)。width と height を mm で両方指定(object-fit は使わない)
+    var fit = reportPhotoFit_(ph.width, ph.height, REPORT_HTML_PHOTO_BOX_MM.w, REPORT_HTML_PHOTO_BOX_MM.h);
+    var imgStyle = 'width:' + fit.w.toFixed(2) + 'mm;height:' + fit.h.toFixed(2) + 'mm';
+    h.push('<table class="pb"' + brk + '><colgroup><col style="width:' + REPORT_PHOTO_COLS_MM[0] + 'mm"><col style="width:' + REPORT_PHOTO_COLS_MM[1] + 'mm"></colgroup>' +
+      '<tr><td class="pic">' + (b64 ? '<img style="' + imgStyle + '" src="data:image/jpeg;base64,' + b64 + '">' : '') + '</td><td class="inf">' + info + '</td></tr></table>');
   });
-  if (photos.length > shown.length) h.push('<p>他' + (photos.length - shown.length) + '枚は電子記録で閲覧可</p>');
+  if (order.rest > 0) h.push('<p>他' + order.rest + '枚は電子記録で閲覧可</p>');
   h.push('<div class="foot">記録ID: ' + esc_(rec.recordId) + ' / 電子記録ハッシュ(SHA-256): ' + hash + '</div>');
   h.push('</body></html>');
   return h.join('\n');

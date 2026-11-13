@@ -109,15 +109,21 @@
         onView: function (p) { KW.modal.photoView(p); }
       });
       if (own) {
-        var add = h('button', { type: 'button', class: 'cam', 'data-act': 'add-drawing', disabled: !editable || list.length >= MAX }, KW.icon('camera'), t('drawing.add'));
-        var input = h('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': t('drawing.add') });
-        add.addEventListener('click', function () { input.click(); });
+        // 版1.14.0(§7.7-1): 「撮影する」=アプリ内カメラ(図面モード)/「写真から選ぶ」=ファイル選択(アルバム・スクリーンショット)
+        var off = !editable || list.length >= MAX;
+        var shoot = h('button', { type: 'button', class: 'cam', 'data-act': 'shoot-drawing', disabled: off }, KW.icon('camera'), t('drawing.shoot'));
+        var pick = h('button', { type: 'button', class: 'cam', 'data-act': 'pick-drawing', disabled: off }, t('drawing.pick'));
+        var input = h('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': t('drawing.pick') });
+        shoot.addEventListener('click', function () {
+          KW.modal.camera({ mode: 'drawing' }).then(function (r) { if (r && r.blob) addFile(r.blob); });
+        });
+        pick.addEventListener('click', function () { input.click(); });
         input.addEventListener('change', function () {
           var f = input.files && input.files[0];
           input.value = '';
           if (f) addFile(f);
         });
-        strip.appendChild(add); strip.appendChild(input);
+        strip.appendChild(h('span', { class: 'row', role: 'group', 'aria-label': t('drawing.add') }, shoot, pick)); strip.appendChild(input);
       }
       node.appendChild(strip);
       return node;

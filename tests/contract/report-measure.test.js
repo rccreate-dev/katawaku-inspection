@@ -200,33 +200,22 @@ describe('C-REP-01②(改訂)・C-REP-07: HTML方式の実測(harness: /__mock/l
     for (const b of m.photoBlocks(html)) for (const line of nl(b.text).filter((x) => /^実測|^n=/.test(x))) assert.ok(!/不合格|不適合/.test(line));
   });
 
-  m.harnessHtml(it, 'C-REP-07⑥: 写真ブロックの実測欄(i6 は職長→管理者の2段落ずつ。i8 は職長のみ。旧形式「実測: 」と値のない項目の実測欄がない)', async () => {
+  m.harnessHtml(it, 'C-REP-07⑥(版1.14.0): 写真ブロックは実測の行を出さず、結果の後ろに側ごとの ▲許容超n件(i6 は職長2件・管理者1件、i8 は許容なしで ▲ なし)', async () => {
     const { html, no } = await build('html:full', FULL('html'));
     const blocks = m.photoBlocks(html);
     assert.ok(blocks.length >= 3, '写真ブロック');
     const of = (id) => blocks.filter((b) => b.text.includes(`No.${no(id)} `));
     const b6 = of('i6'); assert.equal(b6.length, 1, 'i6 の写真は1枚');
     const l6 = nl(b6[0].text);
-    const at = l6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
-    assert.ok(at >= 0, 'i6 職長の実測行: ' + JSON.stringify(l6));
-    assert.equal(l6[at + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件', '職長の要約が実測行の次');
-    assert.equal(l6[at + 2], '実測(管理者): +2、 ▲+3');
-    assert.equal(l6[at + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
-    assert.deepEqual(m.overSpans(b6[0].html).map((s) => s.text), ['▲-3', '▲-2.5', '▲許容超2件', '▲+3', '▲許容超1件'], '許容超の装飾');
+    assert.ok(l6.includes('職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件'), 'i6 の結果の行: ' + JSON.stringify(l6));
+    assert.deepEqual(m.overSpans(b6[0].html).map((s) => s.text), ['▲許容超2件', '▲許容超1件'], '許容超の装飾は件数だけ');
     assert.ok(m.overSpans(b6[0].html).every((s) => s.styled));
     const b8 = of('i8'); assert.equal(b8.length, 1);
     const l8 = nl(b8[0].text);
-    const at8 = l8.indexOf('実測(職長): +2、 -1、 0');
-    assert.ok(at8 >= 0, 'i8: ' + JSON.stringify(l8));
-    assert.equal(l8[at8 + 1], 'n=3 最小-1/最大+2');
-    assert.ok(!l8.some((x) => x.startsWith('実測(管理者)')), 'i8 は管理者の値なし');
-    assert.ok(!/許容|▲/.test(l8[at8] + l8[at8 + 1]));
-    // 旧形式・値のない項目
+    assert.ok(l8.includes('職長: 合 / 管理者: 合'), 'i8(許容なし)は ▲ なし: ' + JSON.stringify(l8));
     for (const b of blocks) {
-      for (const line of nl(b.text)) assert.ok(!line.startsWith('実測: '), '旧形式「実測: 」の行がない: ' + line);
-    }
-    for (const b of blocks.filter((x) => !x.text.includes(`No.${no('i6')} `) && !x.text.includes(`No.${no('i8')} `))) {
-      assert.ok(!b.text.includes('実測'), '値のない項目の写真に「実測」が出ない: ' + b.text.slice(0, 40));
+      assert.ok(!b.text.includes('実測'), '写真ブロックに「実測」が無い: ' + b.text.slice(0, 40));
+      for (const line of nl(b.text)) assert.ok(!line.startsWith('n='), '要約の行が無い: ' + line);
     }
   });
 
@@ -373,24 +362,21 @@ describe('C-REP-08・C-DRAW-07: doc 方式の実測・図面の凡例(harness: /
     assert.deepEqual(nl(t2.cellTexts[rowByNo(t2, only.no('i8'))][4]), m.CELL.i8);
   });
 
-  m.harnessDoc(it, 'C-REP-08⑤: i6 の写真ブロックの右セルに 実測(職長)/要約/実測(管理者)/要約。i8 は職長のみ。値のない項目に「実測」なし', async () => {
+  m.harnessDoc(it, 'C-REP-08⑤(版1.14.0): 写真ブロックの右セルは実測の行なし。結果の後ろに側ごとの ▲許容超n件(赤・太字)', async () => {
     const { doc: d, no } = await build('doc:full', FULL('doc'));
-    const pt = d.tables.filter((tb) => tb.cols === 2 && Math.abs(tb.colWidths[0] - mmPt(83 * 184 / 186)) <= 0.5);
+    const pt = d.tables.filter((tb) => tb.cols === 2 && Math.abs(tb.colWidths[0] - mmPt(110 * 184 / 186)) <= 0.5);
     assert.ok(pt.length >= 3, '写真ブロックの表');
     const text = (tb) => tb.cellTexts.map((r) => r.join('\n')).join('\n');
     const b6 = pt.filter((tb) => text(tb).includes(`No.${no('i6')} `)); assert.equal(b6.length, 1);
-    const l6 = nl(text(b6[0]));
-    const at = l6.indexOf('実測(職長): +1、 ▲-3、 +2、 ▲-2.5');
-    assert.ok(at >= 0, JSON.stringify(l6));
-    assert.equal(l6[at + 1], 'n=4 最小-3/最大+2/許容±2mm ▲許容超2件');
-    assert.equal(l6[at + 2], '実測(管理者): +2、 ▲+3');
-    assert.equal(l6[at + 3], 'n=2 最小+2/最大+3/許容±2mm ▲許容超1件');
+    assert.ok(nl(text(b6[0])).includes('職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件'), JSON.stringify(nl(text(b6[0]))));
+    assert.ok(d.coloredTexts['#CC0000'].includes('▲許容超2件') && d.coloredTexts['#CC0000'].includes('▲許容超1件'), '赤');
+    assert.ok(d.boldTexts.includes('▲許容超2件') && d.boldTexts.includes('▲許容超1件'), '太字');
     const b8 = pt.filter((tb) => text(tb).includes(`No.${no('i8')} `)); assert.equal(b8.length, 1);
-    const l8 = nl(text(b8[0])); const at8 = l8.indexOf('実測(職長): +2、 -1、 0');
-    assert.ok(at8 >= 0, JSON.stringify(l8)); assert.equal(l8[at8 + 1], 'n=3 最小-1/最大+2');
-    assert.ok(!l8.some((x) => x.startsWith('実測(管理者)')));
-    for (const tb of pt) for (const line of nl(text(tb))) assert.ok(!line.startsWith('実測: '), '旧形式がない');
-    for (const tb of pt.filter((x) => x !== b6[0] && x !== b8[0])) assert.ok(!text(tb).includes('実測'), '値のない項目の写真に「実測」が出ない');
+    assert.ok(nl(text(b8[0])).includes('職長: 合 / 管理者: 合'), JSON.stringify(nl(text(b8[0]))));
+    for (const tb of pt) {
+      assert.ok(!text(tb).includes('実測'), '写真ブロックに「実測」が無い');
+      for (const line of nl(text(tb))) assert.ok(!line.startsWith('n='), '要約の行が無い');
+    }
   });
 
   m.harnessDoc(it, 'C-REP-08⑥: 出来形(post_demold)にも同じ文字列(i56 / i57)。許容超は赤・太字', async () => {

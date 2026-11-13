@@ -239,6 +239,9 @@
     /* 図面(確認箇所の書き込み。SPEC §7.7 / M10) */
     ['drawing.add', '図面を追加', 'Tambah gambar kerja'],
     ['drawing.title', '図面', 'Gambar kerja'],
+    ['drawing.shoot', '撮影する', 'Ambil foto'],
+    ['drawing.pick', '写真から選ぶ', 'Pilih dari galeri'],
+    ['drawing.camera_fallback', 'カメラが使えません。「写真から選ぶ」から取り込んでください', 'Kamera tidak dapat digunakan. Silakan ambil dari "Pilih dari galeri".'],
     ['drawing.hint', '確認した箇所の番号を図面に書き込みます', 'Tulis nomor item yang diperiksa pada gambar'],
     ['drawing.pick_item', '番号を選んで図面をタップ', 'Pilih nomor lalu ketuk gambar'],
     ['drawing.placing', '{no} {text}: 置く位置をタップ(何度でも置けます)', '{no} {text}: ketuk posisi (boleh berkali-kali)'],

@@ -34,14 +34,14 @@ var REPORT_DOC_BODY_W_MM = 186;                    // 本文領域の幅(SPEC §
  */
 var REPORT_DOC_TABLE_W_MM = 184;
 var REPORT_DOC_TABLE_SCALE = REPORT_DOC_TABLE_W_MM / REPORT_DOC_BODY_W_MM;
-var REPORT_DOC_PHOTO_ROW_MM = 62;                  // 写真ブロックの最低高
-var REPORT_DOC_PHOTO_COLS_MM = [83, 103];          // 写真ブロックの列幅(左=写真 / 右=情報欄)
-// 写真の枠・図面の枠は SPEC の名目値(80×58 / 186×170)を表と同じ倍率で縮める(縦横比は維持)。
-// 写真: 左列 83mm×倍率 − 左右余白(3pt×2)≒80.0mm の中に 79.1mm が収まる。図面: 画像セルの余白を0にして 184mm が列幅に収まる。
-var REPORT_DOC_PHOTO_BOX_MM = { w: 80 * REPORT_DOC_TABLE_SCALE, h: 58 * REPORT_DOC_TABLE_SCALE };
+// 写真ブロック(SPEC §10.5.5 版1.14.0): 列幅は Report.gs の REPORT_PHOTO_COLS_MM(名目 110/76mm)を表と同じ倍率で縮める。
+// 行の最低高 84mm は縮めない。写真のセルの余白は四辺 0.5mm で、写真は枠(左列の実効幅−余白×2 × 83mm)の中で最大。
+// 実機で3枚が1ページに収まらないときの予備値(設計担当が SPEC を直してから): 行 81mm・枠の高さ 80mm。
+var REPORT_DOC_PHOTO_ROW_MM = 84;                  // 写真ブロックの最低高
+var REPORT_DOC_PHOTO_PAD_MM = 0.5;                 // 写真のセルの余白(四辺)
+var REPORT_DOC_PHOTO_BOX_MM = { w: 110 * REPORT_DOC_TABLE_SCALE - 2 * 0.5, h: 83 };
+// 図面の枠は SPEC の名目値(186×170)を表と同じ倍率で縮める(縦横比は維持)。画像セルの余白を0にして 184mm が列幅に収まる。
 var REPORT_DOC_DRAWING_BOX_MM = { w: 186 * REPORT_DOC_TABLE_SCALE, h: 170 * REPORT_DOC_TABLE_SCALE };
-var REPORT_DOC_PHOTOS_PER_PAGE = 4;
-var REPORT_DOC_PHOTOS_MAX = 60;
 var REPORT_DOC_DRAWINGS_MAX = 6;
 var REPORT_DOC_CHECK_OK = 'OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)';
 
@@ -333,28 +333,29 @@ function docDrawingPage_(body, ph, rows, seq, t0) {
 }
 
 /** 写真ページの1ブロック(SPEC §10.5.5)。2列×1行の表 */
-function docPhotoBlock_(body, ph, rowOf, seq) {
-  var t = docNewTable_(body, 1, REPORT_DOC_PHOTO_COLS_MM, {});
+function docPhotoBlock_(body, ph, rowOf, seq, loadPhoto) {
+  var t = docNewTable_(body, 1, REPORT_PHOTO_COLS_MM, {});
   t.getRow(0).setMinimumHeight(Math.round(docMm_(REPORT_DOC_PHOTO_ROW_MM)));   // 実GASの引数は Integer
   var left = t.getCell(0, 0), right = t.getCell(0, 1);
-  docCellPad_(left, REPORT_DOC_PAD.photoV);
+  var pad = docMm_(REPORT_DOC_PHOTO_PAD_MM);
+  left.setPaddingTop(pad); left.setPaddingBottom(pad); left.setPaddingLeft(pad); left.setPaddingRight(pad);
   docCellPad_(right, REPORT_DOC_PAD.photoV);
   left.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
   right.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
 
-  // 左: サムネ。枠(80mm×58mm)に収める。読めないときは空のセル
+  // 左: 本体(読めない・合計上限を超えたらサムネ)。枠の中で最大。読めないときは空のセル
   var lp = left.getChild(0).asParagraph();
   lp.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
   lp.setSpacingBefore(0);
   lp.setSpacingAfter(0);
   lp.setLineSpacing(1.0);
-  var blob = docImageBlob_(ph.thumbFileId);
+  var blob = loadPhoto(ph);
   if (blob) {
     var img = lp.appendInlineImage(blob);
     if (!docFitImage_(img, ph, REPORT_DOC_PHOTO_BOX_MM.w, REPORT_DOC_PHOTO_BOX_MM.h)) img.removeFromParent();
   }
 
-  // 右: 情報欄(HTML方式 §10.2b-B の1〜7と同じ内容・同じ順)
+  // 右: 情報欄(HTML方式 §10.2b-B の情報欄1〜6と同じ内容・同じ順。版1.14.0: 実測の行は出さない)
   var lb = function (s) { return { t: s, color: REPORT_DOC_COLOR.label }; };
   var who = ph.side === 'self' ? RPT_L_.self : (ph.side === 'qa' ? RPT_L_.qa : '元請サイン証跡');
   var row = ph.itemId ? rowOf[ph.itemId] : null;
@@ -362,8 +363,12 @@ function docPhotoBlock_(body, ph, rowOf, seq) {
   if (row) {
     var snap = row.snapshot;
     lines.push([{ t: 'No.' + (seq[ph.itemId] || '') + ' ' + (snap.key ? '★' : '') + docStr_(snap.textJa), bold: true }]);
-    lines.push([lb(RPT_L_.self + ':'), { t: ' ' }, docResRun_(row.selfResult, row.selfSeverity), { t: ' / ' }, lb(RPT_L_.qa + ':'), { t: ' ' }, docResRun_(row.qaResult, row.qaSeverity)]);
-    docMeasureLines_(row, true).forEach(function (l) { lines.push(l); });   // 実測(職長): 値 / 要約 / 実測(管理者): … (§10.2d。なければ行なし)
+    var overRuns = function (side) {   // §10.2b-B の情報欄2: その側の許容超の件数(無ければ何も出さない)
+      var n = reportOverCount_(row, side);
+      return n > 0 ? [{ t: ' ' }, { t: '▲許容超' + n + '件', bold: true, color: REPORT_DOC_COLOR.ng }] : [];
+    };
+    lines.push([lb(RPT_L_.self + ':'), { t: ' ' }, docResRun_(row.selfResult, row.selfSeverity)].concat(overRuns('self'),
+      [{ t: ' / ' }, lb(RPT_L_.qa + ':'), { t: ' ' }, docResRun_(row.qaResult, row.qaSeverity)], overRuns('qa')));
     lines.push([lb(RPT_L_.selfNote + ':'), { t: ' ' + docStr_(row.foremanNote) }]);
     lines.push([lb(RPT_L_.qaNote + ':'), { t: ' ' + docStr_(row.qaNote) }]);
   }
@@ -469,27 +474,22 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   });
   docBodyPara_(body, '提出回数: ' + events.filter(function (e) { return e.kind === 'submitted' || e.kind === 'resubmitted'; }).length);
 
-  // 11. 写真(最大60枚。NG項目の写真を優先。1ページ最大4枚)
+  // 11. 写真(SPEC §10.5.5 版1.14.0: 項目の番号順・最大60枚(選ぶときだけNG優先)・1ページ3枚・本体の画像)
   body.appendPageBreak();
   docBodyPara_(body, '写真', h2);
-  var ngItems = {}, rowOf = {}, pseq = {};
-  rows.forEach(function (r, i) {
-    if (r.selfResult === 'ng' || r.qaResult === 'ng') ngItems[r.itemId] = true;
-    pseq[r.itemId] = i + 1;
-    rowOf[r.itemId] = r;
-  });
-  var sorted = photos.slice().sort(function (a, b) { return (ngItems[b.itemId] ? 1 : 0) - (ngItems[a.itemId] ? 1 : 0); });
-  var shown = sorted.slice(0, REPORT_DOC_PHOTOS_MAX);
+  var order = reportPhotoOrder_(rows, photos, REPORT_PHOTOS_MAX);
+  var shown = order.shown;
+  var loadPhoto = reportPhotoLoader_();
   shown.forEach(function (ph, idx) {
-    docPhotoBlock_(body, ph, rowOf, pseq);
-    if ((idx + 1) % REPORT_DOC_PHOTOS_PER_PAGE === 0 && idx < shown.length - 1) {
-      body.appendPageBreak();   // 4の倍数枚目の後。最後の写真の後には入れない
+    docPhotoBlock_(body, ph, order.rowOf, order.seq, loadPhoto);
+    if ((idx + 1) % REPORT_PHOTOS_PER_PAGE === 0 && idx < shown.length - 1) {
+      body.appendPageBreak();   // 3の倍数枚目の後。最後の写真の後には入れない(白紙のページを作らない)
     } else {
       docBodyPara_(body, '', { size: 3 });   // 表が連続して結合されるのを避ける空段落
     }
     docCheckTime_(t0);
   });
-  if (photos.length > shown.length) docBodyPara_(body, '他' + (photos.length - shown.length) + '枚は電子記録で閲覧可');
+  if (order.rest > 0) docBodyPara_(body, '他' + order.rest + '枚は電子記録で閲覧可');
 
   // 12. フッタ(全ページ。記録IDとハッシュ。ページ番号は出さない)と全体のフォント
   var footer = doc.getFooter() || doc.addFooter();   // 新規文書は通常フッタ無し。既にあれば再利用(addFooter は二重追加で例外)
