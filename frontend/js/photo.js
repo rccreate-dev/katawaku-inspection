@@ -213,6 +213,12 @@
   /* 測定値チップの番号(丸数字1〜20、21以上は通常数字。図面の枝番 k と同じ) */
   function pointNo(k) { return drawingNo(k); }
 
+  /* 図面を横向きにするか(§7.7-1 版1.14.2)。縦長(高さ>幅)なら true。正方形・不正な値は false。純関数 */
+  function drawingNeedsLandscape(w, h) {
+    w = Number(w); h = Number(h);
+    return w > 0 && h > 0 && h > w;
+  }
+
   /*
    * 図面の縮小・再圧縮の計画(§7.7-3)。長辺1800px以下に縮小し、
    * 品質 0.8 → 0.7 → 0.6 → 0.5、それでも超えるなら寸法を0.85倍にして再試行(最大4回。品質0.6)。
@@ -246,7 +252,7 @@
   }
 
   var api = {
-    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, encodeDrawing: encodeDrawing,
+    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, encodeDrawing: encodeDrawing,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,

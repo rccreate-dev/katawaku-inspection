@@ -14,6 +14,16 @@ const ITEMS = [
   { itemId: 'i22', no: 22, measure: 'none' }
 ];
 
+describe('U-DRAW-10 図面を横向きにするか(版1.14.2 §7.7-1)', () => {
+  it('縦長だけ true。横長・正方形・不正な値は false', () => {
+    assert.equal(photo.drawingNeedsLandscape(1350, 1800), true);
+    assert.equal(photo.drawingNeedsLandscape(1800, 1350), false);
+    assert.equal(photo.drawingNeedsLandscape(1000, 1000), false);
+    assert.equal(photo.drawingNeedsLandscape(0, 100), false);
+    assert.equal(photo.drawingNeedsLandscape('', null), false);
+  });
+});
+
 describe('U-DRAW-01 項目番号の表示', () => {
   it('1〜20 は丸数字、21以上は通常の数字', () => {
     assert.equal(photo.drawingNo(1), '①');

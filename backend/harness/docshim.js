@@ -76,6 +76,8 @@ function createDocShim(state, hooks) {
     setSpacingBefore(v) { this._ck(); this.spacing.before = v; return this; }
     setSpacingAfter(v) { this._ck(); this.spacing.after = v; return this; }
     setLineSpacing(v) { this._ck(); this.lineSpacing = v; return this; }
+    /** 版1.14.2: 段落の中の改ページ(実GASの Paragraph.appendPageBreak)。表のセルの中には置けない(実GASと同じ制約) */
+    appendPageBreak() { this._ck(); need(this.parent && this.parent.kind === 'b', '改ページは表のセルの中に置けません'); this.doc.body.pageBreaks++; this.pageBreak = true; return { kind: 'pb' }; }
     appendInlineImage(blob) {
       this._ck();
       if (ds.failMode === 'image') throw new Error('Service error: Document (注入された画像挿入の失敗)');
@@ -92,6 +94,7 @@ function createDocShim(state, hooks) {
       return -1;
     }
   }
+  /** 実GASと同じく、幅・高さの単位はピクセル(1px = 0.75pt)。lastDoc.images には pt に直した値も出す(版1.14.2) */
   class InlineImage {
     constructor(par, doc, w, h) { this.par = par; this.doc = doc; this.w = w; this.h = h; }
     getWidth() { return this.w; }
@@ -201,7 +204,8 @@ function createDocShim(state, hooks) {
       const b = this.body;
       const tables = this.bodyTables();
       const images = [];
-      const walk = (p) => p.images.forEach((im) => images.push({ w: im.w, h: im.h, inTableIndex: p.tableIndex() }));
+      // w・h は pt(= ピクセル × 0.75)、wPx・hPx は setWidth/setHeight に渡されたピクセルの値(版1.14.2)
+      const walk = (p) => p.images.forEach((im) => images.push({ w: im.w * 0.75, h: im.h * 0.75, wPx: im.w, hPx: im.h, inTableIndex: p.tableIndex() }));
       b.children.forEach((c) => {
         if (c.kind === 'p') walk(c);
         else if (c.kind === 't') c.rows.forEach((r) => r.cells.forEach((cell) => cell.paras.forEach(walk)));

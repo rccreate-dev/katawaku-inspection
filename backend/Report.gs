@@ -409,14 +409,14 @@ function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, no
   var ownerCompany = rec.ownerCompany || userCompany_(rec.ownerUserId);
   if (ownerCompany) h.push('<tr><th>' + esc_(L.company) + '</th><td>' + esc_(ownerCompany) + '</td><th>' + esc_(L.owner) + '</th><td>' + esc_(userName_(rec.ownerUserId)) + '</td></tr>');
   h.push('<tr><th>階・工区・打設箇所</th><td>' + esc_(rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot) + '</td><th>段階</th><td>' + esc_(stage) + '</td></tr>');
+  // 版1.14.2(§10.2 の2): 記録ID・提出ラウンド・版は出さない(記録IDは末尾のフッタにある)
   if (rec.stage === 'post_demold') {
     // 出来形は打設予定日時を使わない(行ごと出さない。SPEC §6.8・§10.2 の2)
-    h.push('<tr><th>記録ID</th><td colspan="3">' + esc_(rec.recordId) + '</td></tr>');
+    h.push('<tr><th>ステータス</th><td>' + esc_(statusLabel_(rec)) + '</td><th>生成日時</th><td>' + esc_(dtShort_(nowDt)) + '</td></tr></table>');
   } else {
-    h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>記録ID</th><td>' + esc_(rec.recordId) + '</td></tr>');
+    h.push('<tr><th>打設予定日時</th><td>' + esc_(dtShort_(rec.pourPlannedAt)) + '</td><th>ステータス</th><td>' + esc_(statusLabel_(rec)) + '</td></tr>');
+    h.push('<tr><th>生成日時</th><td colspan="3">' + esc_(dtShort_(nowDt)) + '</td></tr></table>');
   }
-  h.push('<tr><th>ステータス</th><td>' + esc_(statusLabel_(rec)) + '</td><th>提出ラウンド</th><td>' + rec.round + '</td></tr>');
-  h.push('<tr><th>生成日時</th><td>' + esc_(dtShort_(nowDt)) + '</td><th>版</th><td>v' + version + '</td></tr></table>');
 
   // 3者サイン
   h.push('<h2>サイン欄(3者)</h2><table class="sign"><tr><th>' + esc_(L.signSelf) + '</th><th>' + esc_(L.signQa) + '</th><th>元請</th></tr><tr>');

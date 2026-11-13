@@ -194,6 +194,11 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
     assert.ok(Math.abs(im.w - BW) <= 0.5 || Math.abs(im.h - BH) <= 0.5, `写真は枠の中で最大: ${im.w}x${im.h}`);
   });
   near(BW, 305.62, 0.01, '枠の幅'); near(BH, 226.77, 0.01, '枠の高さ');
+  // 版1.14.2: setWidth/setHeight にはピクセル(pt×96/72 の整数)を渡す。旧実装は pt をそのまま渡し、実PDFで75%の大きさだった
+  d.images.forEach((im) => {
+    assert.ok(Number.isInteger(im.wPx) && Number.isInteger(im.hPx), `ピクセルは整数 ${im.wPx}x${im.hPx}`);
+  });
+  inBlock.forEach((im) => assert.ok(im.wPx > BW || im.hPx > BH, `ピクセルの値は pt より大きい(×4/3) ${im.wPx}x${im.hPx}`));
   // 縦横比(Photos.width/height と±1%)。比率の集合で確認
   const want = [[400, 300], [200, 400], [300, 300], [800, 200], [100, 100], [160, 90]].map(([w, hh]) => w / hh).sort();
   const got = inBlock.map((im) => im.w / im.h).sort();
@@ -327,13 +332,15 @@ test('C-REP-03 図面の枠と凡例: 横長は幅186mm、縦長は高さ170mm�
   assert.equal((d.text.match(/確認箇所\(図面\)/g) || []).length, 2);
 });
 
-test('C-REP-03 出来形・会社名: 出来形は打設予定日時の行を出さず、記録ID行の3・4列目は空。職長の会社名が空なら行ごと出さない', () => {
+test('C-REP-03 出来形・会社名: 打設前は 打設予定日時|ステータス と 生成日時 の行。記録ID・提出ラウンド・版は出さない(版1.14.2)。職長の会社名が空なら行ごと出さない', () => {
   setEngine('doc');
   const id = makeQaOk({ photos: 1 });
   gen(id);
   let m = h.state.docShim.last;
   let rowsOf = m.cellTexts(0).map((r) => r.join('|'));
-  assert.ok(rowsOf.some((r) => r.startsWith('打設予定日時|')));
+  assert.ok(rowsOf.some((r) => /^打設予定日時\|[^|]*\|ステータス\|/.test(r)), rowsOf.join(' / '));
+  assert.ok(rowsOf.some((r) => /^生成日時\|[^|]+\|\|$/.test(r)), '生成日時の行(3・4列目は空)');
+  assert.ok(!rowsOf.some((r) => /記録ID|提出ラウンド|\|版\|/.test(r)), '記録ID・提出ラウンド・版は出さない');
   assert.ok(!rowsOf.some((r) => r.startsWith('職長の会社名')), '会社名が空なら出さない');
   h.control('patch', { sheet: 'Users', key: 'u_tanaka', set: { company: '山田工業株式会社' } });
   const id2 = makeQaOk({ photos: 1 });
@@ -475,7 +482,7 @@ test('C-REP-06①② appsscript.json に documents スコープ(既存4つも残
   assert.equal(configRows().filter((r) => r.key === 'reportEngine').length, 1, '再実行しても増えない');
 });
 
-test('C-REP-03 出来形・approved: 打設予定日時の行なし・記録ID行は3・4列目が空・ステータス「出来形確認済」・元請サイン欄に担当者名と方法', () => {
+test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステータス「出来形確認済」と生成日時が同じ行(版1.14.2)・元請サイン欄に担当者名と方法', () => {
   setEngine('doc');
   const recordId = rid('r');
   assert.equal(tanaka('createRecord', { recordId, siteId: 's_a', floor: '2F', lot: 'PD' + Math.floor(Math.random() * 1e9), stage: 'post_demold' }).ok, true);
@@ -493,9 +500,9 @@ test('C-REP-03 出来形・approved: 打設予定日時の行なし・記録ID�
   const rep = gen(recordId);
   const m = h.state.docShim.last;
   const info = m.cellTexts(0).map((r) => r.join('|'));
-  assert.ok(info.some((r) => r.startsWith('記録ID|' + recordId + '||')), info.join(' / '));
+  assert.ok(!info.some((r) => /記録ID|提出ラウンド|\|版\|/.test(r)), info.join(' / '));
   assert.ok(!info.some((r) => r.startsWith('打設予定日時')));
-  assert.ok(info.some((r) => r.startsWith('ステータス|出来形確認済|')));
+  assert.ok(info.some((r) => /^ステータス\|出来形確認済\|生成日時\|\S+/.test(r)), info.join(' / '));
   assert.ok(m.fullText().includes('型枠工事 出来形検査記録'));
   const sign = m.cellTexts(1)[1];
   assert.ok(sign[2].includes('山田太郎') && sign[2].includes('紙に署名') && sign[2].includes('記録者: 佐藤'), sign[2]);

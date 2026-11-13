@@ -324,9 +324,12 @@
     });
   }
 
-  /* ファイル → 読込 → M10。読めなければ reject(code=DRAWING_UNREADABLE) */
+  /* ファイル → 読込 → M10。読めなければ reject(code=DRAWING_UNREADABLE)。
+   * 版1.14.2: 縦長の画像は右へ90度回して横長にしてから開く(図面は横長の紙が多く、PDFで横に大きく出すため)。
+   * 向きが違うときは M10 の「回転」で直す */
   function edit(o) {
     return loadFile(o.file).then(function (canvas) {
+      if (KW.photo.drawingNeedsLandscape(canvas.width, canvas.height)) canvas = rotate90(canvas);
       return openEditor({ canvas: canvas, side: o.side, items: o.items, stampCtx: o.stampCtx });
     });
   }

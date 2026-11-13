@@ -47,6 +47,11 @@ var REPORT_DOC_CHECK_OK = 'OK: doc 方式の変換に成功しました(A4 595.2
 
 /** mm → pt(1mm = 72/25.4 pt) */
 function docMm_(mm) { return mm * 72 / 25.4; }
+/**
+ * 画像の大きさの単位(版1.14.2)。InlineImage.setWidth/setHeight はピクセル(1px = 0.75pt)で、表の列幅・行の高さ(pt)と単位が違う。
+ * 版1.14.1 までは pt の値をそのまま渡していたため、実PDFで写真・図面が予定の 75% の大きさになっていた。
+ */
+var REPORT_DOC_PX_PER_PT = 96 / 72;
 /** SPEC 名目の列幅(mm。合計186)を実効幅に縮めた値(mm) */
 function docColMm_(mm) { return mm * REPORT_DOC_TABLE_SCALE; }
 
@@ -98,6 +103,22 @@ function docBodyPara_(body, runs, opts) {
   p.setSpacingBefore(opts.before || 0);
   p.setSpacingAfter(opts.after || 0);
   marks.forEach(function (f) { f(); });
+  return p;
+}
+
+/**
+ * 表と表の間の小さな空段落(版1.14.2)。表が連続して結合されるのを避けるために置く。
+ * 文字が空の段落は文字サイズの指定が効かず、既定の大きさ(約14pt)の高さになっていた(実PDFで写真の1ページ目から3枚目が押し出された)。
+ * そのため半角スペース1文字を入れて 1pt・行間1.0 にする。withBreak=true なら、この段落の中に改ページを入れる
+ * (body.appendPageBreak は改ページ用の段落を新しく作り、その高さでページからあふれて白紙のページが出たため)。
+ */
+function docSpacer_(body, withBreak) {
+  var p = body.appendParagraph(' ');
+  p.setFontSize(1);
+  p.setSpacingBefore(0);
+  p.setSpacingAfter(0);
+  p.setLineSpacing(1.0);
+  if (withBreak) p.appendPageBreak();
   return p;
 }
 
@@ -214,9 +235,9 @@ function docFitImage_(img, ph, boxWmm, boxHmm) {
   var rw = Number(ph && ph.width), rh = Number(ph && ph.height);
   if (!(rw > 0 && rh > 0)) { rw = Number(img.getWidth()); rh = Number(img.getHeight()); }
   if (!(rw > 0 && rh > 0)) return false;
-  var s = Math.min(docMm_(boxWmm) / rw, docMm_(boxHmm) / rh);
-  img.setWidth(Math.round(rw * s));   // 実GASの引数は Integer
-  img.setHeight(Math.round(rh * s));
+  var s = Math.min(docMm_(boxWmm) / rw, docMm_(boxHmm) / rh);   // 枠に収まる倍率(pt)
+  img.setWidth(Math.floor(rw * s * REPORT_DOC_PX_PER_PT));   // ピクセルで渡す(実GASの引数は Integer。切り捨てて枠からはみ出さない)
+  img.setHeight(Math.floor(rh * s * REPORT_DOC_PX_PER_PT));
   return true;
 }
 
@@ -328,7 +349,7 @@ function docDrawingPage_(body, ph, rows, seq, t0) {
     }
     trs.push([e.no, itemCell, '', '', [docResRun_(row.selfResult, row.selfSeverity)], [docResRun_(row.qaResult, row.qaSeverity)]]);
   });
-  docBodyPara_(body, '', { size: 3 });
+  docSpacer_(body);
   docTextTable_(body, trs, { widths: [24, 76, 28, 24, 17, 17], headRows: [0], shadeRows: shadeRows, minHeight: REPORT_DOC_ROW_MIN_PT }, t0);
 }
 
@@ -401,10 +422,13 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   var info = [['現場名', docStr_(site.name), '元請会社', docStr_(site.primeContractor)]];
   if (ownerCompany) info.push([L.company, ownerCompany, L.owner, docStr_(userName_(rec.ownerUserId))]);
   info.push(['階・工区・打設箇所', rec.floor + (rec.zone ? '・' + rec.zone : '') + ' / ' + rec.lot, '段階', stage]);
-  if (rec.stage === 'post_demold') info.push(['記録ID', rec.recordId, '', '']);   // 出来形は打設予定日時を出さない(セル結合はしない)
-  else info.push(['打設予定日時', dtShort_(rec.pourPlannedAt), '記録ID', rec.recordId]);
-  info.push(['ステータス', statusLabel_(rec), '提出ラウンド', String(rec.round)]);
-  info.push(['生成日時', dtShort_(nowIso), '版', 'v' + version]);
+  // 版1.14.2: 記録ID・提出ラウンド・版は出さない(記録IDは全ページのフッタにある)。出来形は打設予定日時を出さない(セル結合はしない)
+  if (rec.stage === 'post_demold') {
+    info.push(['ステータス', statusLabel_(rec), '生成日時', dtShort_(nowIso)]);
+  } else {
+    info.push(['打設予定日時', dtShort_(rec.pourPlannedAt), 'ステータス', statusLabel_(rec)]);
+    info.push(['生成日時', dtShort_(nowIso), '', '']);
+  }
   docTextTable_(body, info, { widths: [30, 63, 30, 63], labelCols: [0, 2] }, t0);
 
   // 4. サイン欄(3者)
@@ -482,11 +506,8 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   var loadPhoto = reportPhotoLoader_();
   shown.forEach(function (ph, idx) {
     docPhotoBlock_(body, ph, order.rowOf, order.seq, loadPhoto);
-    if ((idx + 1) % REPORT_PHOTOS_PER_PAGE === 0 && idx < shown.length - 1) {
-      body.appendPageBreak();   // 3の倍数枚目の後。最後の写真の後には入れない(白紙のページを作らない)
-    } else {
-      docBodyPara_(body, '', { size: 3 });   // 表が連続して結合されるのを避ける空段落
-    }
+    // 表の後の小さな空段落。3の倍数枚目の後はその段落の中で改ページ。最後の写真の後には改ページを入れない(白紙のページを作らない)
+    docSpacer_(body, (idx + 1) % REPORT_PHOTOS_PER_PAGE === 0 && idx < shown.length - 1);
     docCheckTime_(t0);
   });
   if (order.rest > 0) docBodyPara_(body, '他' + order.rest + '枚は電子記録で閲覧可');
