@@ -34,12 +34,12 @@ var REPORT_DOC_BODY_W_MM = 186;                    // 本文領域の幅(SPEC §
  */
 var REPORT_DOC_TABLE_W_MM = 184;
 var REPORT_DOC_TABLE_SCALE = REPORT_DOC_TABLE_W_MM / REPORT_DOC_BODY_W_MM;
-// 写真ブロック(SPEC §10.5.5 版1.14.0): 列幅は Report.gs の REPORT_PHOTO_COLS_MM(名目 110/76mm)を表と同じ倍率で縮める。
-// 行の最低高 84mm は縮めない。写真のセルの余白は四辺 0.5mm で、写真は枠(左列の実効幅−余白×2 × 83mm)の中で最大。
-// 実機で3枚が1ページに収まらないときの予備値(設計担当が SPEC を直してから): 行 81mm・枠の高さ 80mm。
-var REPORT_DOC_PHOTO_ROW_MM = 84;                  // 写真ブロックの最低高
+// 写真ブロック(SPEC §10.5.5 版1.14.1): 列幅は Report.gs の REPORT_PHOTO_COLS_MM(名目 110/76mm)を表と同じ倍率で縮める。
+// 行の最低高 81mm は縮めない。写真のセルの余白は四辺 0.5mm で、写真は枠(左列の実効幅−余白×2 × 80mm)の中で最大。
+// 版1.14.1: 実PDFで「写真」見出しのある最初のページに2枚しか入らなかったため、84mm・83mm から予備の値に変更。
+var REPORT_DOC_PHOTO_ROW_MM = 81;                  // 写真ブロックの最低高
 var REPORT_DOC_PHOTO_PAD_MM = 0.5;                 // 写真のセルの余白(四辺)
-var REPORT_DOC_PHOTO_BOX_MM = { w: 110 * REPORT_DOC_TABLE_SCALE - 2 * 0.5, h: 83 };
+var REPORT_DOC_PHOTO_BOX_MM = { w: 110 * REPORT_DOC_TABLE_SCALE - 2 * 0.5, h: 80 };
 // 図面の枠は SPEC の名目値(186×170)を表と同じ倍率で縮める(縦横比は維持)。画像セルの余白を0にして 184mm が列幅に収まる。
 var REPORT_DOC_DRAWING_BOX_MM = { w: 186 * REPORT_DOC_TABLE_SCALE, h: 170 * REPORT_DOC_TABLE_SCALE };
 var REPORT_DOC_DRAWINGS_MAX = 6;

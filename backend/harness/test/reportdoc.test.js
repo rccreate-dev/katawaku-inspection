@@ -187,13 +187,13 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.equal(d.images.length, 7);
   const inBlock = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 2);
   assert.equal(inBlock.length, 6);
-  // 版1.14.0: 枠 305.62×235.28pt の中で最大(幅か高さが枠に一致)
-  const BW = MMK(110) - 2 * MM(0.5), BH = MM(83);
+  // 版1.14.1: 枠 305.62×226.77pt の中で最大(幅か高さが枠に一致)
+  const BW = MMK(110) - 2 * MM(0.5), BH = MM(80);
   inBlock.forEach((im) => {
     assert.ok(im.w <= BW + 0.5 && im.h <= BH + 0.5, `写真は枠内: ${im.w}x${im.h}`);
     assert.ok(Math.abs(im.w - BW) <= 0.5 || Math.abs(im.h - BH) <= 0.5, `写真は枠の中で最大: ${im.w}x${im.h}`);
   });
-  near(BW, 305.62, 0.01, '枠の幅'); near(BH, 235.28, 0.01, '枠の高さ');
+  near(BW, 305.62, 0.01, '枠の幅'); near(BH, 226.77, 0.01, '枠の高さ');
   // 縦横比(Photos.width/height と±1%)。比率の集合で確認
   const want = [[400, 300], [200, 400], [300, 300], [800, 200], [100, 100], [160, 90]].map(([w, hh]) => w / hh).sort();
   const got = inBlock.map((im) => im.w / im.h).sort();
@@ -211,7 +211,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   blocks.forEach((t) => {
     assert.equal(t.rows, 1);
     near(t.colWidths[0], 308.46, 0.5); near(t.colWidths[1], 213.12, 0.5);   // 版1.14.0: 110/76mm ×184/186
-    near(t.minRowHeights[0], 238.11, 0.5);   // 84mm(縮めない)
+    near(t.minRowHeights[0], 229.61, 0.5);   // 81mm(縮めない。版1.14.1)
     assert.equal(t.borderWidth, 0.75);
   });
   const items = d.tables.find((t) => t.cols === 7);

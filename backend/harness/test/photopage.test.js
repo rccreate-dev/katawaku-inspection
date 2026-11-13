@@ -237,7 +237,7 @@ test('C-REP-10 doc方式: 番号順・本体の画像・枠の中で最大・3�
   const imgs = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 2);
   const want = [720 / 1280, 1600 / 1200, 160 / 90, 1280 / 720];   // 本体(9:16・4:3)/ サムネ(16:9)/ 本体(16:9)
   imgs.forEach((im, i) => assert.ok(Math.abs(im.w / im.h - want[i]) / want[i] <= 0.01, `比率 ${i}: ${im.w / im.h} vs ${want[i]}`));
-  const BW = 305.62, BH = 235.28;
+  const BW = 305.62, BH = 226.77;   // 版1.14.1: 枠の高さ 80mm
   imgs.forEach((im) => {
     assert.ok(im.w <= BW + 0.5 && im.h <= BH + 0.5, `枠内 ${im.w}x${im.h}`);
     assert.ok(Math.abs(im.w - BW) <= 0.5 || Math.abs(im.h - BH) <= 0.5, `枠の中で最大 ${im.w}x${im.h}`);

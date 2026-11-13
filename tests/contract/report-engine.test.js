@@ -184,20 +184,20 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
     assert.equal(d.images.length, nPhoto + nDrawing, '画像の数');
     const expectBreaks = nDrawing + 1 + Math.floor((nPhoto - 1) / 3);   // 版1.14.0: 3枚/ページ
     assert.equal(d.pageBreaks, expectBreaks, '改ページ数');
-    // 写真ブロックの表(版1.14.0: 2列・308.46/213.12pt(=110・76mm×184/186)・最低行高238.11pt(84mm))の数 = 写真の枚数
+    // 写真ブロックの表(版1.14.1: 2列・308.46/213.12pt(=110・76mm×184/186)・最低行高229.61pt(81mm))の数 = 写真の枚数
     const mm = (x) => x * 72 / 25.4;
     const photoTables = d.tables.filter((tb) => tb.cols === 2 && tb.colWidths.length === 2 && Math.abs(tb.colWidths[0] - mm(110 * 184 / 186)) <= 0.5);
     assert.equal(photoTables.length, nPhoto, '写真ブロックの表の数');
     for (const tb of photoTables) {
       near(tb.colWidths[1], mm(76 * 184 / 186), 0.5, 'colWidths[1]');
-      assert.ok(tb.minRowHeights.some((x) => Math.abs(x - 238.11) <= 0.5), '最低行高238.11pt');
+      assert.ok(tb.minRowHeights.some((x) => Math.abs(x - 229.61) <= 0.5), '最低行高229.61pt(81mm。版1.14.1)');
     }
-    // 写真は枠 305.62×235.28pt の中で最大(幅か高さが枠に一致)
+    // 写真は枠 305.62×226.77pt(版1.14.1)の中で最大(幅か高さが枠に一致)
     const inBlock = d.images.filter((im) => im.inTableIndex >= 0 && d.tables[im.inTableIndex].cols === 2);
     assert.equal(inBlock.length, nPhoto, '写真の画像の数');
     for (const im of inBlock) {
-      assert.ok(im.w <= 305.62 + 0.5 && im.h <= 235.28 + 0.5, `写真は枠内: ${im.w}x${im.h}`);
-      assert.ok(Math.abs(im.w - 305.62) <= 0.5 || Math.abs(im.h - 235.28) <= 0.5, `写真は枠の中で最大: ${im.w}x${im.h}`);
+      assert.ok(im.w <= 305.62 + 0.5 && im.h <= 226.77 + 0.5, `写真は枠内: ${im.w}x${im.h}`);
+      assert.ok(Math.abs(im.w - 305.62) <= 0.5 || Math.abs(im.h - 226.77) <= 0.5, `写真は枠の中で最大: ${im.w}x${im.h}`);
     }
     const itemTable = d.tables.find((tb) => tb.cols === 7);
     assert.ok(itemTable, '項目表は7列');

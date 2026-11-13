@@ -248,7 +248,7 @@ var REPORT_PHOTOS_PER_PAGE = 3;                // 1ページの写真の枚数(�
 var REPORT_PHOTOS_MAX = 60;                    // 写真ページに出す上限
 var REPORT_PHOTO_MAIN_MAX_BYTES = 20000000;    // 1つのPDFで読む本体の合計の上限。超えた分はサムネ(P-52 ①)
 var REPORT_PHOTO_COLS_MM = [110, 76];          // 写真ブロックの列幅(名目。左=写真 / 右=情報欄)
-var REPORT_HTML_PHOTO_ROW_MM = 80;             // HTML方式のブロックの高さ(レター用紙のため。doc 方式は 84mm)
+var REPORT_HTML_PHOTO_ROW_MM = 80;             // HTML方式のブロックの高さ(レター用紙のため。doc 方式は 81mm)
 var REPORT_HTML_PHOTO_BOX_MM = { w: 109, h: 79 };   // HTML方式の写真の枠(セル余白0.5mm の内側)
 
 /**
