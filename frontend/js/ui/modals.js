@@ -204,6 +204,9 @@
       var info = h('div', { class: 'stamp' });
       var hint = h('div', { class: 'stamp camhint' }, t('photo.landscape_hint'));
       var msg = h('div', { class: 'stamp', hidden: true });
+      // 版1.16.0(§7.1): 縦持ちのときの案内(検査写真だけ)
+      var turn = h('div', { class: 'camturn', role: 'status', hidden: true }, KW.icon('turn'), h('span', null, t('photo.turn_landscape')));
+      var blocked = false, camReady = false, blockTimer = null;
       var fileIn = null;
       var shutter = h('button', { type: 'button', class: 'shutter', 'aria-label': t('photo.shutter'), disabled: true });
       var retake = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.retake'));
@@ -214,13 +217,14 @@
       var count = h('span', { hidden: drawingMode }, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
       if (drawingMode) hint.hidden = true;
       var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, use);
-      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, bar);
+      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, turn, bar);
       layer.appendChild(box);
       M.fit(box);
 
       function finish(v) {
         if (done) return; done = true;
         KW.photo.stopCamera(stream);
+        if (blockTimer) clearInterval(blockTimer);
         motion.stop();
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(v);
@@ -274,8 +278,24 @@
           shutter.disabled = false; rotate.disabled = false; use.disabled = false;
         });
       }
+      /* 縦持ちの判定(撮影前のプレビュー中だけ。図面モードは止めない) */
+      function checkPortrait() {
+        if (drawingMode) return false;
+        var preview = !video.hidden && !shutter.hidden;
+        var b = preview && KW.photo.portraitBlocked(motion.gravity(), blocked);
+        if (b !== blocked) {
+          blocked = b;
+          turn.hidden = !b;
+          hint.hidden = b;
+          shutter.classList.toggle('blocked', b);
+          if (b) shutter.disabled = true; else if (camReady && msg.hidden) shutter.disabled = false;
+        }
+        return b;
+      }
+      if (!drawingMode) blockTimer = setInterval(checkPortrait, 200);
       shutter.addEventListener('click', function () {
         if (!video.videoWidth) return;
+        if (checkPortrait()) return; // 縦持ちでは撮らない
         var c = document.createElement('canvas');
         c.width = video.videoWidth; c.height = video.videoHeight;
         c.getContext('2d').drawImage(video, 0, 0);
@@ -285,6 +305,7 @@
       retake.addEventListener('click', function () {
         result = null; prev.hidden = true; video.hidden = false; shutter.hidden = false; shutter.disabled = false;
         retake.hidden = true; rotate.hidden = true; use.hidden = true; KW.clear(info);
+        blocked = false; checkPortrait();
       });
       /* 向きが違って写ったとき(端末の画面回転ロック等)に、右へ90°回してスタンプを入れ直す */
       rotate.addEventListener('click', function () {
@@ -303,7 +324,7 @@
         if (done) { KW.photo.stopCamera(s); return; }
         stream = s;
         video.srcObject = s;
-        var ready = function () { shutter.disabled = false; };
+        var ready = function () { camReady = true; shutter.disabled = blocked; };
         if (video.readyState >= 2 && video.videoWidth) ready(); else video.addEventListener('loadeddata', ready, { once: true });
         var p = video.play(); if (p && p.catch) p.catch(function () { /* 無視 */ });
       }, function () {

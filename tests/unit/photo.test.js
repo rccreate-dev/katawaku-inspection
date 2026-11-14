@@ -103,3 +103,23 @@ describe('U-PHOTO-04 撮った画像の向き(版1.14.4 §7.1)', () => {
     assert.equal(photo.motionSign('Mozilla/5.0 (iPhone)', { MOTION_SIGN: 2 }), -1, '1/−1 以外は無視');
   });
 });
+
+describe('U-PHOTO-05 縦持ちでシャッターを止める(版1.16.0 §7.1)', () => {
+  it('portraitBlocked: 縦は止める・横と寝かせは止めない・35°〜45° は前の状態のまま', () => {
+    const pb = photo.portraitBlocked;
+    assert.equal(pb(null, false), false, '傾きなし');
+    assert.equal(pb(null, true), false);
+    assert.equal(pb({ x: 0, y: 9.8 }, false), true, '縦');
+    assert.equal(pb({ x: 0, y: -9.8 }, false), true, '上下逆の縦');
+    assert.equal(pb({ x: 9.8, y: 0 }, true), false, '横(左回し)');
+    assert.equal(pb({ x: -9.8, y: 0 }, true), false, '横(右回し)');
+    assert.equal(pb({ x: 1, y: 2 }, true), false, '寝かせた状態');
+    assert.equal(pb({ x: 5, y: 6 }, false), false, '約40°: 前が止めていない → そのまま');
+    assert.equal(pb({ x: 5, y: 6 }, true), true, '約40°: 前が止めている → そのまま');
+    assert.equal(pb({ x: 6, y: 5 }, true), false, '横寄り');
+    assert.equal(pb({ x: 6, y: 5 }, false), false);
+    assert.equal(pb({ x: 3, y: 7 }, false), true, '約23°');
+    assert.equal(pb({ x: 'a', y: 7 }, false), false, '数でない');
+    assert.equal(pb({ x: 0 }, true), false, 'y が無い');
+  });
+});

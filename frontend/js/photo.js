@@ -145,7 +145,8 @@
   function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.reject(new Error('NO_CAMERA'));
     return navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      // 版1.16.0(§7.1): 縦横比 4:3 を求める。出せない端末はそのまま(切り取らない)
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 } },
       audio: false
     });
   }
@@ -232,6 +233,19 @@
     if (Math.max(ax, ay) < MOTION_MIN) return null;
     if (ax > ay) return x > 0 ? 90 : 270;
     return y > 0 ? 0 : 180;
+  }
+  /* 版1.16.0(§7.1): 縦持ちでシャッターを止めるか。g は仕様の向きの重力 {x,y} または null。純関数。
+   * null・平らに近い → false。止める状態に入るのは |y|>|x|×1.43(縦の軸から35°以内)、出るのは |x|>|y|(横の軸から45°以内)。間は wasBlocked のまま */
+  var PORTRAIT_ENTER = 1.43;
+  function portraitBlocked(g, wasBlocked) {
+    if (!g || g.x == null || g.y == null) return false;
+    var x = Number(g.x), y = Number(g.y);
+    if (!isFinite(x) || !isFinite(y)) return false;
+    var ax = Math.abs(x), ay = Math.abs(y);
+    if (Math.max(ax, ay) < MOTION_MIN) return false;
+    if (ay > ax * PORTRAIT_ENTER) return true;
+    if (ax > ay) return false;
+    return !!wasBlocked;
   }
   function norm360(a) { a = Math.round(Number(a) / 90) * 90; return ((a % 360) + 360) % 360; }
   /* 画面の向き。so = screen.orientation.angle、wo = window.orientation(古い iOS)。どちらも無ければ 0。純関数 */
@@ -345,7 +359,7 @@
 
   var api = {
     drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, drawingAttention: drawingAttention, valueCount: valueCount, encodeDrawing: encodeDrawing,
-    motionSign: motionSign, deviceAngle: deviceAngle, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
+    motionSign: motionSign, deviceAngle: deviceAngle, portraitBlocked: portraitBlocked, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,

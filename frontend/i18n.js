@@ -230,6 +230,7 @@
     ['photo.rotate', '回転', 'Putar'],
     ['photo.landscape_hint', 'スマホを横向きにして撮影してください(PDFの写真枠が横長のため)', 'Ambil foto dengan ponsel posisi horizontal (bingkai foto di PDF melebar)'],
     ['photo.shutter', '撮影', 'Ambil foto'],
+    ['photo.turn_landscape', '横向きにして撮ってください', 'Putar ponsel ke posisi horizontal untuk memotret'],
     ['photo.thumb_only', '縮小画像を表示しています', 'Menampilkan gambar kecil'],
     ['photo.loading', '読み込み中…', 'Memuat…'],
     ['photo.load_failed', '画像を表示できませんでした', 'Gambar tidak dapat ditampilkan'],
