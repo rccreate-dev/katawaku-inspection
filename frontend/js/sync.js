@@ -73,6 +73,8 @@
             if (m.replaces) params.replaces = m.replaces;
           }
           if (m.kind === 'drawing_base') params.kind = 'drawing_base'; // 図面の元の画像(見えない行)
+          // 版1.17.0(§7.8-2): 文字入りの画像。元の写真と書いた文字を同送
+          if (m.kind === 'photo_text') { params.kind = 'photo_text'; params.basePhotoId = m.basePhotoId; params.texts = m.texts || []; }
           // サムネは index=0 のリクエストに同梱(単発は常に同梱)
           if (idx === 0) return KW.photo.blobToB64(pb.thumb).then(function (tb) { params.thumb = tb; return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 }); });
           return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 });
@@ -122,6 +124,8 @@
         if (!pb) return null;
         // 図面の元の画像(drawing_base)は詳細に載らない行なので、送れたら本体を消す(書き直しは getPhoto part=base で取る)
         if (pb.meta && pb.meta.kind === 'drawing_base') return KW.data.delPhotoBlob(pid);
+        // 版1.17.0: 文字入りの画像は元の写真の text に載る(古いものは載らない)。送れたらサムネを残して本体を消す
+        if (pb.meta && pb.meta.kind === 'photo_text') { var tt = pb.thumb; return KW.data.delPhotoBlob(pid).then(function () { return tt ? KW.data.cacheThumb(pid, tt) : null; }); }
         var th = pb.thumb;
         var done = function () { return th ? KW.data.cacheThumb(pid, th) : null; };
         if (!fresh) { pb.uploadState = 'uploaded'; return KW.db.put('photoBlobs', pb).then(done); }

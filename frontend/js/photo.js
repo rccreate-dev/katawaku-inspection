@@ -58,6 +58,53 @@
     return step(0);
   }
 
+  /* ---- 版1.17.0(§7.8): 写真への文字。純関数 ---- */
+  var TEXT_SIZE_K = { s: 0.045, m: 0.065, l: 0.09 };
+  var TEXT_COLORS = {
+    white: { fill: '#FFFFFF', stroke: '#000000', k: 0.12 },
+    red: { fill: '#E60012', stroke: '#FFFFFF', k: 0.08 },
+    yellow: { fill: '#FFD400', stroke: '#000000', k: 0.08 }
+  };
+  /* 文字の描き方 → {fontPx, fill, stroke, strokePx}。文字の高さ=画像の高さ×係数(最小14px) */
+  function textStyle(size, color, imgH) {
+    var k = TEXT_SIZE_K[size] || TEXT_SIZE_K.m;
+    var c = TEXT_COLORS[color] || TEXT_COLORS.white;
+    var fontPx = Math.max(14, Math.round(Number(imgH) * k));
+    return { fontPx: fontPx, fill: c.fill, stroke: c.stroke, strokePx: Math.round(fontPx * c.k) };
+  }
+  /* 文字の枠(割合 {x,y,w,h})を、画像の中で、スタンプの帯(bandH px)に重ならない位置に収める → {x,y} */
+  function clampTextBox(box, imgW, imgH, bandH) {
+    var round = function (v) { return Math.round(v * 1e6) / 1e6; };
+    var maxX = Math.max(0, 1 - box.w);
+    var maxY = Math.max(0, 1 - (Number(bandH) || 0) / imgH - box.h);
+    return { x: round(Math.min(maxX, Math.max(0, box.x))), y: round(Math.min(maxY, Math.max(0, box.y))) };
+  }
+  /* 文字幅の目安(measure が無いとき。ASCII は文字の高さ×0.6、それ以外は×1) */
+  function estimateWidth(text, fontPx) {
+    var w = 0;
+    for (var i = 0; i < text.length; i++) w += text.charCodeAt(i) < 128 ? fontPx * 0.6 : fontPx;
+    return w;
+  }
+  /* スタンプの帯の高さ(px)。§7.2 と同じ: 1行=max(28, 高さ×0.08)、幅(-20px)に収まらなければ2行分。
+   * measure(text, fontPx) で実際の描画幅を測る(省略時は目安) */
+  function stampBandHeight(width, height, stampText, measure) {
+    var bh = Math.max(28, Math.round(height * 0.08));
+    var font = Math.round(bh * 0.5);
+    var tw = measure ? measure(String(stampText || ''), font) : estimateWidth(String(stampText || ''), font);
+    return tw > width - 20 ? bh * 2 : bh;
+  }
+  /* 書いた文字の検査(サーバー §5.4.4 と同じ規則) */
+  function validTexts(texts) {
+    if (!Array.isArray(texts) || texts.length < 1 || texts.length > 3) return false;
+    return texts.every(function (o) {
+      if (!o || typeof o !== 'object' || typeof o.text !== 'string') return false;
+      var tx = o.text.trim();
+      if (tx.length < 1 || tx.length > 30 || /[\r\n]/.test(tx)) return false;
+      if (typeof o.x !== 'number' || typeof o.y !== 'number' || !(o.x >= 0 && o.x <= 1) || !(o.y >= 0 && o.y <= 1)) return false;
+      return !!TEXT_SIZE_K[o.size] && !!TEXT_COLORS[o.color];
+    });
+  }
+
   /* ---- 画像処理(ブラウザ) ---- */
   function canvasOf(w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
   function toBlob(canvas, quality) {
@@ -96,6 +143,66 @@
     ctx.fillStyle = '#fff';
     ctx.textBaseline = 'middle';
     rows.forEach(function (txt, i) { ctx.fillText(txt, 10, h - band + bh * (i + 0.5)); });
+  }
+
+  /* 版1.17.0(§7.8): 文字を1つ描く。t = {text,x,y,size,color}(x,y は枠の左上の割合)。枠 {x,y,w,h}(px)を返す */
+  function drawText(g, tx, w, h) {
+    var st = textStyle(tx.size, tx.color, h);
+    g.save();
+    g.font = 'bold ' + st.fontPx + 'px sans-serif';
+    g.textBaseline = 'middle';
+    g.lineJoin = 'round';
+    var bw = g.measureText(tx.text).width, bh = st.fontPx * 1.2;
+    var x = tx.x * w, y = tx.y * h, cy = y + bh / 2;
+    if (st.strokePx > 0) { g.lineWidth = st.strokePx * 2; g.strokeStyle = st.stroke; g.strokeText(tx.text, x, cy); }
+    g.fillStyle = st.fill; g.fillText(tx.text, x, cy);
+    g.restore();
+    return { x: x, y: y, w: bw, h: bh };
+  }
+  /* 文字の枠の大きさ(割合 {w,h}) */
+  function textBoxSize(g, tx, w, h) {
+    var st = textStyle(tx.size, tx.color, h);
+    g.save(); g.font = 'bold ' + st.fontPx + 'px sans-serif';
+    var bw = g.measureText(tx.text).width;
+    g.restore();
+    return { w: bw / w, h: st.fontPx * 1.2 / h };
+  }
+  /* canvas で測る measure(stampBandHeight 用) */
+  function canvasMeasure(g) {
+    return function (text, fontPx) { g.save(); g.font = 'bold ' + fontPx + 'px sans-serif'; var v = g.measureText(text).width; g.restore(); return v; };
+  }
+  /* 描いた canvas を、検査写真と同じ符号化(§7.3)で 本体+サムネ+SHA-256 にする */
+  function encodeLike(drawAt, baseW, baseH, stamp) {
+    var cfg = (KW.state && KW.state.bootstrap && KW.state.bootstrap.config) || {};
+    var q0 = cfg.photoJpegQuality || 0.72;
+    var maxBytes = cfg.photoMaxBytes || 600000;
+    var thumbEdge = cfg.photoThumbEdge || 320;
+    function encode(scale, quality) {
+      var w = Math.max(1, Math.round(baseW * scale)), h = Math.max(1, Math.round(baseH * scale));
+      var c = canvasOf(w, h);
+      drawAt(c.getContext('2d'), w, h);
+      return toBlob(c, quality).then(function (b) { return { size: b.size, blob: b, w: w, h: h, canvas: c }; });
+    }
+    return chooseEncoding(encode, q0, 400000, maxBytes).then(function (r) {
+      if (r.tooLarge) { var e = new Error('PHOTO_TOO_LARGE'); e.code = 'PHOTO_TOO_LARGE'; throw e; }
+      var full = r.result;
+      var tsz = scaledSize(full.w, full.h, thumbEdge);
+      var tc = canvasOf(tsz.w, tsz.h);
+      tc.getContext('2d').drawImage(full.canvas, 0, 0, tsz.w, tsz.h);
+      function thumbTry(q) {
+        return toBlob(tc, q).then(function (b) { return (b.size > 60000 && q > 0.3) ? thumbTry(q - 0.15) : b; });
+      }
+      return Promise.all([thumbTry(0.6), sha256Hex(full.blob)]).then(function (xs) {
+        return { full: full.blob, thumb: xs[0], width: full.w, height: full.h, bytes: full.blob.size, sha256: xs[1], stampText: stamp, mime: 'image/jpeg' };
+      });
+    });
+  }
+  /* 版1.17.0(§7.8-4): 元の写真(img/canvas。width×height)に文字を焼き込む */
+  function bakeText(source, width, height, texts, stamp) {
+    return encodeLike(function (g, w, h) {
+      g.drawImage(source, 0, 0, w, h);
+      (texts || []).forEach(function (tx) { drawText(g, tx, w, h); });
+    }, width, height, stamp);
   }
 
   /*
@@ -361,6 +468,8 @@
     drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, drawingAttention: drawingAttention, valueCount: valueCount, encodeDrawing: encodeDrawing,
     motionSign: motionSign, deviceAngle: deviceAngle, portraitBlocked: portraitBlocked, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
     toBlob: toBlob, canvasOf: canvasOf,
+    textStyle: textStyle, clampTextBox: clampTextBox, stampBandHeight: stampBandHeight, validTexts: validTexts,
+    drawText: drawText, textBoxSize: textBoxSize, canvasMeasure: canvasMeasure, bakeText: bakeText,
     planUpload: planUpload,
     stampText: stampText, stampLines: stampLines, splitBase64: splitBase64, scaledSize: scaledSize, chooseEncoding: chooseEncoding,
     process: process, startCamera: startCamera, stopCamera: stopCamera, chunksOf: chunksOf, blobToB64: blobToB64, sha256Hex: sha256Hex

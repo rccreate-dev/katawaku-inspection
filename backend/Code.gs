@@ -144,7 +144,9 @@ var ACTIONS = {
       // 版1.6(図面): 値の検証は PhotoUpload.gs が path 付きで行う(markers は配列/null のみ許すので型指定なし)
       kind: { t: 'str', nullable: true, max: 20 }, markers: { t: 'any', nullable: true },
       // 版1.15.0(図面の書き直し・書き足し): 値の検証は PhotoUpload.gs が path 付きで行う
-      basePhotoId: { t: 'str', nullable: true, max: 40 }, replaces: { t: 'str', nullable: true, max: 40 }
+      basePhotoId: { t: 'str', nullable: true, max: 40 }, replaces: { t: 'str', nullable: true, max: 40 },
+      // 版1.17.0(写真への文字): 値の検証は PhotoUpload.gs が path 付きで行う
+      texts: { t: 'any', nullable: true }
     }
   },
   deletePhoto: { w: true, idem: true, roles: ALL_ROLES, params: { photoId: { t: 'id', p: 'p', req: 1 } } },

@@ -126,7 +126,7 @@
           if (x.result && x.result !== 'na') {
             var photos = C.photosFor(detail, work, blobs, it.itemId, 'qa').concat(mem.forItem(it.itemId, 'qa', blobs));
             var max = (KW.state.bootstrap && KW.state.bootstrap.config && KW.state.bootstrap.config.photoMaxPerItem) || 5;
-            var strip = C.photoStrip(photos, { onDelete: ed ? function (p) { deletePhoto(it, p); } : null });
+            var strip = C.photoStrip(photos, { onDelete: ed ? function (p) { deletePhoto(it, p); } : null, textFor: function (p) { return textActs(it, p, ed); } });
             if (ed && has(detail, 'uploadPhotoChunk')) {
               var cam = h('button', { type: 'button', class: 'cam', disabled: photos.length >= max }, KW.icon('camera'), t('act.photo') + ' ' + photos.length + '/' + max);
               cam.addEventListener('click', function () { takePhoto(it, photos.length, max); });
@@ -145,12 +145,20 @@
         old.parentNode.replaceChild(nn, old); itemNodes[itemId] = nn;
       }
 
+      /* 版1.17.0(§7.8-3): 拡大表示の「文字を書く」「文字を直す」(自分の写真だけ) */
+      function textActs(it, p, ed) {
+        return KW.phototext.actions(p, {
+          recordId: id, itemId: it.itemId, side: 'qa', editable: ed && has(detail, 'uploadPhotoChunk'),
+          markDeleted: function (pid) { work.deletedPhotos[pid] = true; return KW.data.putDraft(work); },
+          after: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; redraw(it.itemId); }); }
+        });
+      }
       function takePhoto(it, count, max) {
         KW.modal.camera({ siteName: C.siteName(detail.siteId), floor: detail.floor, zone: detail.zone, count: count, max: max }).then(function (p) {
           if (!p) return;
           var photoId = KW.newPhotoId();
           // 『使う』を押した時点で、端末への保存を待たずにサムネを出す(SPEC §8.11.5)
-          mem.add({ photoId: photoId, itemId: it.itemId, side: 'qa', thumb: p.thumb });
+          mem.add({ photoId: photoId, itemId: it.itemId, side: 'qa', thumb: p.text ? p.text.baked.thumb : p.thumb });
           redraw(it.itemId);
           return KW.data.putPhotoBlob({
             photoId: photoId, recordId: id, itemId: it.itemId, side: 'qa', full: p.full, thumb: p.thumb,
@@ -158,7 +166,7 @@
           }).then(function () {
             return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'qa' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
               .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); });
-          }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
+          }).then(function () { return C.queueTakenText(id, it.itemId, 'qa', photoId, p); }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
             blobs = b; mem.drop(photoId); redraw(it.itemId); drawVerdict();
           }, function (e) {
             KW.reportError(e); mem.fail(photoId); redraw(it.itemId); // 保存できません。撮り直してください
@@ -171,7 +179,7 @@
           KW.outbox.forRecord(id).then(function (rs) {
             var row = rs.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
             if (row && row.status === 'sending') return null; // 送信中は削除できない(完了後に削除)
-            var tasks = [KW.data.delPhotoBlob(p.photoId)]; if (row) tasks.push(KW.outbox.remove(row.seq));
+            var tasks = [KW.data.delPhotoBlob(p.photoId), C.dropTextFor(id, p.photoId)]; if (row) tasks.push(KW.outbox.remove(row.seq));
             return Promise.all(tasks);
           }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redraw(it.itemId); drawVerdict(); });
           return;

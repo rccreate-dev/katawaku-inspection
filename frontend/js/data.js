@@ -51,7 +51,7 @@
   function reapUploaded(d) {
     var ids = {};
     (d.items || []).forEach(function (it) {
-      ['self', 'qa'].forEach(function (sd) { ((it[sd] && it[sd].photos) || []).forEach(function (p) { ids[p.photoId] = 1; }); });
+      ['self', 'qa'].forEach(function (sd) { ((it[sd] && it[sd].photos) || []).forEach(function (p) { ids[p.photoId] = 1; if (p.text && p.text.photoId) ids[p.text.photoId] = 1; }); });
     });
     (d.primePhotos || []).forEach(function (p) { ids[p.photoId] = 1; });
     (d.drawings || []).forEach(function (p) { ids[p.photoId] = 1; }); // 図面(版1.6)
@@ -64,7 +64,8 @@
     if (!d) return false;
     var found = (d.primePhotos || []).some(function (p) { return p.photoId === pid; }) || (d.drawings || []).some(function (p) { return p.photoId === pid; });
     (d.items || []).forEach(function (it) {
-      ['self', 'qa'].forEach(function (sd) { if (((it[sd] && it[sd].photos) || []).some(function (p) { return p.photoId === pid; })) found = true; });
+      // 版1.17.0: 文字入りの画像は元の写真の text に載る
+      ['self', 'qa'].forEach(function (sd) { if (((it[sd] && it[sd].photos) || []).some(function (p) { return p.photoId === pid || (p.text && p.text.photoId === pid); })) found = true; });
     });
     return found;
   }

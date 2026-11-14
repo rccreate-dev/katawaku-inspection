@@ -48,12 +48,20 @@
     var have = {};
     list.forEach(function (p) { have[p.photoId] = true; });
     blobs.forEach(function (b) {
+      if (KW.phototext.isTextBlob(b)) return;   // 版1.17.0: 文字入りの画像は写真として数えない(元の写真の上に出す)
       // 送信済みで詳細にも載った写真は二重に数えない(photoId は端末で採番しサーバーでも同じIDを使う)
       if (b.itemId === itemId && b.side === side && !have[b.photoId] && !(work.deletedPhotos && work.deletedPhotos[b.photoId])) list.push({ photoId: b.photoId, local: b.uploadState !== 'uploaded', blob: b.full, thumbBlob: b.thumb, stampText: b.meta && b.meta.stampText, takenAt: b.meta && b.meta.takenAt });
     });
-    return list;
+    return KW.phototext.decorate(list, blobs, work);
   }
   C.photosFor = photosFor;
+  /* 版1.17.0(§7.8): 撮った直後に書いた文字(p.text)を、元の写真の後に積む */
+  C.queueTakenText = function (recordId, itemId, side, photoId, p) {
+    if (!p || !p.text) return Promise.resolve();
+    return KW.phototext.queue({ recordId: recordId, itemId: itemId, side: side }, photoId, p.stampText, p.text);
+  };
+  /* 写真を消すとき、送る前の文字入りの画像も片付ける */
+  C.dropTextFor = function (recordId, photoId) { return KW.phototext.dropLocal(recordId, photoId); };
 
   /* 検証用の記録(入力中の値を重ねる) */
   function recFor(detail, work, blobs, side) {
@@ -166,7 +174,7 @@
         // 写真
         if (x.result && x.result !== 'na') {
           var photos = itemPhotos(it.itemId);
-          var box = C.photoStrip(photos, { onDelete: editable ? function (p) { deletePhoto(it, p); } : null });
+          var box = C.photoStrip(photos, { onDelete: editable ? function (p) { deletePhoto(it, p); } : null, textFor: function (p) { return textActs(it, p); } });
           var max = (KW.state.bootstrap && KW.state.bootstrap.config && KW.state.bootstrap.config.photoMaxPerItem) || 5;
           if (editable) {
             var cam = h('button', { type: 'button', class: 'cam', disabled: photos.length >= max }, KW.icon('camera'), t('act.photo') + ' ' + photos.length + '/' + max);
@@ -221,12 +229,20 @@
         return (detail.items || []).filter(function (i) { return i.def.audience !== 'qa'; }).sort(function (a, b) { return a.def.seq - b.def.seq; });
       }
 
+      /* 版1.17.0(§7.8-3): 拡大表示の「文字を書く」「文字を直す」 */
+      function textActs(it, p) {
+        return KW.phototext.actions(p, {
+          recordId: id, itemId: it.itemId, side: 'self', editable: editable,
+          markDeleted: function (pid) { work.deletedPhotos[pid] = true; return KW.data.putDraft(work); },
+          after: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; redrawItem(it.itemId); }); }
+        });
+      }
       function takePhoto(it, count, max) {
         KW.modal.camera({ siteName: C.siteName(detail.siteId), floor: detail.floor, zone: detail.zone, count: count, max: max }).then(function (p) {
           if (!p) return;
           var photoId = KW.newPhotoId();
           // 『使う』を押した時点で、端末への保存を待たずにサムネを出す(SPEC §8.11.5)
-          mem.add({ photoId: photoId, itemId: it.itemId, side: 'self', thumb: p.thumb });
+          mem.add({ photoId: photoId, itemId: it.itemId, side: 'self', thumb: p.text ? p.text.baked.thumb : p.thumb });
           delete errMap[it.itemId]; redrawItem(it.itemId);
           return KW.data.putPhotoBlob({
             photoId: photoId, recordId: id, itemId: it.itemId, side: 'self', full: p.full, thumb: p.thumb,
@@ -234,7 +250,7 @@
           }).then(function () {
             return KW.outbox.enqueue('uploadPhotoChunk', { recordId: id, itemId: it.itemId, side: 'self' }, { recordId: id, photo: { photoId: photoId, total: 0, nextIndex: 0 } })
               .catch(function (e) { return KW.data.delPhotoBlob(photoId).then(function () { throw e; }, function () { throw e; }); }); // 積めなければ本体も消す
-          }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
+          }).then(function () { return C.queueTakenText(id, it.itemId, 'self', photoId, p); }).then(function () { return KW.sync.refreshCounts(); }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) {
             blobs = b; mem.drop(photoId); redrawItem(it.itemId);
           }, function (e) {
             // 保存に失敗: 赤の『保存できません。撮り直してください』。送信行は積まない
@@ -248,7 +264,7 @@
           KW.outbox.forRecord(id).then(function (rows) {
             var row = rows.filter(function (r) { return r.photo && r.photo.photoId === p.photoId; })[0];
             if (row && row.status === 'sending') return null; // 送信中は削除できない(完了後に削除)
-            var tasks = [KW.data.delPhotoBlob(p.photoId)];
+            var tasks = [KW.data.delPhotoBlob(p.photoId), C.dropTextFor(id, p.photoId)];
             if (row) tasks.push(KW.outbox.remove(row.seq));
             return Promise.all(tasks);
           }).then(function () { return KW.data.photoBlobsFor(id); }).then(function (b) { blobs = b; redrawItem(it.itemId); });

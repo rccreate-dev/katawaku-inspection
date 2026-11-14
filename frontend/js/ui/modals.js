@@ -213,10 +213,12 @@
       var rotate = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.rotate'));
       var lastSrc = null; // 回転の元(直近に処理した画像: {source,w,h})
       var use = h('button', { type: 'button', class: 'cambtn primary', hidden: true }, t('photo.use'));
+      // 版1.17.0(§7.8-3): 撮った直後に文字を書く(検査写真だけ)
+      var textBtn = h('button', { type: 'button', class: 'cambtn', 'data-act': 'text', hidden: true }, t('photo.add_text'));
       var cancel = h('button', { type: 'button', class: 'cambtn' }, t('act.cancel'));
       var count = h('span', { hidden: drawingMode }, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
       if (drawingMode) hint.hidden = true;
-      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, use);
+      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, textBtn, use);
       var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, turn, bar);
       layer.appendChild(box);
       M.fit(box);
@@ -266,10 +268,12 @@
         rotate.disabled = true; use.disabled = true;
         return KW.photo.process({ source: source, width: w, height: hgt }, stampCtx(ms)).then(function (p) {
           p.takenAt = KW.time.toIso(ms);
+          p.text = null;   // 版1.17.0: {texts, baked}(文字を書いたとき)
           result = p;
           prev.src = C.blobUrl(p.full);
           prev.hidden = false; video.hidden = true;
           shutter.hidden = true; retake.hidden = false; rotate.hidden = false; use.hidden = false;
+          textBtn.hidden = false; setTextLabel();
           KW.clear(info).appendChild(document.createTextNode(p.stampText));
           msg.hidden = true;
           rotate.disabled = false; use.disabled = false;
@@ -278,6 +282,18 @@
           shutter.disabled = false; rotate.disabled = false; use.disabled = false;
         });
       }
+      function setTextLabel() { KW.clear(textBtn).appendChild(document.createTextNode(t(result && result.text ? 'photo.edit_text' : 'photo.add_text'))); }
+      /* 版1.17.0(§7.8-3): 文字を書く。保存するとプレビューが文字入りに変わる */
+      textBtn.addEventListener('click', function () {
+        if (!result || drawingMode) return;
+        var cur = result;
+        KW.modal.textEditor({ blob: cur.full, stampText: cur.stampText, texts: cur.text ? cur.text.texts : [] }).then(function (r) {
+          if (!r || result !== cur) return;
+          cur.text = r.texts.length ? { texts: r.texts, baked: r.baked } : null;
+          prev.src = C.blobUrl(cur.text ? cur.text.baked.full : cur.full);
+          setTextLabel();
+        });
+      });
       /* 縦持ちの判定(撮影前のプレビュー中だけ。図面モードは止めない) */
       function checkPortrait() {
         if (drawingMode) return false;
@@ -304,12 +320,14 @@
       });
       retake.addEventListener('click', function () {
         result = null; prev.hidden = true; video.hidden = false; shutter.hidden = false; shutter.disabled = false;
-        retake.hidden = true; rotate.hidden = true; use.hidden = true; KW.clear(info);
+        retake.hidden = true; rotate.hidden = true; use.hidden = true; textBtn.hidden = true; KW.clear(info);
         blocked = false; checkPortrait();
       });
       /* 向きが違って写ったとき(端末の画面回転ロック等)に、右へ90°回してスタンプを入れ直す */
       rotate.addEventListener('click', function () {
         if (!lastSrc) return;
+        // 版1.17.0: 回すと書いた文字は消える(回してから書き直す)
+        if (result && result.text) C.toast(t('photo.text_cleared'));
         var rc = document.createElement('canvas');
         rc.width = lastSrc.h; rc.height = lastSrc.w;
         var g = rc.getContext('2d');
@@ -362,6 +380,9 @@
       return b;
     });
     var box = h('div', { class: 'photoview', role: 'dialog', 'aria-modal': 'true' }, img, stampP, note, acts.length ? h('div', { class: 'row' }, acts, close) : close);
+    // 版1.17.0(§7.8-5): 文字入りの画像があればそれを出す
+    var ti = KW.phototext ? KW.phototext.textImgOf(p) : null;
+    if (ti) { box.setAttribute('data-text', '1'); p = { photoId: ti.photoId, local: !!ti.blob, blob: ti.blob }; }
     layer.appendChild(box);
     M.fit(box);
     close.addEventListener('click', shut);

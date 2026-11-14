@@ -88,8 +88,41 @@ function recordListView_(actor, rec) {
   return recordSummary_(actor, rec);
 }
 
-/** Photos 行の種別(版1.6。旧行で kind が空なら 'photo')。版1.15.0: 'drawing_base'(図面の元の画像。どこにも出さない見えない行) */
-function photoKindOf_(p) { return p.kind === 'drawing' ? 'drawing' : (p.kind === 'drawing_base' ? 'drawing_base' : 'photo'); }
+/** Photos 行の種別(版1.6。旧行で kind が空なら 'photo')。版1.15.0: 'drawing_base'(図面の元の画像。どこにも出さない見えない行)。
+ * 版1.17.0: 'photo_text'(検査写真に文字を書き込んだ画像。元の写真の text として返す) */
+var PHOTO_KINDS_ = { drawing: 1, drawing_base: 1, photo_text: 1 };
+function photoKindOf_(p) { return PHOTO_KINDS_[p.kind] ? p.kind : 'photo'; }
+
+/**
+ * 版1.17.0(§5.4.4・§7.8): 元の写真ごとの有効な文字入りの画像。rows=その記録の未削除の行。
+ * 元の写真が無い・合わない(項目・side・撮影者)行は使わない。takenAt が最も新しいもの(同じなら photoId の大きい方)
+ */
+function photoTextMap_(rows) {
+  var byId = {};
+  rows.forEach(function (p) { byId[p.photoId] = p; });
+  var m = {};
+  rows.forEach(function (t) {
+    if (t.deleted || photoKindOf_(t) !== 'photo_text') return;
+    var b = byId[t.basePhotoId];
+    if (!b || b.deleted || photoKindOf_(b) !== 'photo' || b.itemId !== t.itemId || b.side !== t.side || b.takenBy !== t.takenBy) return;
+    var cur = m[t.basePhotoId];
+    var ta = String(t.takenAt), ca = cur ? String(cur.takenAt) : '';
+    if (!cur || ta > ca || (ta === ca && t.photoId > cur.photoId)) m[t.basePhotoId] = t;
+  });
+  return m;
+}
+
+/** 版1.17.0: PhotoMeta の text(元の写真の有効な文字入りの画像)。無ければ null */
+function photoTextView_(t) {
+  return t ? { photoId: t.photoId, texts: Array.isArray(t.texts) ? t.texts : [], takenAt: t.takenAt } : null;
+}
+
+/** 版1.17.0(§7.8-6): PDF 用。文字入りの画像があれば、その画像のファイル・寸法を使う写真の行(元の行は変えない) */
+function photoForReport_(p, textMap) {
+  var t = textMap[p.photoId];
+  if (!t) return p;
+  return Object.assign({}, p, { driveFileId: t.driveFileId, thumbFileId: t.thumbFileId, width: t.width, height: t.height });
+}
 
 function photoMeta_(p) {
   var kind = photoKindOf_(p);
@@ -97,7 +130,9 @@ function photoMeta_(p) {
     photoId: p.photoId, itemId: orNull_(p.itemId), side: p.side, round: p.round, takenBy: p.takenBy,
     takenByName: userName_(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes,
     stampText: p.stampText, kind: kind, markers: kind === 'drawing' ? (Array.isArray(p.markers) ? p.markers : []) : null,
-    basePhotoId: kind === 'drawing' ? orNull_(p.basePhotoId) : null   // 版1.15.0
+    basePhotoId: (kind === 'drawing' || kind === 'photo_text') ? orNull_(p.basePhotoId) : null,   // 版1.15.0 / 版1.17.0
+    texts: kind === 'photo_text' ? (Array.isArray(p.texts) ? p.texts : []) : undefined,
+    text: kind === 'photo' ? null : undefined   // 版1.17.0: 元の写真の文字入りの画像(recordDetail_ で入れる)
   };
 }
 
@@ -138,7 +173,13 @@ function recordDetail_(actor, rec) {
   var drawings = allPhotos.filter(function (p) { return photoKindOf_(p) === 'drawing' && !(hideQa && p.side === 'qa'); })
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : (a.takenAt > b.takenAt ? 1 : 0); }).map(photoMeta_);
   var byKey = {};
-  photos.forEach(function (p) { if (p.side !== 'prime') (byKey[p.itemId + '|' + p.side] = byKey[p.itemId + '|' + p.side] || []).push(photoMeta_(p)); });
+  var textMap = photoTextMap_(allPhotos);   // 版1.17.0
+  photos.forEach(function (p) {
+    if (p.side === 'prime') return;
+    var m = photoMeta_(p);
+    m.text = photoTextView_(textMap[p.photoId]);
+    (byKey[p.itemId + '|' + p.side] = byKey[p.itemId + '|' + p.side] || []).push(m);
+  });
   var items = [];
   itemsOf_(rec.recordId).forEach(function (r) {
     var snap = r.snapshot;

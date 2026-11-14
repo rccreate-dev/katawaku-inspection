@@ -33,7 +33,16 @@ function act_deletePhoto(ctx) {
   requireAuth_(actor, 'deletePhoto', { record: rec, photo: ph, params: ctx.params });
   // 削除済みは「存在しない」扱い(PhotoMeta・getPhoto と同じ。再送はclientIdの冪等で吸収される)
   if (ph.deleted) throw new ApiError('NOT_FOUND', '写真が見つかりません');
-  Repo.update('Photos', ph, { deleted: true, deletedBy: actor.userId, deletedAt: Util.nowIso() });
+  var at = Util.nowIso();
+  Repo.update('Photos', ph, { deleted: true, deletedBy: actor.userId, deletedAt: at });
+  // 版1.17.0: 検査写真を消すときは、その写真の文字入りの画像も消す(§5.4.4)
+  if (photoKindOf_(ph) === 'photo') {
+    Repo.where('Photos', 'recordId', ph.recordId).forEach(function (t) {
+      if (!t.deleted && photoKindOf_(t) === 'photo_text' && t.basePhotoId === ph.photoId) {
+        Repo.update('Photos', t, { deleted: true, deletedBy: actor.userId, deletedAt: at });
+      }
+    });
+  }
   touchRecord_(rec, {});
   return { photoId: ph.photoId, deleted: true };
 }

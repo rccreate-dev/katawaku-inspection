@@ -422,8 +422,25 @@ module.exports = function install(C) {
   // commit  : 既存行確認→項目上限確認→Photos追記→touch。(再認証は engine.handleUpload が先に行う)
   const range = (n) => Array.from({ length: n }, (_, i) => i);
   // 版1.15.0(§5.4.4): 土台(まだ無くてもよい。あれば同じ記録・side の drawing_base か drawing)
-  const kindOf = (x) => (x.kind === 'drawing' || x.kind === 'drawing_base' ? x.kind : 'photo');
-  const baseBad = (b, rec, side) => !!b && (b.recordId !== rec.recordId || b.side !== side || kindOf(b) === 'photo');
+  const kindOf = (x) => (x.kind === 'drawing' || x.kind === 'drawing_base' || x.kind === 'photo_text' ? x.kind : 'photo');
+  const baseBad = (b, rec, side) => !!b && (b.recordId !== rec.recordId || b.side !== side || (kindOf(b) !== 'drawing' && kindOf(b) !== 'drawing_base'));
+  // 版1.17.0: 文字の元の写真(あれば)は同じ記録・side・項目の検査写真で、撮影者が本人・未削除
+  const textBaseBad = (b, rec, side, itemId, userId) => !!b && (kindOf(b) !== 'photo' || b.recordId !== rec.recordId || b.side !== side || (b.itemId || null) !== itemId || b.takenBy !== userId || b.deleted);
+  // 版1.17.0(§5.4.4): texts の検証。通れば整えた配列、不正なら null
+  const TEXT_SIZES = ['s', 'm', 'l']; const TEXT_COLORS = ['white', 'red', 'yellow'];
+  const cleanTexts = (raw) => {
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > 3) return null;
+    const out = [];
+    for (const o of raw) {
+      if (!o || typeof o !== 'object' || Array.isArray(o) || typeof o.text !== 'string') return null;
+      const tx = o.text.trim();
+      if (tx.length < 1 || tx.length > 30 || /[\r\n]/.test(tx)) return null;
+      if (typeof o.x !== 'number' || typeof o.y !== 'number' || !(o.x >= 0 && o.x <= 1) || !(o.y >= 0 && o.y <= 1)) return null;
+      if (!TEXT_SIZES.includes(o.size) || !TEXT_COLORS.includes(o.color)) return null;
+      out.push({ text: tx, x: o.x, y: o.y, size: o.size, color: o.color });
+    }
+    return out;
+  };
   // 書き直す前の図面: 同じ記録・side の drawing、登録した本人、今の回(削除済みでもよい)
   const replaceBad = (o, rec, side, userId) => !o || kindOf(o) !== 'drawing' || o.recordId !== rec.recordId || o.side !== side || o.takenBy !== userId || o.round !== rec.round;
   H.uploadPhotoChunk$prepare = (rc) => {
@@ -435,6 +452,7 @@ module.exports = function install(C) {
     if (!['self', 'qa', 'prime'].includes(p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'side' });
     else if (p.side === 'prime') { if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' }); }
     else if (p.kind === 'drawing' || p.kind === 'drawing_base') { /* 図面は itemId 空(下の kind 検証で判定) */ }
+    // 版1.17.0: 文字入りの画像は元の写真と同じ項目(下の itemId 検証を通す)
     else {
       const row = p.itemId ? rowsOf(rec).find((r) => r.itemId === p.itemId) : null;
       if (!row || (p.side === 'self' && row.snapshot.audience === 'qa') || (p.side === 'qa' && row.snapshot.audience === 'foreman')) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
@@ -451,11 +469,19 @@ module.exports = function install(C) {
     // 版1.6: kind / markers(図面。§5.4.4・§7.7)
     const isDrawingReq = p.kind === 'drawing';
     const isBaseReq = p.kind === 'drawing_base';   // 版1.15.0: 図面の元の画像(見えない行)
+    const isTextReq = p.kind === 'photo_text';     // 版1.17.0: 写真に文字を書き込んだ画像
+    let texts = null;
     const has = (v) => v !== undefined && v !== null && v !== '';
     const okId = (v) => typeof v === 'string' && /^p_[a-z0-9]{16}$/.test(v) && v !== p.photoId;
     let markers = null;
-    if (p.kind !== undefined && p.kind !== null && p.kind !== 'photo' && p.kind !== 'drawing' && p.kind !== 'drawing_base') viol.push({ rule: 'FIELD_INVALID', path: 'kind' });
-    else if (isBaseReq) {
+    if (p.kind !== undefined && p.kind !== null && p.kind !== 'photo' && p.kind !== 'drawing' && p.kind !== 'drawing_base' && p.kind !== 'photo_text') viol.push({ rule: 'FIELD_INVALID', path: 'kind' });
+    else if (isTextReq) {
+      // side=prime は上で itemId が空のとき通っているので、ここで side として弾く
+      if (p.side === 'prime') viol.push({ rule: 'FIELD_INVALID', path: 'side' });
+      if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
+      texts = cleanTexts(p.texts);
+      if (!texts) viol.push({ rule: 'FIELD_INVALID', path: 'texts' });
+    } else if (isBaseReq) {
       if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
       if (p.side === 'prime') viol.push({ rule: 'FIELD_INVALID', path: 'side' });
       if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
@@ -480,9 +506,12 @@ module.exports = function install(C) {
       }
       if (bad) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
     } else if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
-    // 版1.15.0(§5.4.4): basePhotoId・replaces は kind=drawing のときだけ
-    if (has(p.basePhotoId) && (!isDrawingReq || !okId(p.basePhotoId))) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
+    if (!isTextReq && p.texts !== undefined && p.texts !== null) viol.push({ rule: 'FIELD_INVALID', path: 'texts' });
+    // 版1.15.0(§5.4.4): basePhotoId・replaces は kind=drawing のときだけ(版1.17.0: basePhotoId は photo_text で必須)
+    if (isTextReq) { if (!okId(p.basePhotoId)) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' }); }
+    else if (has(p.basePhotoId) && (!isDrawingReq || !okId(p.basePhotoId))) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
     if (has(p.replaces) && (!isDrawingReq || !okId(p.replaces))) viol.push({ rule: 'FIELD_INVALID', path: 'replaces' });
+    if (!viol.length && isTextReq && textBaseBad(find('Photos', p.basePhotoId), rec, p.side, p.itemId || null, rc.actor.userId)) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
     if (!viol.length && isDrawingReq) {
       if (has(p.basePhotoId) && baseBad(find('Photos', p.basePhotoId), rec, p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
       if (has(p.replaces) && replaceBad(find('Photos', p.replaces), rec, p.side, rc.actor.userId)) viol.push({ rule: 'FIELD_INVALID', path: 'replaces' });
@@ -527,10 +556,10 @@ module.exports = function install(C) {
     const itemId = (p.side === 'prime' || isDrawingReq || isBaseReq) ? null : p.itemId;
     const site = siteRow(rec.siteId);
     const clean = (x) => String(x).replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60);
-    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${isDrawingReq ? 'drawing' : (isBaseReq ? 'drawingbase' : (itemId || 'prime'))}_${p.side}_${p.photoId}.jpg`;
+    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${isDrawingReq ? 'drawing' : (isBaseReq ? 'drawingbase' : (itemId || 'prime'))}_${p.side}_${p.photoId}${isTextReq ? '_text' : ''}.jpg`;
     const driveFileId = C.driveSave(path, buf);
     const thumbFileId = C.driveSave(`thumbs/${p.photoId}.jpg`, thumbBuf);
-    return { itemId, kind: isDrawingReq ? 'drawing' : (isBaseReq ? 'drawing_base' : 'photo'), markers, basePhotoId: isDrawingReq && has(p.basePhotoId) ? p.basePhotoId : null, replaces: isDrawingReq && has(p.replaces) ? p.replaces : null, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
+    return { itemId, kind: isDrawingReq ? 'drawing' : (isBaseReq ? 'drawing_base' : (isTextReq ? 'photo_text' : 'photo')), markers, texts, basePhotoId: (isDrawingReq || isTextReq) && has(p.basePhotoId) ? p.basePhotoId : null, replaces: isDrawingReq && has(p.replaces) ? p.replaces : null, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
   };
   H.uploadPhotoChunk$commit = (rc, prep) => {
     const p = rc.params; const rec = ctxRec(rc); const actor = rc.actor;
@@ -548,7 +577,16 @@ module.exports = function install(C) {
     // 版1.15.0: 書き直す前の図面・土台の確認(ロック内=最新の状態)
     const old = prep.replaces ? find('Photos', prep.replaces) : null;
     if (prep.replaces && replaceBad(old, rec, p.side, actor.userId)) vfail([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
-    if (prep.basePhotoId && baseBad(find('Photos', prep.basePhotoId), rec, p.side)) vfail([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+    if (prep.kind === 'drawing' && prep.basePhotoId && baseBad(find('Photos', prep.basePhotoId), rec, p.side)) vfail([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+    if (prep.kind === 'photo_text' && textBaseBad(find('Photos', prep.basePhotoId), rec, p.side, prep.itemId, actor.userId)) vfail([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+    // 版1.17.0: 文字入りの画像は最新の1枚だけ有効(takenAt で決める)
+    const takenStr = U.fmtDt(prep.takenMs); const olderTexts = []; let newerExists = false;
+    if (prep.kind === 'photo_text') {
+      for (const x of table('Photos')) {
+        if (x.recordId !== rec.recordId || x.deleted || x.kind !== 'photo_text' || x.basePhotoId !== prep.basePhotoId) continue;
+        if (String(x.takenAt) > takenStr) newerExists = true; else olderTexts.push(x);
+      }
+    }
     if (prep.kind === 'drawing') {
       // 書き直す前の図面(replaces)は数えない(5枚でも書き直せる)
       const dc = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind === 'drawing' && x.side === p.side && x.photoId !== prep.replaces).length;
@@ -557,7 +595,9 @@ module.exports = function install(C) {
     const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && C.isPhotoKind(x) && x.side === p.side && (x.itemId || null) === prep.itemId).length;
     if (prep.kind === 'photo' && cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
     // 4 Photos 行の追記(round=ここで読んだ Records.round、receivedAt=ここでの現在時刻)
-    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false, kind: prep.kind, markers: prep.kind === 'drawing' ? prep.markers : null, basePhotoId: prep.kind === 'drawing' ? prep.basePhotoId : null });
+    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: newerExists, kind: prep.kind, markers: prep.kind === 'drawing' ? prep.markers : null, basePhotoId: prep.kind === 'drawing' || prep.kind === 'photo_text' ? prep.basePhotoId : null, texts: prep.kind === 'photo_text' ? prep.texts : null });
+    if (newerExists) { ph.deletedBy = actor.userId; ph.deletedAt = nowDt(); }
+    for (const x of olderTexts) { x.deleted = true; x.deletedBy = actor.userId; x.deletedAt = nowDt(); }
     // 書き直す前の図面を論理削除(deletePhoto と同じ。削除済みならそのまま)
     if (old && !old.deleted) { old.deleted = true; old.deletedBy = actor.userId; old.deletedAt = nowDt(); }
     S.chunks.delete(p.photoId);
@@ -578,7 +618,10 @@ module.exports = function install(C) {
 
   H.deletePhoto = (rc) => {
     const ph = rc.ctx.photo; const rec = ctxRec(rc);
-    ph.deleted = true; ph.deletedBy = rc.actor.userId; ph.deletedAt = nowDt();
+    const at = nowDt();
+    ph.deleted = true; ph.deletedBy = rc.actor.userId; ph.deletedAt = at;
+    // 版1.17.0: 検査写真を消すときは、その写真の文字入りの画像も消す
+    if (C.isPhotoKind(ph)) for (const t of table('Photos')) if (!t.deleted && t.kind === 'photo_text' && t.basePhotoId === ph.photoId) { t.deleted = true; t.deletedBy = rc.actor.userId; t.deletedAt = at; }
     C.touch(rec);
     return { photoId: ph.photoId, deleted: true };
   };

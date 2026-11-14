@@ -276,7 +276,8 @@ function authorize(actor, action, ctx) {
     case 'deletePhoto':
       var ph = ctx.photo;
       if (!ph || ph.takenBy !== actor.userId) return deny_('FORBIDDEN_TEAM', '他人の写真は削除できません');
-      if (ph.round !== rec.round || (PHOTO_EDIT_STATES[ph.side] || []).indexOf(st) < 0) {
+      // 版1.17.0: 文字入りの画像(photo_text)はラウンドを問わない(前の回の自分の写真の文字も消せる)
+      if ((ph.kind !== 'photo_text' && ph.round !== rec.round) || (PHOTO_EDIT_STATES[ph.side] || []).indexOf(st) < 0) {
         return deny_('RECORD_LOCKED', '削除できない状態です', { status: st });
       }
       break;

@@ -148,7 +148,9 @@ const itemsOf = (recordId) => table('RecordItems').filter((r) => r.recordId === 
 const photosOf = (recordId) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted);
 const isDrawing = (p) => p.kind === 'drawing';
 // 版1.15.0: 図面の元の画像(drawing_base)は見えない行。検査写真にも図面にも数えない
-const isPhotoKind = (p) => p.kind !== 'drawing' && p.kind !== 'drawing_base';
+// 版1.17.0: 文字入りの画像(photo_text)も見えない行。数えない
+const isPhotoKind = (p) => p.kind !== 'drawing' && p.kind !== 'drawing_base' && p.kind !== 'photo_text';
+const isTextKind = (p) => p.kind === 'photo_text';
 const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && isPhotoKind(p) && p.side === side && (itemId == null || p.itemId === itemId)).length;
 
 // 版1.12.0(§6.9): 1次検査者の役割。空の既存記録は foreman とみなす
@@ -303,7 +305,8 @@ function authorize(actor, action, ctx) {
     case 'deletePhoto': {
       const ph = ctx.photo;
       if (ph.takenBy !== actor.userId) return deny('FORBIDDEN_TEAM', 'not owner');
-      if (ph.round !== rec.round) return locked();
+      // 版1.17.0: 文字入りの画像は前の回でもよい
+      if (ph.kind !== 'photo_text' && ph.round !== rec.round) return locked();
       const okState = ph.side === 'self' ? (st === 'draft' || st === 'fix')
         : ph.side === 'qa' ? (st === 'submitted' && rec.claimedBy === actor.userId)
           : st === 'qa_ok';
@@ -366,8 +369,26 @@ function siteView(actor, s) {
   return { siteId: s.siteId, name: s.name, status: s.status, floors: splitCsv(s.floors), zones: splitCsv(s.zones), primeContractor: s.primeContractor || '', qa: { main: q.main ? brief(q.main) : null, mainAbsent: q.mainAbsent, subs: q.subs.map(brief) }, myAssignRole: mine ? mine.assignRole : null, myTeam: mine && mine.team ? mine.team : null };
 }
 function photoMeta(p) {
-  return { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText, kind: p.kind === 'drawing' ? 'drawing' : 'photo', markers: p.kind === 'drawing' ? (p.markers || []) : null, basePhotoId: p.kind === 'drawing' ? (p.basePhotoId || null) : null };
+  const kind = p.kind === 'drawing' || p.kind === 'drawing_base' || p.kind === 'photo_text' ? p.kind : 'photo';
+  const m = { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText, kind, markers: kind === 'drawing' ? (p.markers || []) : null, basePhotoId: (kind === 'drawing' || kind === 'photo_text') ? (p.basePhotoId || null) : null };
+  if (kind === 'photo_text') m.texts = Array.isArray(p.texts) ? p.texts : [];   // 版1.17.0
+  if (kind === 'photo') m.text = null;                                          // 版1.17.0(detailView で入れる)
+  return m;
 }
+/* 版1.17.0(§5.4.4): 元の写真ID → 有効な文字入りの画像(最新の takenAt。同時刻は photoId の大きい方) */
+function photoTextMap(rows) {
+  const byId = new Map(rows.map((p) => [p.photoId, p]));
+  const m = new Map();
+  for (const t of rows) {
+    if (t.deleted || !isTextKind(t)) continue;
+    const b = byId.get(t.basePhotoId);
+    if (!b || b.deleted || !isPhotoKind(b) || b.itemId !== t.itemId || b.side !== t.side || b.takenBy !== t.takenBy) continue;
+    const cur = m.get(t.basePhotoId);
+    if (!cur || t.takenAt > cur.takenAt || (t.takenAt === cur.takenAt && t.photoId > cur.photoId)) m.set(t.basePhotoId, t);
+  }
+  return m;
+}
+const photoTextView = (t) => (t ? { photoId: t.photoId, texts: Array.isArray(t.texts) ? t.texts : [], takenAt: t.takenAt } : null);
 function countsOf(rows, kinds, filledKey) {
   const c = { total: 0, filled: 0, ok: 0, ng: 0, na: 0 };
   for (const r of rows) {
@@ -418,6 +439,8 @@ function detailView(actor, rec) {
   // 版1.6: 検査写真(kind=photo)と図面(kind=drawing)を分ける。items[].photos・primePhotos には図面を含めない。
   const allPhotos = photosOf(rec.recordId);
   const photos = allPhotos.filter(isPhotoKind);
+  const textMap = photoTextMap(allPhotos);   // 版1.17.0
+  const itemMeta = (p) => Object.assign(photoMeta(p), { text: photoTextView(textMap.get(p.photoId)) });
   const drawings = allPhotos.filter((p) => isDrawing(p) && !(hideQa && p.side === 'qa')).sort((a, b) => (a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0)).map(photoMeta);
   const items = itemsOf(rec.recordId)
     .filter((r) => !(isForeman && r.snapshot.audience === 'qa'))
@@ -426,8 +449,8 @@ function detailView(actor, rec) {
       const def = { seq: sn.seq, stage: sn.stage, audience: sn.audience, groupKey: sn.groupKey, groupJa: sn.groupJa, groupId: sn.groupId, textJa: sn.textJa, textId: sn.textId, key: sn.key, tol: sn.tol == null ? null : sn.tol, measure: sn.measure, minMeasures: sn.minMeasures, unit: sn.unit };
       return {
         itemId: r.itemId, def,
-        self: { result: r.selfResult || null, severity: r.selfSeverity || null, values: r.selfValues || [], note: r.foremanNote || '', updatedAt: r.selfUpdatedAt || null, photos: photos.filter((p) => p.itemId === r.itemId && p.side === 'self').map(photoMeta) },
-        qa: hideQa ? null : { result: r.qaResult || null, severity: r.qaSeverity || null, values: r.qaValues || [], note: r.qaNote || '', updatedAt: r.qaUpdatedAt || null, photos: photos.filter((p) => p.itemId === r.itemId && p.side === 'qa' && p.round === rec.round).map(photoMeta) },
+        self: { result: r.selfResult || null, severity: r.selfSeverity || null, values: r.selfValues || [], note: r.foremanNote || '', updatedAt: r.selfUpdatedAt || null, photos: photos.filter((p) => p.itemId === r.itemId && p.side === 'self').map(itemMeta) },
+        qa: hideQa ? null : { result: r.qaResult || null, severity: r.qaSeverity || null, values: r.qaValues || [], note: r.qaNote || '', updatedAt: r.qaUpdatedAt || null, photos: photos.filter((p) => p.itemId === r.itemId && p.side === 'qa' && p.round === rec.round).map(itemMeta) },
       };
     });
   const events = table('Events').filter((e) => e.recordId === rec.recordId).slice(-100).map(eventView);
@@ -601,7 +624,7 @@ const ACTIONS = {
   recordPrimeSign: A(ROLES_QL, { recordId: 's', signerName: 's', method: 's', evidencePhotoId: 's?' }, { write: true, star: true, pin: true, load: 'record' }),
   stopPour: A(ROLES_ALL, { recordId: 's', reason: 's' }, { write: true, star: true, load: 'record' }),
   addNote: A(ROLES_ALL, { recordId: 's', itemId: 's?', text: 's' }, { write: true, star: true, load: 'record' }),
-  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's', kind: 's?', markers: 'x?', basePhotoId: 's?', replaces: 's?' }, { write: true, load: 'record' }),
+  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's', kind: 's?', markers: 'x?', basePhotoId: 's?', replaces: 's?', texts: 'x?' }, { write: true, load: 'record' }),
   deletePhoto: A(ROLES_ALL, { photoId: 's' }, { write: true, star: true, load: 'photo' }),
   getPhotoThumbs: A(ROLES_ALL, { photoIds: 'a' }), getPhoto: A(ROLES_ALL, { photoId: 's', part: 's?' }),
   generateReport: A(ROLES_QL, { recordId: 's' }, { write: true, star: true, load: 'record' }),
@@ -1174,7 +1197,7 @@ function loadState(d) {
 const C = {
   ApiError, fail, S: () => S, table, find, insert, cfg, U, nowMs, nowDt, today, ev, mailTo, mailSubject, mailBody, recordLink,
   user, userName, siteRow, splitCsv, effAssigns, siteAccess, visibleSiteIds, myAssign, teamOf, isAbsent, effectiveQa, leads, qaRecipients, siteQaUsers,
-  recordRow, itemsOf, photosOf, photoCount, isPhotoKind, canViewDetail, canApprove, ownerRoleOf, inTeam, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
+  recordRow, itemsOf, photosOf, photoCount, isPhotoKind, isTextKind, photoTextMap, canViewDetail, canApprove, ownerRoleOf, inTeam, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
   meView, publicItem, enabledItems, siteView, photoMeta, summaryView, detailView, noteView, membershipView, assignmentView, absenceView, reportView,
   state: () => S, countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
   ROLES_QL, ISOK: okRes,

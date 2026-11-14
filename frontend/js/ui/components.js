@@ -292,17 +292,21 @@
     opts = opts || {};
     var box = h('div', { class: 'photos' });
     var imgs = {};
+    var need = [];
     photos.forEach(function (p) {
       var img = h('img', { alt: '' });
-      imgs[p.photoId] = img;
+      // 版1.17.0(§7.8-5): 文字入りの画像があればそれを出し、隅に「文」の印
+      var ti = KW.phototext.textImgOf(p);
+      var disp = ti ? { photoId: ti.photoId, local: !!ti.blob, blob: ti.blob, thumbBlob: ti.thumbBlob } : p;
+      imgs[disp.photoId] = img;
       var btn = h('button', {
         type: 'button', class: 'thumb', 'aria-label': t('photo.view'),
         on: { click: function () {
           var row = p.local && !p.mem ? (KW.state.photoRows || {})[p.photoId] : null;
           if (row && KW.outbox.photoState(row) === 'failed') { photoFailSheet(p, row); return; }
-          if (opts.onView) opts.onView(p); else KW.modal.photoView(p);
+          if (opts.onView) opts.onView(p); else KW.modal.photoView(p, opts.textFor ? { actions: opts.textFor(p) } : null);
         } }
-      }, img);
+      }, img, ti ? h('span', { class: 'tbadge', role: 'img', 'aria-label': t('photo.has_text') }, t('photo.text_badge')) : null);
       var wrap = h('span', { class: 'thumbwrap', 'data-pid': p.photoId }, btn);
       if (p.local) wrap.setAttribute('data-local', '1');
       if (p.mem) wrap.setAttribute('data-mem', p.mem);
@@ -311,10 +315,11 @@
         wrap.appendChild(h('button', { type: 'button', class: 'x', 'data-pid': p.photoId, 'aria-label': t('act.delete'), disabled: !!(p.mem === 'saving' || (p.local && KW.state.sendingPhotos && KW.state.sendingPhotos[p.photoId])), on: { click: function () { opts.onDelete(p); } } }, '×'));
       }
       box.appendChild(wrap);
-      if (p.local && p.blob) img.src = C.blobUrl(p.thumbBlob || p.blob);
+      if (ti) wrap.setAttribute('data-text', ti.photoId);
+      if (disp.local && disp.blob) img.src = C.blobUrl(disp.thumbBlob || disp.blob);
+      else if (!disp.local) need.push(disp.photoId);
       paintPhoto(wrap);
     });
-    var need = photos.filter(function (p) { return !p.local; }).map(function (p) { return p.photoId; });
     if (need.length) {
       KW.data.loadThumbs(need).then(function (map) {
         Object.keys(map).forEach(function (id) { if (imgs[id] && imgs[id].isConnected !== false) imgs[id].src = C.blobUrl(map[id]); });

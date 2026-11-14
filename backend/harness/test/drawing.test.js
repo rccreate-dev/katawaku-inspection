@@ -72,16 +72,16 @@ test('C-DRAW-05 PDF: 図面ページ(1枚1ページ・凡例・固定レイア�
   assert.equal(rec.data.record.drawings.length, 2);
 });
 
-test('C-DRAW-06 旧形式シート(kind,markers,basePhotoId なし。版1.15.0)へ setupSheets が列を補い、kind 空の既存行は photo 扱い', () => {
+test('C-DRAW-06 旧形式シート(kind,markers,basePhotoId,texts なし。版1.15.0・1.17.0)へ setupSheets が列を補い、kind 空の既存行は photo 扱い', () => {
   const ss = h.ctx.Repo.ss();
   const sh = ss.getSheetByName('Photos');
   const cols = Array.from(h.ctx.SCHEMA_COLUMNS.Photos);
-  assert.deepEqual(cols.slice(-3), ['kind', 'markers', 'basePhotoId']);
+  assert.deepEqual(cols.slice(-4), ['kind', 'markers', 'basePhotoId', 'texts']);
   const n = cols.length;
-  // 旧形式に戻す: 末尾2列のヘッダとデータを空にする
+  // 旧形式に戻す: 末尾4列のヘッダとデータを空にする
   const lastRow = sh.getLastRow();
-  sh.getRange(1, n - 2, lastRow, 3).setValues(Array.from({ length: lastRow }, () => ['', '', '']));
-  assert.equal(sh.getLastColumn(), n - 3, '旧形式=列数が3少ない');
+  sh.getRange(1, n - 3, lastRow, 4).setValues(Array.from({ length: lastRow }, () => ['', '', '', '']));
+  assert.equal(sh.getLastColumn(), n - 4, '旧形式=列数が4少ない');
   const before = h.control('state', { sheet: 'Photos' }).data.rows.length;
   assert.ok(before > 0);
   assert.doesNotThrow(() => h.ctx.setupSheets());
