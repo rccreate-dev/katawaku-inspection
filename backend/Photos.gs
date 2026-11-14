@@ -54,7 +54,7 @@ function act_getPhotoThumbs(ctx) {
   ids.forEach(function (id) {
     var ph = map ? map[id] : Repo.get('Photos', id);
     var rec = ph && !ph.deleted ? Repo.get('Records', ph.recordId) : null;
-    if (!ph || ph.deleted || !rec || !canViewDetail(actor, rec)) { missing.push(id); return; }
+    if (!ph || ph.deleted || photoKindOf_(ph) === 'drawing_base' || !rec || !canViewDetail(actor, rec)) { missing.push(id); return; }
     try {
       photos.push({ photoId: id, dataUrl: 'data:image/jpeg;base64,' + photoBytesB64_(ph.thumbFileId) });
     } catch (e) { missing.push(id); }
@@ -64,10 +64,20 @@ function act_getPhotoThumbs(ctx) {
 
 function act_getPhoto(ctx) {
   var actor = ctx.actor;
+  var part = ctx.params.part;
+  if (part !== undefined && part !== null && part !== 'base') throw violation_([{ rule: 'FIELD_INVALID', path: 'part' }]);
   var ph = Repo.get('Photos', ctx.params.photoId);
   var rec = ph && !ph.deleted ? Repo.get('Records', ph.recordId) : null;
-  if (!ph || ph.deleted || !rec || !canViewDetail(actor, rec)) throw new ApiError('NOT_FOUND', '写真が見つかりません');
+  // drawing_base(図面の元の画像)は直接は取れない(版1.15.0)
+  if (!ph || ph.deleted || photoKindOf_(ph) === 'drawing_base' || !rec || !canViewDetail(actor, rec)) throw new ApiError('NOT_FOUND', '写真が見つかりません');
+  var src = ph;
+  if (part === 'base') {
+    // 版1.15.0(§5.4.4): 図面の土台の画像。土台の行は削除済みの前の図面でもよい
+    var b = photoKindOf_(ph) === 'drawing' && ph.basePhotoId ? Repo.get('Photos', ph.basePhotoId) : null;
+    if (!b || b.recordId !== ph.recordId) throw new ApiError('NOT_FOUND', '写真が見つかりません');
+    src = b;
+  }
   var b64;
-  try { b64 = photoBytesB64_(ph.driveFileId); } catch (e) { throw new ApiError('DRIVE_ERROR', '写真を読み込めません'); }
-  return { photoId: ph.photoId, dataUrl: 'data:image/jpeg;base64,' + b64, width: ph.width, height: ph.height };
+  try { b64 = photoBytesB64_(src.driveFileId); } catch (e) { throw new ApiError('DRIVE_ERROR', '写真を読み込めません'); }
+  return { photoId: ph.photoId, dataUrl: 'data:image/jpeg;base64,' + b64, width: src.width, height: src.height };
 }

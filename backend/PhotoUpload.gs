@@ -95,8 +95,8 @@ function photoSaveInner_(rec, site, itemId, p, v, taken, kind) {
     var floorF = subFolder_(f.siteFolder, Util.sanitizeName(rec.floor));
     var dateF = subFolder_(floorF, Util.dateOf(taken));
     // 図面は {recordId}_drawing_{side}_{photoId}.jpg(§5.4.4)
-    var name = kind === 'drawing'
-      ? rec.recordId + '_drawing_' + p.side + '_' + p.photoId + '.jpg'
+    var name = kind === 'drawing' || kind === 'drawing_base'
+      ? rec.recordId + (kind === 'drawing' ? '_drawing_' : '_drawingbase_') + p.side + '_' + p.photoId + '.jpg'
       : rec.recordId + '_' + (itemId || 'prime') + '_' + p.side + '_' + p.photoId + '.jpg';
     fileId = dateF.createFile(Utilities.newBlob(v.bytes, 'image/jpeg', name)).getId();
     thumbId = f.thumbs.createFile(Utilities.newBlob(v.thumbBytes, 'image/jpeg', p.photoId + '.jpg')).getId();
@@ -137,7 +137,10 @@ function photoMarkers_(raw, rows, side) {
     if (!Util.isObj(m) || typeof m.itemId !== 'string' || !ok[m.itemId]) throw bad();
     if (typeof m.label !== 'string' || m.label.length < 1 || m.label.length > 8) throw bad();
     if (typeof m.x !== 'number' || typeof m.y !== 'number' || !(m.x >= 0 && m.x <= 1) || !(m.y >= 0 && m.y <= 1)) throw bad();
-    return { itemId: m.itemId, label: m.label, x: m.x, y: m.y };
+    if (m.fixed !== undefined && m.fixed !== null && typeof m.fixed !== 'boolean') throw bad();
+    var o = { itemId: m.itemId, label: m.label, x: m.x, y: m.y };
+    if (m.fixed === true) o.fixed = true;   // 版1.15.0: 土台に焼き込み済みの印(書き足しの前の印)
+    return o;
   });
 }
 
@@ -150,17 +153,37 @@ function act_uploadPhotoChunk(ctx) {
 
   // kind / markers(版1.6。§5.4.4)。kind 省略は検査写真
   var kind = p.kind === undefined || p.kind === null ? 'photo' : p.kind;
-  if (kind !== 'photo' && kind !== 'drawing') throw violation_([{ rule: 'FIELD_INVALID', path: 'kind' }]);
+  if (kind !== 'photo' && kind !== 'drawing' && kind !== 'drawing_base') throw violation_([{ rule: 'FIELD_INVALID', path: 'kind' }]);
   var isDrawing = kind === 'drawing';
+  var isBase = kind === 'drawing_base';   // 版1.15.0: 図面の元の画像(見えない行)
   var markers = null;
+  var has = function (v) { return v !== undefined && v !== null && v !== ''; };
+  var basePhotoId = '', replaces = '';
 
   // itemId の整合
   var itemId = p.itemId || '';
-  if (isDrawing) {
+  if (isDrawing || isBase) {
     if (itemId) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
     if (p.side === 'prime') throw violation_([{ rule: 'FIELD_INVALID', path: 'side' }]);
-    markers = photoMarkers_(p.markers, itemsOf_(rec.recordId), p.side);
+    if (isDrawing) {
+      markers = photoMarkers_(p.markers, itemsOf_(rec.recordId), p.side);
+      // 版1.15.0(§5.4.4): 土台の行と、書き直す前の図面
+      if (has(p.basePhotoId)) {
+        if (!Util.isClientGenId(p.basePhotoId, 'p') || p.basePhotoId === p.photoId) throw violation_([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+        basePhotoId = p.basePhotoId;
+      }
+      if (has(p.replaces)) {
+        if (!Util.isClientGenId(p.replaces, 'p') || p.replaces === p.photoId) throw violation_([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
+        replaces = p.replaces;
+      }
+    } else {
+      if (p.markers !== undefined && p.markers !== null) throw violation_([{ rule: 'FIELD_INVALID', path: 'markers' }]);
+      if (has(p.basePhotoId)) throw violation_([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+      if (has(p.replaces)) throw violation_([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
+    }
   } else {
+    if (has(p.basePhotoId)) throw violation_([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+    if (has(p.replaces)) throw violation_([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
     if (p.markers !== undefined && p.markers !== null) throw violation_([{ rule: 'FIELD_INVALID', path: 'markers' }]);
     if (p.side === 'prime') {
       if (itemId) throw violation_([{ rule: 'FIELD_INVALID', path: 'itemId' }]);
@@ -171,6 +194,14 @@ function act_uploadPhotoChunk(ctx) {
     }
   }
   if (p.index >= p.total) throw violation_([{ rule: 'FIELD_INVALID', path: 'index' }]); // total=1 で index≠0 もここ
+
+  // 版1.15.0: 土台の行(あれば)・書き直す前の図面の整合(ロック外の早期判定。ロック内でも確かめる)
+  var baseBad = function (b) { return b && (b.recordId !== rec.recordId || b.side !== p.side || (photoKindOf_(b) !== 'drawing_base' && photoKindOf_(b) !== 'drawing')); };
+  var replaceBad = function (o, rec2, userId) {
+    return !o || photoKindOf_(o) !== 'drawing' || o.recordId !== rec2.recordId || o.side !== p.side || o.takenBy !== userId || o.round !== rec2.round;
+  };
+  if (basePhotoId && baseBad(Repo.get('Photos', basePhotoId))) throw violation_([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+  if (replaces && replaceBad(Repo.get('Photos', replaces), rec, actor.userId)) throw violation_([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
   if (!/^[0-9a-f]{64}$/.test(p.sha256)) throw violation_([{ rule: 'FIELD_INVALID', path: 'sha256' }]);
 
   var single = p.total === 1;
@@ -224,9 +255,11 @@ function act_uploadPhotoChunk(ctx) {
   // 図面(kind=drawing)は記録×sideで5枚まで。検査写真(項目×side)の数には互いに含めない
   var DRAWING_MAX = 5;
   var maxCount = isDrawing ? DRAWING_MAX : lim.maxPer;
+  // 書き直す前の図面(replaces)は数えない(5枚でも書き直せる。版1.15.0)。drawing_base は上限なし
   var countSame = function () {
+    if (isBase) return 0;
     return activePhotos_(rec.recordId).filter(function (x) {
-      return x.side === p.side && x.photoId !== p.photoId && photoKindOf_(x) === kind && (isDrawing || x.itemId === itemId);
+      return x.side === p.side && x.photoId !== p.photoId && x.photoId !== replaces && photoKindOf_(x) === kind && (isDrawing || x.itemId === itemId);
     }).length;
   };
   // 同じ photoId の既存行があるときは、確定判定(ロック内の手順2=冪等/不一致→PHOTO_INVALID)に任せる
@@ -255,6 +288,11 @@ function act_uploadPhotoChunk(ctx) {
         return { photoId: p.photoId, received: photoReceivedAll_(p.total), complete: true, photo: photoMeta_(dup) };
       }
 
+      // 版1.15.0: 書き直す前の図面の確認(最新のシート)。論理削除は新しい行の追記と同じロックの中で行う
+      var old = replaces ? Repo.get('Photos', replaces) : null;
+      if (replaces && replaceBad(old, rec2, a2.actor.userId)) throw violation_([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
+      if (basePhotoId && baseBad(Repo.get('Photos', basePhotoId))) throw violation_([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
+
       // 項目あたり上限(確定)
       if (countSame() >= maxCount) throw new ApiError('PHOTO_LIMIT', isDrawing ? '図面の上限です' : '1項目あたりの写真上限です', { max: maxCount });
 
@@ -263,9 +301,11 @@ function act_uploadPhotoChunk(ctx) {
         photoId: p.photoId, recordId: rec2.recordId, itemId: itemId, side: p.side, round: rec2.round, takenBy: a2.actor.userId,
         takenAt: Util.fmtDt(taken), receivedAt: Util.fmtDt(now), mime: 'image/jpeg', bytes: p.bytes, width: p.width, height: p.height,
         sha256: p.sha256, stampText: p.stampText, driveFileId: saved.fileId, thumbFileId: saved.thumbId, clockSuspect: suspect, deleted: false,
-        kind: kind, markers: isDrawing ? markers : null
+        kind: kind, markers: isDrawing ? markers : null, basePhotoId: isDrawing ? basePhotoId : ''
       });
       committed = true;
+      // 書き直す前の図面を論理削除(deletePhoto と同じ)。すでに削除済みならそのまま(エラーにしない)
+      if (old && !old.deleted) Repo.update('Photos', old, { deleted: true, deletedBy: a2.actor.userId, deletedAt: Util.fmtDt(now) });
       touchRecord_(rec2, {});
 
       // 現場フォルダIDの初回記入(Sites の書込みは参照キャッシュを自動で破棄する)

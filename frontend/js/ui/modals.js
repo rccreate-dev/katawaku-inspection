@@ -327,16 +327,23 @@
   };
 
   /* ---- M3 写真拡大 ---- */
-  M.photoView = function (p) {
+  /* o.actions(版1.15.0。§7.7-5): [{ label, act, run() }] … 閉じてから run を呼ぶ(図面の「書き直す」「書き足す」) */
+  M.photoView = function (p, o) {
     var layer = document.getElementById('overlay');
     var img = h('img', { alt: '' });
     var stampP = h('p', null, p.stampText || '');
     var note = h('p', { hidden: true }, t('photo.thumb_only'));
     var close = h('button', { type: 'button', class: 'cambtn' }, t('act.close'));
-    var box = h('div', { class: 'photoview', role: 'dialog', 'aria-modal': 'true' }, img, stampP, note, close);
+    function shut() { if (box.parentNode) box.parentNode.removeChild(box); }
+    var acts = ((o && o.actions) || []).map(function (a) {
+      var b = h('button', { type: 'button', class: 'cambtn', 'data-act': a.act }, a.label);
+      b.addEventListener('click', function () { shut(); a.run(); });
+      return b;
+    });
+    var box = h('div', { class: 'photoview', role: 'dialog', 'aria-modal': 'true' }, img, stampP, note, acts.length ? h('div', { class: 'row' }, acts, close) : close);
     layer.appendChild(box);
     M.fit(box);
-    close.addEventListener('click', function () { if (box.parentNode) box.parentNode.removeChild(box); });
+    close.addEventListener('click', shut);
     close.focus();
     if (p.local && p.blob) { img.src = C.blobUrl(p.blob); return; }
     note.hidden = false; KW.clear(note).appendChild(document.createTextNode(t('photo.loading')));

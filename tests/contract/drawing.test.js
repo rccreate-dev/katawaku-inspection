@@ -223,6 +223,209 @@ describe('C-DRAW 図面', () => {
     assert.equal(v3.ok, true, '重点項目の写真を付ければ判定できる(図面は影響しない): ' + JSON.stringify(v3.error));
   });
 
+  // ===== 版1.15.0: 図面の書き直し・書き足し(§5.4.4・§7.7-5) =====
+  const uploadBase = (session, { recordId, side = 'self', photoId = h.newPhotoId(), buf = h.SAMPLE, extra = {} } = {}) =>
+    session.call('uploadPhotoChunk', { ...h.photoParams({ photoId, recordId, side, buf }), kind: 'drawing_base', ...extra }).then((r) => { Object.defineProperty(r, '_photoId', { value: photoId, enumerable: false }); return r; });
+  const jpegOf = (n, fill) => { const b = Buffer.alloc(n, fill); b[0] = 0xff; b[1] = 0xd8; return b; };
+  const b64Of = (dataUrl) => String(dataUrl).replace(/^data:image\/jpeg;base64,/, '');
+  const allPhotoIds = (rec) => [...rec.drawings, ...rec.primePhotos, ...rec.items.flatMap((i) => [...i.self.photos, ...((i.qa && i.qa.photos) || [])])].map((p) => p.photoId);
+  /** 下書きを全項目 OK にして重点項目の写真を付けて提出する */
+  const submitAll = async (t, recordId, over = {}) => {
+    const rec = await h.getRecord(t, recordId);
+    await t.ok('saveDraft', { recordId, items: h.okPatches(over, rec.items.map((i) => i.itemId)) });
+    for (const id of rec.items.filter((i) => i.def.key).map((i) => i.itemId)) await h.uploadPhoto(t, { recordId, itemId: id, side: 'self' });
+    await t.ok('submitRecord', { recordId, round: 1 }, { pin: t.pin });
+  };
+
+  it('C-DRAW-10①(drawing_base): 登録でき、どの一覧にも出ず、上限にも数えない。不正な付加は FIELD_INVALID', async () => {
+    const t = await h.login('u_tanaka');
+    const { recordId } = await h.createRecordFor(t, { lot: 'DRB1' });
+    const b = await uploadBase(t, { recordId });
+    assert.equal(b.ok, true, JSON.stringify(b.error));
+    assert.equal(b.data.complete, true);
+    let rec = await h.getRecord(t, recordId);
+    assert.ok(!allPhotoIds(rec).includes(b._photoId), 'drawings・items[].photos・primePhotos に出ない');
+    // 図面5枚+元の画像(上限に数えない)
+    for (let i = 0; i < 5; i++) assert.equal((await h.uploadDrawing(t, { recordId })).ok, true, `図面${i + 1}`);
+    assert.equal((await uploadBase(t, { recordId })).ok, true, '図面5枚でも元の画像は登録できる');
+    assert.equal((await h.uploadDrawing(t, { recordId })).error.code, 'PHOTO_LIMIT', '元の画像は図面の枠を使わない');
+    // 項目の検査写真の上限にも数えない
+    for (let i = 0; i < 5; i++) assert.equal((await h.uploadPhoto(t, { recordId, itemId: 'i2', side: 'self' })).ok, true);
+    rec = await h.getRecord(t, recordId);
+    assert.equal(rec.drawings.length, 5);
+    // 不正な付加
+    const bad = async (label, extra, expect) => {
+      const x = await uploadBase(t, { recordId, extra });
+      assert.equal(x.ok, false, label);
+      assert.equal(x.error.code, 'VALIDATION_FAILED', `${label}: ${JSON.stringify(x.error)}`);
+      assert.ok(viols(x).includes(expect), `${label}: ${viols(x)}`);
+    };
+    await bad('itemId', { itemId: 'i9' }, 'FIELD_INVALID|itemId');
+    await bad('markers', { markers: [] }, 'FIELD_INVALID|markers');
+    await bad('basePhotoId', { basePhotoId: h.newPhotoId() }, 'FIELD_INVALID|basePhotoId');
+    await bad('replaces', { replaces: h.newPhotoId() }, 'FIELD_INVALID|replaces');
+    // side=prime(qa_ok の記録に対する担当QA)
+    const qa = await h.login('u_suzuki');
+    const { recordId: okId } = await h.makeQaOk(t, qa, { lot: 'DRB1Q' });
+    const pr = await uploadBase(qa, { recordId: okId, side: 'prime' });
+    assert.equal(pr.error.code, 'VALIDATION_FAILED', JSON.stringify(pr.error));
+    assert.ok(viols(pr).includes('FIELD_INVALID|side'), viols(pr));
+    // getPhotoThumbs でも出ない
+    assert.deepEqual((await t.ok('getPhotoThumbs', { photoIds: [b._photoId] })).missing, [b._photoId]);
+  });
+
+  it('C-DRAW-10②③(basePhotoId・getPhoto part=base)', async () => {
+    const t = await h.login('u_tanaka');
+    const { recordId } = await h.createRecordFor(t, { lot: 'DRB2' });
+    const { recordId: otherId } = await h.createRecordFor(t, { lot: 'DRB2X' });
+    const baseBuf = jpegOf(300, 0x42), drawBuf = jpegOf(400, 0x43);
+    const b = await uploadBase(t, { recordId, buf: baseBuf });
+    assert.equal(b.ok, true, JSON.stringify(b.error));
+    const d = await h.uploadDrawing(t, { recordId, buf: drawBuf, extra: { basePhotoId: b._photoId } });
+    assert.equal(d.ok, true, JSON.stringify(d.error));
+    assert.equal(d.data.photo.basePhotoId, b._photoId, 'PhotoMeta に basePhotoId');
+    assert.equal((await h.getRecord(t, recordId)).drawings[0].basePhotoId, b._photoId);
+    // 土台の行がまだ無くても成功
+    const ahead = h.newPhotoId();
+    const d2 = await h.uploadDrawing(t, { recordId, extra: { basePhotoId: ahead } });
+    assert.equal(d2.ok, true, JSON.stringify(d2.error));
+    // ③ part=base は土台の本体。part なしは図面の本体
+    const g = await t.ok('getPhoto', { photoId: d._photoId, part: 'base' });
+    assert.equal(g.photoId, d._photoId);
+    assert.equal(b64Of(g.dataUrl), baseBuf.toString('base64'));
+    assert.equal(b64Of((await t.ok('getPhoto', { photoId: d._photoId })).dataUrl), drawBuf.toString('base64'));
+    assert.equal((await t.call('getPhoto', { photoId: d2._photoId, part: 'base' })).error.code, 'NOT_FOUND', '土台がまだ届いていない');
+    // 届けば取れる(後から届く)
+    assert.equal((await uploadBase(t, { recordId, photoId: ahead })).ok, true);
+    assert.equal((await t.call('getPhoto', { photoId: d2._photoId, part: 'base' })).ok, true);
+    const noBase = await h.uploadDrawing(t, { recordId });
+    assert.equal((await t.call('getPhoto', { photoId: noBase._photoId, part: 'base' })).error.code, 'NOT_FOUND', 'basePhotoId なし');
+    assert.equal((await t.call('getPhoto', { photoId: b._photoId })).error.code, 'NOT_FOUND', 'drawing_base は直接取れない');
+    const px = await t.call('getPhoto', { photoId: d._photoId, part: 'x' });
+    assert.equal(px.error.code, 'VALIDATION_FAILED'); assert.ok(viols(px).includes('FIELD_INVALID|part'), viols(px));
+    // ② 不正な basePhotoId
+    const bad = async (label, basePhotoId, photoId) => {
+      const x = await h.uploadDrawing(t, { recordId, photoId, extra: { basePhotoId } });
+      assert.equal(x.error && x.error.code, 'VALIDATION_FAILED', `${label}: ${JSON.stringify(x.error)}`);
+      assert.ok(viols(x).includes('FIELD_INVALID|basePhotoId'), `${label}: ${viols(x)}`);
+    };
+    const ob = await uploadBase(t, { recordId: otherId });
+    await bad('別の記録の土台', ob._photoId);
+    const ph = await h.uploadPhoto(t, { recordId, itemId: 'i3', side: 'self' });
+    await bad('kind=photo の行', ph.data.photo.photoId);
+    const same = h.newPhotoId();
+    await bad('photoId と同じ', same, same);
+    // 別の side: 職長の土台を管理者の図面が指す
+    const sb = await uploadBase(t, { recordId });
+    await submitAll(t, recordId);
+    const qa = await h.login('u_suzuki');
+    await qa.ok('claimReview', { recordId, round: 1 });
+    const xs = await h.uploadDrawing(qa, { recordId, side: 'qa', extra: { basePhotoId: sb._photoId } });
+    assert.equal(xs.error && xs.error.code, 'VALIDATION_FAILED', JSON.stringify(xs.error));
+    assert.ok(viols(xs).includes('FIELD_INVALID|basePhotoId'), viols(xs));
+  });
+
+  it('C-DRAW-10④(replaces): 5枚でも書き直せ、前の図面は同じ処理で消える。冪等。他人・別side・写真・前のラウンドは不可', async () => {
+    const t = await h.login('u_tanaka');
+    const { recordId } = await h.createRecordFor(t, { lot: 'DRB4' });
+    const ids = [];
+    for (let i = 0; i < 5; i++) ids.push((await h.uploadDrawing(t, { recordId }))._photoId);
+    const v0 = (await h.getRecord(t, recordId)).version;
+    const nid = h.newPhotoId();
+    const r = await h.uploadDrawing(t, { recordId, photoId: nid, extra: { replaces: ids[0], basePhotoId: ids[0] } });
+    assert.equal(r.ok, true, JSON.stringify(r.error));
+    let rec = await h.getRecord(t, recordId);
+    assert.equal(rec.drawings.length, 5, '未削除の図面は5枚のまま');
+    assert.ok(!rec.drawings.some((x) => x.photoId === ids[0]), '前の図面は消えた');
+    assert.ok(rec.drawings.some((x) => x.photoId === nid));
+    assert.equal(rec.version, v0 + 1, 'version は1つだけ増える');
+    if (await h.hasMock()) {
+      const row = (await h.stateRows('Photos')).find((x) => x.photoId === ids[0]);
+      assert.equal(row.deleted === true || row.deleted === 'TRUE', true);
+      assert.equal(row.deletedBy, 'u_tanaka');
+    }
+    // 書き足し: 削除済みの前の図面を土台として取れる
+    assert.equal((await t.call('getPhoto', { photoId: nid, part: 'base' })).ok, true, '削除済みの前の図面が土台でも返す');
+    // 同じ photoId の再送: 成功し、他を消さない
+    const again = await h.uploadDrawing(t, { recordId, photoId: nid, extra: { replaces: ids[0], basePhotoId: ids[0] } });
+    assert.equal(again.ok, true, JSON.stringify(again.error));
+    assert.equal((await h.getRecord(t, recordId)).drawings.length, 5);
+    // すでに削除済みの図面を replaces: 成功・何も消さない(枠は空かないので、先に1枚消して空ける)
+    await t.ok('deletePhoto', { photoId: ids[1] });
+    const r2 = await h.uploadDrawing(t, { recordId, extra: { replaces: ids[1] } });
+    assert.equal(r2.ok, true, JSON.stringify(r2.error));
+    assert.equal((await h.getRecord(t, recordId)).drawings.length, 5);
+    // 不正な replaces
+    const bad = async (session, label, replaces, side) => {
+      const x = await h.uploadDrawing(session, { recordId, side, extra: { replaces } });
+      assert.equal(x.error && x.error.code, 'VALIDATION_FAILED', `${label}: ${JSON.stringify(x.error)}`);
+      assert.ok(viols(x).includes('FIELD_INVALID|replaces'), `${label}: ${viols(x)}`);
+    };
+    const ph = await h.uploadPhoto(t, { recordId, itemId: 'i3', side: 'self' });
+    await bad(t, 'kind=photo', ph.data.photo.photoId);
+    await bad(t, '存在しない', h.newPhotoId());
+    await bad(t, 'drawing_base', (await uploadBase(t, { recordId }))._photoId);
+    // 提出 → QA が職長(他人・別 side)の図面を replaces
+    await submitAll(t, recordId);
+    const qa = await h.login('u_suzuki');
+    await qa.ok('claimReview', { recordId, round: 1 });
+    await bad(qa, '他人・別の side の図面', nid, 'qa');
+    // 差し戻し(fix)
+    await h.fillQa(qa, recordId, { i10: { result: 'ng', severity: 'minor', note: 'x' } }, { comment: 'c' });
+    await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'minor' });
+    rec = await h.getRecord(t, recordId);
+    assert.equal(rec.status, 'fix');
+    const prev = rec.drawings.find((x) => x.photoId === nid);
+    if (prev.round !== rec.round) await bad(t, '前のラウンド', nid);
+    else {
+      // fix 中も同じ round: 書き直しは成功する(deletePhoto と同じ条件)
+      const ok = await h.uploadDrawing(t, { recordId, extra: { replaces: nid } });
+      assert.equal(ok.ok, true, JSON.stringify(ok.error));
+    }
+  });
+
+  it('C-DRAW-10⑤(markers の fixed): true は保存され、false・省略は fixed を付けないか false。bool 以外は FIELD_INVALID', async () => {
+    const t = await h.login('u_tanaka');
+    const { recordId } = await h.createRecordFor(t, { lot: 'DRB5' });
+    const ms = [M({ label: '④-1', fixed: true }), M({ label: '④-2', fixed: false }), M({ label: '④-3' })];
+    const r = await h.uploadDrawing(t, { recordId, markers: ms });
+    assert.equal(r.ok, true, JSON.stringify(r.error));
+    const got = r.data.photo.markers;
+    assert.equal(got[0].fixed, true);
+    assert.ok(got[1].fixed === undefined || got[1].fixed === false);
+    assert.ok(got[2].fixed === undefined || got[2].fixed === false);
+    assert.deepEqual((await h.getRecord(t, recordId)).drawings[0].markers, got);
+    for (const v of ['yes', 1, {}]) {
+      const x = await h.uploadDrawing(t, { recordId, markers: [M({ fixed: v })] });
+      assert.equal(x.error && x.error.code, 'VALIDATION_FAILED', JSON.stringify(v));
+      assert.ok(viols(x).includes('FIELD_INVALID|markers'), viols(x));
+    }
+  });
+
+  it('C-DRAW-10⑥(PDF): drawing_base の画像は出ず、fixed の印も凡例に出る', async (tt) => {
+    const t = await h.login('u_tanaka');
+    const qa = await h.login('u_suzuki');
+    const { recordId } = await h.createRecordFor(t, { lot: 'DRB6' });
+    const b = await uploadBase(t, { recordId });
+    const dr = await h.uploadDrawing(t, { recordId, markers: [M({ label: '④-1', fixed: true }), M({ label: '④-2' })], extra: { basePhotoId: b._photoId } });
+    assert.equal(dr.ok, true, JSON.stringify(dr.error));
+    await submitAll(t, recordId, { i9: { values: [2, -1] } });
+    await qa.ok('claimReview', { recordId, round: 1 });
+    await h.fillQa(qa, recordId);
+    await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
+    const rep = await qa.call('generateReport', { recordId });
+    assert.equal(rep.ok, true, JSON.stringify(rep.error));
+    if (await h.hasMock()) {
+      const d = await h.driveInfo();
+      assert.ok(d.paths.some((x) => x.includes(`${recordId}_drawingbase_self_${b._photoId}`)), '元の画像のファイル名 {recordId}_drawingbase_{side}_{photoId}.jpg');
+    }
+    let html = '';
+    try { html = (await h.mock('lastReportHtml')).html || ''; } catch { html = ''; }
+    if (!html) return tt.skip('PDFの中身はハーネスだけで確かめる(モックのPDFは簡易版)');
+    assert.equal((html.match(/確認箇所\(図面\)<\/h2>/g) || []).length, 1, '図面ページは1つ(元の画像は出ない)');
+    assert.ok(html.includes('>④-1</td>') && html.includes('>④-2</td>'), 'fixed の印も凡例に出る');
+  });
+
   it('(mock-only) generateReport: 図面があっても落ちない / Photos 行に kind・markers が出る', async function () {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_suzuki');

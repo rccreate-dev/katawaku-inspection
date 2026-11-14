@@ -24,6 +24,22 @@ describe('U-DRAW-10 図面を横向きにするか(版1.14.2 §7.7-1)', () => {
   });
 });
 
+describe('U-DRAW-11 番号ボタンの見分け(版1.15.0 §7.7-2)', () => {
+  it('NG→ng、写真・コメントあり→info、他は dim。空白だけのコメントは数えない', () => {
+    assert.deepEqual(photo.drawingAttention({ result: 'ng' }), { ng: true, photo: false, note: false, level: 'ng' });
+    assert.deepEqual(photo.drawingAttention({ result: 'ok', photoCount: 1 }), { ng: false, photo: true, note: false, level: 'info' });
+    assert.deepEqual(photo.drawingAttention({ result: 'na', note: 'あ' }), { ng: false, photo: false, note: true, level: 'info' });
+    assert.deepEqual(photo.drawingAttention({ result: 'ng', photoCount: 2, note: 'x' }), { ng: true, photo: true, note: true, level: 'ng' });
+    assert.equal(photo.drawingAttention({ result: 'ok' }).level, 'dim');
+    assert.equal(photo.drawingAttention({ result: 'na' }).level, 'dim');
+    assert.equal(photo.drawingAttention({}).level, 'dim');
+    assert.equal(photo.drawingAttention().level, 'dim');
+    const sp = photo.drawingAttention({ result: 'ok', note: ' 　\n' });
+    assert.equal(sp.note, false);
+    assert.equal(sp.level, 'dim');
+  });
+});
+
 describe('U-DRAW-01 項目番号の表示', () => {
   it('1〜20 は丸数字、21以上は通常の数字', () => {
     assert.equal(photo.drawingNo(1), '①');

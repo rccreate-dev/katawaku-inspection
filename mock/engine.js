@@ -147,7 +147,9 @@ const recordRow = (id) => find('Records', id);
 const itemsOf = (recordId) => table('RecordItems').filter((r) => r.recordId === recordId).sort((a, b) => a.snapshot.seq - b.snapshot.seq);
 const photosOf = (recordId) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted);
 const isDrawing = (p) => p.kind === 'drawing';
-const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && !isDrawing(p) && p.side === side && (itemId == null || p.itemId === itemId)).length;
+// 版1.15.0: 図面の元の画像(drawing_base)は見えない行。検査写真にも図面にも数えない
+const isPhotoKind = (p) => p.kind !== 'drawing' && p.kind !== 'drawing_base';
+const photoCount = (recordId, itemId, side) => table('Photos').filter((p) => p.recordId === recordId && !p.deleted && isPhotoKind(p) && p.side === side && (itemId == null || p.itemId === itemId)).length;
 
 // 版1.12.0(§6.9): 1次検査者の役割。空の既存記録は foreman とみなす
 const ownerRoleOf = (rec) => rec.ownerRole || 'foreman';
@@ -364,7 +366,7 @@ function siteView(actor, s) {
   return { siteId: s.siteId, name: s.name, status: s.status, floors: splitCsv(s.floors), zones: splitCsv(s.zones), primeContractor: s.primeContractor || '', qa: { main: q.main ? brief(q.main) : null, mainAbsent: q.mainAbsent, subs: q.subs.map(brief) }, myAssignRole: mine ? mine.assignRole : null, myTeam: mine && mine.team ? mine.team : null };
 }
 function photoMeta(p) {
-  return { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText, kind: p.kind === 'drawing' ? 'drawing' : 'photo', markers: p.kind === 'drawing' ? (p.markers || []) : null };
+  return { photoId: p.photoId, itemId: p.itemId || null, side: p.side, round: p.round, takenBy: p.takenBy, takenByName: userName(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes, stampText: p.stampText, kind: p.kind === 'drawing' ? 'drawing' : 'photo', markers: p.kind === 'drawing' ? (p.markers || []) : null, basePhotoId: p.kind === 'drawing' ? (p.basePhotoId || null) : null };
 }
 function countsOf(rows, kinds, filledKey) {
   const c = { total: 0, filled: 0, ok: 0, ng: 0, na: 0 };
@@ -415,7 +417,7 @@ function detailView(actor, rec) {
   const hideQa = !canApprove(actor, rec) && (rec.status === 'draft' || rec.status === 'submitted');
   // 版1.6: 検査写真(kind=photo)と図面(kind=drawing)を分ける。items[].photos・primePhotos には図面を含めない。
   const allPhotos = photosOf(rec.recordId);
-  const photos = allPhotos.filter((p) => !isDrawing(p));
+  const photos = allPhotos.filter(isPhotoKind);
   const drawings = allPhotos.filter((p) => isDrawing(p) && !(hideQa && p.side === 'qa')).sort((a, b) => (a.takenAt < b.takenAt ? -1 : a.takenAt > b.takenAt ? 1 : 0)).map(photoMeta);
   const items = itemsOf(rec.recordId)
     .filter((r) => !(isForeman && r.snapshot.audience === 'qa'))
@@ -599,9 +601,9 @@ const ACTIONS = {
   recordPrimeSign: A(ROLES_QL, { recordId: 's', signerName: 's', method: 's', evidencePhotoId: 's?' }, { write: true, star: true, pin: true, load: 'record' }),
   stopPour: A(ROLES_ALL, { recordId: 's', reason: 's' }, { write: true, star: true, load: 'record' }),
   addNote: A(ROLES_ALL, { recordId: 's', itemId: 's?', text: 's' }, { write: true, star: true, load: 'record' }),
-  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's', kind: 's?', markers: 'x?' }, { write: true, load: 'record' }),
+  uploadPhotoChunk: A(ROLES_ALL, { photoId: 's', recordId: 's', itemId: 's?', side: 's', index: 'i', total: 'i', mime: 's', data: 's', thumb: 's?', takenAt: 's', width: 'i', height: 'i', bytes: 'i', sha256: 's', stampText: 's', kind: 's?', markers: 'x?', basePhotoId: 's?', replaces: 's?' }, { write: true, load: 'record' }),
   deletePhoto: A(ROLES_ALL, { photoId: 's' }, { write: true, star: true, load: 'photo' }),
-  getPhotoThumbs: A(ROLES_ALL, { photoIds: 'a' }), getPhoto: A(ROLES_ALL, { photoId: 's' }),
+  getPhotoThumbs: A(ROLES_ALL, { photoIds: 'a' }), getPhoto: A(ROLES_ALL, { photoId: 's', part: 's?' }),
   generateReport: A(ROLES_QL, { recordId: 's' }, { write: true, star: true, load: 'record' }),
   listReports: A(ROLES_QL, { recordId: 's' }, { load: 'record' }),
   requestJoin: A(['foreman'], { siteId: 's', joinKey: 's' }, { write: true, star: true }),
@@ -1172,7 +1174,7 @@ function loadState(d) {
 const C = {
   ApiError, fail, S: () => S, table, find, insert, cfg, U, nowMs, nowDt, today, ev, mailTo, mailSubject, mailBody, recordLink,
   user, userName, siteRow, splitCsv, effAssigns, siteAccess, visibleSiteIds, myAssign, teamOf, isAbsent, effectiveQa, leads, qaRecipients, siteQaUsers,
-  recordRow, itemsOf, photosOf, photoCount, canViewDetail, canApprove, ownerRoleOf, inTeam, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
+  recordRow, itemsOf, photosOf, photoCount, isPhotoKind, canViewDetail, canApprove, ownerRoleOf, inTeam, touch, escLevel, computeTiming, authorize, allowedActions, ACTIONS,
   meView, publicItem, enabledItems, siteView, photoMeta, summaryView, detailView, noteView, membershipView, assignmentView, absenceView, reportView,
   state: () => S, countFailure, verifyPin, stepUp, issueDevice, hashPin, hashInvite, driveSave, driveTrash, driveGet, PEPPER, SAMPLE_JPEG, PUBLIC_CONFIG_KEYS, shapeViolations, scrub,
   ROLES_QL, ISOK: okRes,

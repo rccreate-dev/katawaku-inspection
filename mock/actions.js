@@ -176,7 +176,7 @@ module.exports = function install(C) {
       const res = who === 'self' ? r.selfResult : r.qaResult;
       const values = (who === 'self' ? r.selfValues : r.qaValues) || [];
       const note = who === 'self' ? r.foremanNote : r.qaNote;
-      const photos = C.photosOf(rec.recordId).filter((p) => p.kind !== 'drawing' && p.itemId === r.itemId && p.side === who && (who === 'self' || p.round === rec.round)).length;
+      const photos = C.photosOf(rec.recordId).filter((p) => C.isPhotoKind(p) && p.itemId === r.itemId && p.side === who && (who === 'self' || p.round === rec.round)).length;
       const id = r.itemId;
       if (!res) { v.push({ rule: 'ANSWER_MISSING', itemId: id }); continue; }
       if (res === 'ng') {
@@ -421,6 +421,11 @@ module.exports = function install(C) {
   // prepare : 入力検証→(分割の中間チャンクはキャッシュ保存して応答)→組立・デコード・検査→仮想Drive保存。Photos には書かない。
   // commit  : 既存行確認→項目上限確認→Photos追記→touch。(再認証は engine.handleUpload が先に行う)
   const range = (n) => Array.from({ length: n }, (_, i) => i);
+  // 版1.15.0(§5.4.4): 土台(まだ無くてもよい。あれば同じ記録・side の drawing_base か drawing)
+  const kindOf = (x) => (x.kind === 'drawing' || x.kind === 'drawing_base' ? x.kind : 'photo');
+  const baseBad = (b, rec, side) => !!b && (b.recordId !== rec.recordId || b.side !== side || kindOf(b) === 'photo');
+  // 書き直す前の図面: 同じ記録・side の drawing、登録した本人、今の回(削除済みでもよい)
+  const replaceBad = (o, rec, side, userId) => !o || kindOf(o) !== 'drawing' || o.recordId !== rec.recordId || o.side !== side || o.takenBy !== userId || o.round !== rec.round;
   H.uploadPhotoChunk$prepare = (rc) => {
     const p = rc.params; const rec = ctxRec(rc);
     const single = p.total === 1;
@@ -429,7 +434,7 @@ module.exports = function install(C) {
     if (!/^p_[a-z0-9]{16}$/.test(p.photoId)) viol.push({ rule: 'FIELD_INVALID', path: 'photoId' });
     if (!['self', 'qa', 'prime'].includes(p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'side' });
     else if (p.side === 'prime') { if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' }); }
-    else if (p.kind === 'drawing') { /* 図面は itemId 空(下の kind 検証で判定) */ }
+    else if (p.kind === 'drawing' || p.kind === 'drawing_base') { /* 図面は itemId 空(下の kind 検証で判定) */ }
     else {
       const row = p.itemId ? rowsOf(rec).find((r) => r.itemId === p.itemId) : null;
       if (!row || (p.side === 'self' && row.snapshot.audience === 'qa') || (p.side === 'qa' && row.snapshot.audience === 'foreman')) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
@@ -445,9 +450,16 @@ module.exports = function install(C) {
     if (blank(p.stampText) || p.stampText.length > 300) viol.push({ rule: 'FIELD_INVALID', path: 'stampText' });
     // 版1.6: kind / markers(図面。§5.4.4・§7.7)
     const isDrawingReq = p.kind === 'drawing';
+    const isBaseReq = p.kind === 'drawing_base';   // 版1.15.0: 図面の元の画像(見えない行)
+    const has = (v) => v !== undefined && v !== null && v !== '';
+    const okId = (v) => typeof v === 'string' && /^p_[a-z0-9]{16}$/.test(v) && v !== p.photoId;
     let markers = null;
-    if (p.kind !== undefined && p.kind !== null && p.kind !== 'photo' && p.kind !== 'drawing') viol.push({ rule: 'FIELD_INVALID', path: 'kind' });
-    else if (isDrawingReq) {
+    if (p.kind !== undefined && p.kind !== null && p.kind !== 'photo' && p.kind !== 'drawing' && p.kind !== 'drawing_base') viol.push({ rule: 'FIELD_INVALID', path: 'kind' });
+    else if (isBaseReq) {
+      if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
+      if (p.side === 'prime') viol.push({ rule: 'FIELD_INVALID', path: 'side' });
+      if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
+    } else if (isDrawingReq) {
       if (p.itemId) viol.push({ rule: 'FIELD_INVALID', path: 'itemId' });
       if (p.side === 'prime') viol.push({ rule: 'FIELD_INVALID', path: 'side' });
       const ms = p.markers;
@@ -460,11 +472,21 @@ module.exports = function install(C) {
           const audOk = row && (p.side === 'self' ? row.snapshot.audience !== 'qa' : row.snapshot.audience !== 'foreman');
           const num01 = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
           if (!audOk || typeof m.label !== 'string' || m.label.length < 1 || m.label.length > 8 || !num01(m.x) || !num01(m.y)) { bad = true; break; }
-          markers.push({ itemId: m.itemId, label: m.label, x: m.x, y: m.y });
+          if (m.fixed !== undefined && m.fixed !== null && typeof m.fixed !== 'boolean') { bad = true; break; }
+          const o = { itemId: m.itemId, label: m.label, x: m.x, y: m.y };
+          if (m.fixed === true) o.fixed = true;   // 版1.15.0: 土台に焼き込み済みの印
+          markers.push(o);
         }
       }
       if (bad) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
     } else if (p.markers !== undefined && p.markers !== null) viol.push({ rule: 'FIELD_INVALID', path: 'markers' });
+    // 版1.15.0(§5.4.4): basePhotoId・replaces は kind=drawing のときだけ
+    if (has(p.basePhotoId) && (!isDrawingReq || !okId(p.basePhotoId))) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
+    if (has(p.replaces) && (!isDrawingReq || !okId(p.replaces))) viol.push({ rule: 'FIELD_INVALID', path: 'replaces' });
+    if (!viol.length && isDrawingReq) {
+      if (has(p.basePhotoId) && baseBad(find('Photos', p.basePhotoId), rec, p.side)) viol.push({ rule: 'FIELD_INVALID', path: 'basePhotoId' });
+      if (has(p.replaces) && replaceBad(find('Photos', p.replaces), rec, p.side, rc.actor.userId)) viol.push({ rule: 'FIELD_INVALID', path: 'replaces' });
+    }
     if (viol.length) vfail(viol);
 
     // 1 data の文字数(単発=photoSingleMaxChars/分割=photoChunkChars)・4の倍数・base64
@@ -502,13 +524,13 @@ module.exports = function install(C) {
     let takenMs = U.parseDt(p.takenAt); let suspect = false;
     if (takenMs > t + 5 * 60000 || takenMs < t - 14 * 86400000) { takenMs = t; suspect = true; }
     // 仮想Drive保存(ロックの外)
-    const itemId = (p.side === 'prime' || isDrawingReq) ? null : p.itemId;
+    const itemId = (p.side === 'prime' || isDrawingReq || isBaseReq) ? null : p.itemId;
     const site = siteRow(rec.siteId);
     const clean = (x) => String(x).replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60);
-    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${isDrawingReq ? 'drawing' : (itemId || 'prime')}_${p.side}_${p.photoId}.jpg`;
+    const path = `photos/${rec.siteId}_${clean(site.name)}/${clean(rec.floor)}/${U.jstDate(takenMs)}/${rec.recordId}_${isDrawingReq ? 'drawing' : (isBaseReq ? 'drawingbase' : (itemId || 'prime'))}_${p.side}_${p.photoId}.jpg`;
     const driveFileId = C.driveSave(path, buf);
     const thumbFileId = C.driveSave(`thumbs/${p.photoId}.jpg`, thumbBuf);
-    return { itemId, kind: isDrawingReq ? 'drawing' : 'photo', markers, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
+    return { itemId, kind: isDrawingReq ? 'drawing' : (isBaseReq ? 'drawing_base' : 'photo'), markers, basePhotoId: isDrawingReq && has(p.basePhotoId) ? p.basePhotoId : null, replaces: isDrawingReq && has(p.replaces) ? p.replaces : null, bytes: buf.length, takenMs, suspect, driveFileId, thumbFileId, fileIds: [driveFileId, thumbFileId] };
   };
   H.uploadPhotoChunk$commit = (rc, prep) => {
     const p = rc.params; const rec = ctxRec(rc); const actor = rc.actor;
@@ -523,14 +545,21 @@ module.exports = function install(C) {
     }
     // 3 項目×side の未削除写真数の上限(確定判定)
     // 版1.6: 図面は記録×sideあたり5枚(固定)。検査写真の枚数(photoMaxPerItem)とは別勘定。
+    // 版1.15.0: 書き直す前の図面・土台の確認(ロック内=最新の状態)
+    const old = prep.replaces ? find('Photos', prep.replaces) : null;
+    if (prep.replaces && replaceBad(old, rec, p.side, actor.userId)) vfail([{ rule: 'FIELD_INVALID', path: 'replaces' }]);
+    if (prep.basePhotoId && baseBad(find('Photos', prep.basePhotoId), rec, p.side)) vfail([{ rule: 'FIELD_INVALID', path: 'basePhotoId' }]);
     if (prep.kind === 'drawing') {
-      const dc = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind === 'drawing' && x.side === p.side).length;
+      // 書き直す前の図面(replaces)は数えない(5枚でも書き直せる)
+      const dc = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind === 'drawing' && x.side === p.side && x.photoId !== prep.replaces).length;
       if (dc >= 5) fail('PHOTO_LIMIT', '図面の上限です', { max: 5 });
     }
-    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && x.kind !== 'drawing' && x.side === p.side && (x.itemId || null) === prep.itemId).length;
-    if (prep.kind !== 'drawing' && cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
+    const cnt = table('Photos').filter((x) => x.recordId === rec.recordId && !x.deleted && C.isPhotoKind(x) && x.side === p.side && (x.itemId || null) === prep.itemId).length;
+    if (prep.kind === 'photo' && cnt >= cfg('photoMaxPerItem')) fail('PHOTO_LIMIT', '1項目あたりの写真数の上限です', { max: cfg('photoMaxPerItem') });
     // 4 Photos 行の追記(round=ここで読んだ Records.round、receivedAt=ここでの現在時刻)
-    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false, kind: prep.kind, markers: prep.kind === 'drawing' ? prep.markers : null });
+    const ph = insert('Photos', { photoId: p.photoId, recordId: rec.recordId, itemId: prep.itemId, side: p.side, round: rec.round, takenBy: actor.userId, takenAt: U.fmtDt(prep.takenMs), receivedAt: nowDt(), mime: 'image/jpeg', bytes: prep.bytes, width: p.width, height: p.height, sha256: p.sha256, stampText: p.stampText, driveFileId: prep.driveFileId, thumbFileId: prep.thumbFileId, clockSuspect: prep.suspect, deleted: false, kind: prep.kind, markers: prep.kind === 'drawing' ? prep.markers : null, basePhotoId: prep.kind === 'drawing' ? prep.basePhotoId : null });
+    // 書き直す前の図面を論理削除(deletePhoto と同じ。削除済みならそのまま)
+    if (old && !old.deleted) { old.deleted = true; old.deletedBy = actor.userId; old.deletedAt = nowDt(); }
     S.chunks.delete(p.photoId);
     // 5 touch(Events には残さない)
     C.touch(rec);
@@ -565,16 +594,27 @@ module.exports = function install(C) {
     const photos = []; const missing = [];
     for (const id of ids) {
       const ph = find('Photos', id);
-      const buf = photoVisible(rc.actor, ph) ? C.driveGet(ph.thumbFileId) : null;
+      const buf = photoVisible(rc.actor, ph) && ph.kind !== 'drawing_base' ? C.driveGet(ph.thumbFileId) : null;
       if (buf) photos.push({ photoId: id, dataUrl: dataUrl(buf) }); else missing.push(id);
     }
     return { photos, missing };
   };
   H.getPhoto = (rc) => {
+    const part = rc.params.part;
+    if (part !== undefined && part !== null && part !== 'base') fieldInvalid('part');
     const ph = find('Photos', rc.params.photoId);
-    const buf = photoVisible(rc.actor, ph) ? C.driveGet(ph.driveFileId) : null;
+    // drawing_base は直接は取れない(版1.15.0)
+    if (!photoVisible(rc.actor, ph) || ph.kind === 'drawing_base') fail('NOT_FOUND', '写真が見つかりません');
+    let src = ph;
+    if (part === 'base') {
+      // 図面の土台の画像。土台は削除済みの前の図面でもよい
+      const b = ph.kind === 'drawing' && ph.basePhotoId ? find('Photos', ph.basePhotoId) : null;
+      if (!b || b.recordId !== ph.recordId) fail('NOT_FOUND', '写真が見つかりません');
+      src = b;
+    }
+    const buf = C.driveGet(src.driveFileId);
     if (!buf) fail('NOT_FOUND', '写真が見つかりません');
-    return { photoId: ph.photoId, dataUrl: dataUrl(buf), width: ph.width, height: ph.height };
+    return { photoId: ph.photoId, dataUrl: dataUrl(buf), width: src.width, height: src.height };
   };
 
   // ===== PDF ===========================================================

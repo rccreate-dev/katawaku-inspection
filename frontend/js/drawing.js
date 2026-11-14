@@ -92,7 +92,8 @@
     var c = KW.photo.canvasOf(w, h);
     var g = c.getContext('2d');
     g.drawImage(src, 0, 0, w, h);
-    drawMarks(g, w, h, markers, side, markFontPx(src.width, src.height) * scale);
+    // 版1.15.0: fixed の印は土台に焼き込み済みなので重ねて描かない(§7.7-5)
+    drawMarks(g, w, h, (markers || []).filter(function (m) { return !m.fixed; }), side, markFontPx(src.width, src.height) * scale);
     return c;
   }
 
@@ -122,15 +123,17 @@
 
   /*
    * M10 書き込みエディタ(全画面)。
-   * o = { canvas, side:'self'|'qa', items:[{itemId,no,measure,text}], stampCtx:function(ms)->{siteName,floor,zone,inspector,ms} }
-   * 戻り値: Promise<null | { full, thumb, width, height, bytes, sha256, mime, takenAt, stampText, markers }>
+   * o = { canvas, side:'self'|'qa', items:[{itemId,no,measure,text,attention?}], stampCtx:function(ms)->{siteName,floor,zone,inspector,ms},
+   *       markers?:[{itemId,label,x,y,fixed?}](書き直し・書き足しの今の印。版1.15.0), withBase?:bool(元の画像も作る) }
+   * 戻り値: Promise<null | { full, thumb, width, height, bytes, sha256, mime, takenAt, stampText, markers, base? }>
+   *   base: withBase のとき、印なしの土台(回転後)を同じ作り方で符号化したもの { full, thumb, width, height, bytes, sha256, mime }
    */
   function openEditor(o) {
     var h = KW.h, t = KW.t, P = KW.photo;
     return new Promise(function (resolve) {
       var layer = document.getElementById('overlay');
       var src = o.canvas;
-      var markers = [];          // 置いた順。{itemId, x, y, label}
+      var markers = [];          // 置いた順。{itemId, k, x, y, label, fixed}
       var activeId = null, activeK = null, selected = null, zoom = 1, busy = false, done = false;
       var marksEls = [];
 
@@ -146,13 +149,25 @@
       var numBtns = {};
       var nums = h('div', { class: 'dnums' });
       o.items.forEach(function (it) {
-        var b = h('button', { type: 'button', class: 'dnum', 'data-no': String(it.no), 'data-item': it.itemId, 'aria-pressed': 'false', 'aria-label': t('drawing.item_no', { n: it.no }), title: it.text || '' }, P.drawingNo(it.no));
+        // 版1.15.0(§7.7-2): 図面に記録が必要な項目の見分け(NG=赤枠、写真・コメントあり=橙枠と印、他は薄く)
+        var at = it.attention || { level: 'dim' };
+        var says = [];
+        if (at.ng) says.push(t('drawing.attn_ng'));
+        if (at.photo) says.push(t('drawing.attn_photo'));
+        if (at.note) says.push(t('drawing.attn_note'));
+        var aria = t('drawing.item_no', { n: it.no }) + (says.length ? ' ' + says.join('、') : '');
+        var badges = (at.ng || at.photo || at.note) ? h('span', { class: 'dbadges', 'aria-hidden': 'true' },
+          at.ng ? h('span', { class: 'dbadge ng' }, 'NG') : null,
+          at.photo ? h('span', { class: 'dbadge', 'data-badge': 'photo' }, KW.icon('camera')) : null,
+          at.note ? h('span', { class: 'dbadge', 'data-badge': 'note' }, KW.icon('note')) : null) : null;
+        var b = h('button', { type: 'button', class: 'dnum', 'data-no': String(it.no), 'data-item': it.itemId, 'data-attn': at.level, 'aria-pressed': 'false', 'aria-label': aria, title: it.text || '' }, P.drawingNo(it.no), badges);
+        b._attn = at.level;
         b.addEventListener('click', function () {
           activeId = (activeId === it.itemId) ? null : it.itemId;
           activeK = null; selected = null;
           if (activeId && hasPoints(it)) { // 未配置の最初の測定点を選んでおく
             for (var k = 1; k <= (it.values || []).length; k++) { if (!findMark(it.itemId, k)) { activeK = k; break; } }
-            if (activeK == null && (it.values || []).length) activeK = 1;
+            if (activeK == null && (it.values || []).length) { var f1 = findMark(it.itemId, 1); activeK = (f1 && f1.fixed) ? null : 1; }
           }
           refresh();
         });
@@ -183,7 +198,20 @@
       function itemOf(id) { return o.items.filter(function (i) { return i.itemId === id; })[0] || null; }
       function valText(v, unit) { return (v > 0 ? '+' : '') + v + (unit || 'mm'); }
       function showMsg(text) { msg.hidden = !text; KW.clear(msg); if (text) msg.appendChild(document.createTextNode(text)); }
-      function relabel() { var ls = P.drawingLabels(markers, o.items); markers.forEach(function (m, i) { m.label = ls[i]; }); }
+      // fixed の印(焼き込み済み)は label を変えない
+      function relabel() { var ls = P.drawingLabels(markers, o.items); markers.forEach(function (m, i) { if (!m.fixed) m.label = ls[i]; }); }
+      /* 今の印から k(測定点の番号)を label で逆算する。合わなければ k=null(枝番なし) */
+      function kOf(m) {
+        var it = itemOf(m.itemId);
+        if (!it || !hasPoints(it)) return null;
+        for (var k = 1; k <= 60; k++) { if (P.drawingLabel(it.no, k, it.measure) === m.label) return k; }
+        return null;
+      }
+      (o.markers || []).forEach(function (m) {
+        markers.push({ itemId: m.itemId, k: null, x: Number(m.x) || 0, y: Number(m.y) || 0, label: String(m.label || ''), fixed: m.fixed === true });
+        markers[markers.length - 1].k = kOf(markers[markers.length - 1]);
+      });
+      function movable() { return markers.filter(function (m) { return !m.fixed; }); }
 
       function paintBase() {
         cv.width = src.width; cv.height = src.height;
@@ -205,6 +233,7 @@
       function renderMarks() {
         KW.clear(markLayer); marksEls = [];
         markers.forEach(function (m) {
+          if (m.fixed) return; // 焼き込み済みの印は重ねて描かない・選べない(§7.7-5)
           var el = h('button', {
             type: 'button', class: 'dmark dmark-' + o.side + (m === selected ? ' sel' : ''), 'data-testid': 'drawing-mark',
             'data-label': m.label, 'data-item': m.itemId, 'aria-label': t('drawing.mark', { label: m.label })
@@ -224,10 +253,10 @@
         o.items.forEach(function (it) {
           var b = numBtns[it.itemId];
           b.setAttribute('aria-pressed', it.itemId === activeId ? 'true' : 'false');
-          b.className = 'dnum' + (have[it.itemId] ? ' has' : '');
+          b.className = 'dnum' + (have[it.itemId] ? ' has' : '') + ' attn-' + (b._attn || 'dim');
         });
         zoomBtns.forEach(function (b) { b.setAttribute('aria-pressed', Number(b.getAttribute('data-zoom')) === zoom ? 'true' : 'false'); });
-        undoBtn.disabled = busy || !markers.length;
+        undoBtn.disabled = busy || !movable().length;
         delBtn.disabled = busy || !selected;
         rotateBtn.disabled = busy; save.disabled = busy;
         var act = itemOf(activeId);
@@ -242,8 +271,8 @@
           else {
             hintText = activeK ? t('drawing.placing_point', { label: P.drawingLabel(act.no, activeK, act.measure), value: valText(vals[activeK - 1], act.unit) }) : t('drawing.pick_point');
             vals.forEach(function (v, i) {
-              var k = i + 1, placed = !!findMark(act.itemId, k), label = P.drawingLabel(act.no, k, act.measure);
-              var c = h('button', { type: 'button', class: 'dpoint' + (placed ? ' placed' : ''), 'data-k': String(k), 'aria-pressed': k === activeK ? 'true' : 'false' },
+              var k = i + 1, fm = findMark(act.itemId, k), placed = !!fm, label = P.drawingLabel(act.no, k, act.measure);
+              var c = h('button', { type: 'button', class: 'dpoint' + (placed ? ' placed' : ''), 'data-k': String(k), 'aria-pressed': k === activeK ? 'true' : 'false', disabled: !!(fm && fm.fixed) },
                 (placed ? '● ' : '') + label + ' ' + valText(v, act.unit));
               c.addEventListener('click', function () { activeK = k; selected = null; refresh(); });
               pointsBox.appendChild(c);
@@ -268,6 +297,7 @@
         } else {
           if (!activeK) { refresh(); return; } // 測定点が未選択: 置けない
           var ex = findMark(activeId, activeK);
+          if (ex && ex.fixed) { refresh(); return; } // 焼き込み済みの印は動かせない
           if (ex) { ex.x = x; ex.y = y; } // 1測定点につき印は1つ: 置き済みなら移動
           else {
             markers.push({ itemId: activeId, k: activeK, x: x, y: y, label: '' });
@@ -277,8 +307,10 @@
         relabel(); refresh();
       });
       undoBtn.addEventListener('click', function () {
-        if (!markers.length) return;
-        var last = markers.pop(); if (selected === last) selected = null;
+        var mv = movable();
+        if (!mv.length) return;
+        var last = mv[mv.length - 1];
+        markers.splice(markers.indexOf(last), 1); if (selected === last) selected = null;
         relabel(); refresh();
       });
       delBtn.addEventListener('click', function () {
@@ -305,8 +337,12 @@
         busy = true; showMsg(''); refresh();
         save.textContent = t('drawing.saving');
         var ms = KW.time.nowMs(KW.state.skewMs);
-        var out = markers.map(function (m) { return { itemId: m.itemId, label: m.label, x: r4(m.x), y: r4(m.y) }; });
-        build(src, out, o.side).then(function (p) {
+        var out = markers.map(function (m) { var r = { itemId: m.itemId, label: m.label, x: r4(m.x), y: r4(m.y) }; if (m.fixed) r.fixed = true; return r; });
+        // 版1.15.0(§7.7-5): 新しく登録するときは印なしの土台も同じ作り方で作る(drawing_base)
+        var baseP = o.withBase ? build(src, [], o.side) : Promise.resolve(null);
+        Promise.all([build(src, out, o.side), baseP]).then(function (xs) {
+          var p = xs[0];
+          p.base = xs[1];
           p.markers = out;
           p.stampText = P.stampText(o.stampCtx(ms)); // 文字としてのみ保存(画素には焼き込まない)
           p.takenAt = KW.time.toIso(ms);
@@ -330,10 +366,17 @@
   function edit(o) {
     return loadFile(o.file).then(function (canvas) {
       if (KW.photo.drawingNeedsLandscape(canvas.width, canvas.height)) canvas = rotate90(canvas);
-      return openEditor({ canvas: canvas, side: o.side, items: o.items, stampCtx: o.stampCtx });
+      return openEditor({ canvas: canvas, side: o.side, items: o.items, stampCtx: o.stampCtx, withBase: true });
     });
   }
 
-  var api = { loadFile: loadFile, rotate90: rotate90, drawMarks: drawMarks, bake: bake, build: build, openEditor: openEditor, edit: edit, markFontPx: markFontPx, clampCenter: clampCenter, markCenter: markCenter, COLORS: COLORS };
+  /* 版1.15.0(§7.7-5): 書き直し・書き足し。o.blob=土台の画像、o.markers=今の印。向きは変えない(土台は登録時の向き) */
+  function reedit(o) {
+    return loadFile(o.blob).then(function (canvas) {
+      return openEditor({ canvas: canvas, side: o.side, items: o.items, stampCtx: o.stampCtx, markers: o.markers || [] });
+    });
+  }
+
+  var api = { loadFile: loadFile, rotate90: rotate90, drawMarks: drawMarks, bake: bake, build: build, openEditor: openEditor, edit: edit, reedit: reedit, markFontPx: markFontPx, clampCenter: clampCenter, markCenter: markCenter, COLORS: COLORS };
   KW.drawing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

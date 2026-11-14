@@ -381,7 +381,7 @@ function buildDrawingPageHtml_(ph, rows, seq, resChip) {
 function buildReportHtml_(rec, site, rows, allPhotos, notes, events, version, nowDt) {
   var L = reportLabelsFor_(rec);   // 版1.12.0: 欄名(§10.2e)
   // 版1.6: 写真ページ(60枚上限・並び)には図面を含めない。図面は §10.2c で別に載せる
-  var photos = allPhotos.filter(function (x) { return photoKindOf_(x) !== 'drawing'; });
+  var photos = allPhotos.filter(function (x) { return photoKindOf_(x) === 'photo'; });   // 版1.15.0: drawing_base は出さない
   var drawings = allPhotos.filter(function (x) { return photoKindOf_(x) === 'drawing'; })
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : (a.takenAt > b.takenAt ? 1 : 0); });
   var hash = reportSnapshotHash_(rec, rows, events.filter(function (e) { return /^verdict_/.test(e.kind); }));

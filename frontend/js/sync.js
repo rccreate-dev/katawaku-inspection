@@ -66,7 +66,13 @@
           };
           if (row.params.itemId) params.itemId = row.params.itemId;
           // 図面(版1.6): kind と markers を同送(itemId は付けない)
-          if (m.kind === 'drawing') { params.kind = 'drawing'; params.markers = m.markers || []; }
+          if (m.kind === 'drawing') {
+            params.kind = 'drawing'; params.markers = m.markers || [];
+            // 版1.15.0(§7.7-5): 土台の行・書き直す前の図面
+            if (m.basePhotoId) params.basePhotoId = m.basePhotoId;
+            if (m.replaces) params.replaces = m.replaces;
+          }
+          if (m.kind === 'drawing_base') params.kind = 'drawing_base'; // 図面の元の画像(見えない行)
           // サムネは index=0 のリクエストに同梱(単発は常に同梱)
           if (idx === 0) return KW.photo.blobToB64(pb.thumb).then(function (tb) { params.thumb = tb; return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 }); });
           return KW.api.call('uploadPhotoChunk', params, { timeoutMs: 60000 });
@@ -114,6 +120,8 @@
       .then(function () { return KW.db.get('photoBlobs', pid); })
       .then(function (pb) {
         if (!pb) return null;
+        // 図面の元の画像(drawing_base)は詳細に載らない行なので、送れたら本体を消す(書き直しは getPhoto part=base で取る)
+        if (pb.meta && pb.meta.kind === 'drawing_base') return KW.data.delPhotoBlob(pid);
         var th = pb.thumb;
         var done = function () { return th ? KW.data.cacheThumb(pid, th) : null; };
         if (!fresh) { pb.uploadState = 'uploaded'; return KW.db.put('photoBlobs', pb).then(done); }
@@ -124,8 +132,8 @@
 
   /* 先出しした写真の削除が確定失敗したとき: 隠していた写真を元に戻し、トーストで知らせる(SPEC §8.11.4)。
    * 端末の下書き(deletedPhotos)の印を外してから 'photo:delete_failed' を出す(開いている画面はメモリ上の印も外して描き直す) */
-  function rollbackDelete(row) {
-    var pid = row.params && row.params.photoId;
+  function rollbackDelete(row, pidOverride) {
+    var pid = pidOverride || (row.params && row.params.photoId);
     if (!pid || !row.recordId) return Promise.resolve();
     return KW.data.getDraft(row.recordId).then(function (d) {
       if (d && d.deletedPhotos && d.deletedPhotos[pid]) { delete d.deletedPhotos[pid]; return KW.data.putDraft(d); }
@@ -228,6 +236,8 @@
     }).then(function () {
       KW.bus.emit('outbox:failed', row.recordId, code, row);
       if (row.action === 'deletePhoto') rollbackDelete(row);
+      // 版1.15.0(§7.7-5): 書き直しの図面が確定失敗 → 隠していた前の図面を元に戻す(削除の失敗と同じ扱い)
+      if (row.action === 'uploadPhotoChunk' && row.params && row.params.replaces) rollbackDelete(row, row.params.replaces);
       return true;
     });
   }

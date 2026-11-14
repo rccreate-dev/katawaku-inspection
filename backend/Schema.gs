@@ -29,7 +29,7 @@ var SCHEMA = (function () {
   def('RecordItems', 'recordItemId', false,
     'recordItemId,recordId,itemId,snapshot:json,selfResult,selfSeverity,selfValues:json,foremanNote,selfUpdatedAt:dt,qaResult,qaSeverity,qaValues:json,qaNote,qaUpdatedAt:dt');
   def('Photos', 'photoId', false,
-    'photoId,recordId,itemId,side,round:int,takenBy,takenAt:dt,receivedAt:dt,mime,bytes:int,width:int,height:int,sha256,stampText,driveFileId,thumbFileId,clockSuspect:bool,deleted:bool,deletedBy,deletedAt:dt,kind,markers:json');
+    'photoId,recordId,itemId,side,round:int,takenBy,takenAt:dt,receivedAt:dt,mime,bytes:int,width:int,height:int,sha256,stampText,driveFileId,thumbFileId,clockSuspect:bool,deleted:bool,deletedBy,deletedAt:dt,kind,markers:json,basePhotoId');
   def('Notes', 'noteId', true,
     'noteId,recordId,itemId,kind,authorUserId,authorRole,round:int,text,source,clientId,createdAt:dt');
   def('Events', 'eventId', true,

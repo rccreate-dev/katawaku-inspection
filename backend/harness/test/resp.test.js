@@ -167,7 +167,7 @@ test('C-RESP-03 重さ: record に dataUrl・thumb・base64 本体を含まな�
   };
   walk(u.data.record, 'record');
   const ph = u.data.record.items.find((x) => x.itemId === 'i9').self.photos[0];
-  assert.deepEqual(Object.keys(ph).sort(), ['bytes', 'height', 'itemId', 'kind', 'markers', 'photoId', 'round', 'side', 'stampText', 'takenAt', 'takenBy', 'takenByName', 'width']);
+  assert.deepEqual(Object.keys(ph).sort(), ['basePhotoId', 'bytes', 'height', 'itemId', 'kind', 'markers', 'photoId', 'round', 'side', 'stampText', 'takenAt', 'takenBy', 'takenByName', 'width']);
 });
 
 test('C-RESP-04 version: saveDraft → addNote → uploadPhotoChunk → submitRecord で単調増加。写真3本の最終版には3枚とも載る', () => {

@@ -269,6 +269,17 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .dedit .dtop,.dedit .dtools,.dedit .dhint,.dedit .dmsg{flex:none}
 .dnum,.dtool{min-width:44px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:18px;font-weight:700;padding:0 8px;cursor:pointer}
 .dnum.has{background:var(--accent-soft)}
+/* 版1.15.0(§7.7-2): 番号ボタンの見分け。NG=赤枠、写真・コメントあり=橙枠、他は薄く(押せる) */
+/* 印はボタンの中の右上に置く(パネルのスクロールで見切れないよう、外にはみ出さない) */
+.dnum{display:inline-flex;align-items:center;justify-content:center;gap:2px}
+.dnum.attn-ng{border:2px solid #CC0000}
+.dnum.attn-info{border:2px solid #E07B00}
+.dnum.attn-dim{opacity:.45}
+.dnum[aria-pressed="true"].attn-dim{opacity:1}
+.dnum .dbadges{align-self:flex-start;margin-top:3px;display:inline-flex;gap:1px;pointer-events:none}
+.dnum .dbadge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:8px;background:#E07B00;color:#fff;font-size:9px;line-height:1;padding:0 2px}
+.dnum .dbadge.ng{background:#CC0000;font-weight:700}
+.dnum .dbadge .ico{width:11px;height:11px}
 .dnum[aria-pressed="true"],.dtool[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .dtools{display:flex;flex-wrap:wrap;gap:6px}
 .dtool{font-size:14px}

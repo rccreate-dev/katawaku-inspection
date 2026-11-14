@@ -294,6 +294,18 @@
   }
 
   /*
+   * 番号ボタンの見分け(§7.7-2 版1.15.0)。a = {result, photoCount, note}(その side の入力)。純関数。
+   * NG → level 'ng'。写真あり・コメントあり → 'info'。どれでもない(OK・該当なし・未入力) → 'dim'
+   */
+  function drawingAttention(a) {
+    a = a || {};
+    var ng = a.result === 'ng';
+    var photo = Number(a.photoCount) > 0;
+    var note = typeof a.note === 'string' && a.note.trim() !== '';
+    return { ng: ng, photo: photo, note: note, level: ng ? 'ng' : ((photo || note) ? 'info' : 'dim') };
+  }
+
+  /*
    * 図面の縮小・再圧縮の計画(§7.7-3)。長辺1800px以下に縮小し、
    * 品質 0.8 → 0.7 → 0.6 → 0.5、それでも超えるなら寸法を0.85倍にして再試行(最大4回。品質0.6)。
    * 戻り値: { base:{w,h}, attempts:[{scale,quality,w,h}] }
@@ -326,7 +338,7 @@
   }
 
   var api = {
-    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, encodeDrawing: encodeDrawing,
+    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, drawingAttention: drawingAttention, encodeDrawing: encodeDrawing,
     motionSign: motionSign, deviceAngle: deviceAngle, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,

@@ -88,15 +88,16 @@ function recordListView_(actor, rec) {
   return recordSummary_(actor, rec);
 }
 
-/** Photos 行の種別(版1.6。旧行で kind が空なら 'photo') */
-function photoKindOf_(p) { return p.kind === 'drawing' ? 'drawing' : 'photo'; }
+/** Photos 行の種別(版1.6。旧行で kind が空なら 'photo')。版1.15.0: 'drawing_base'(図面の元の画像。どこにも出さない見えない行) */
+function photoKindOf_(p) { return p.kind === 'drawing' ? 'drawing' : (p.kind === 'drawing_base' ? 'drawing_base' : 'photo'); }
 
 function photoMeta_(p) {
   var kind = photoKindOf_(p);
   return {
     photoId: p.photoId, itemId: orNull_(p.itemId), side: p.side, round: p.round, takenBy: p.takenBy,
     takenByName: userName_(p.takenBy), takenAt: p.takenAt, width: p.width, height: p.height, bytes: p.bytes,
-    stampText: p.stampText, kind: kind, markers: kind === 'drawing' ? (Array.isArray(p.markers) ? p.markers : []) : null
+    stampText: p.stampText, kind: kind, markers: kind === 'drawing' ? (Array.isArray(p.markers) ? p.markers : []) : null,
+    basePhotoId: kind === 'drawing' ? orNull_(p.basePhotoId) : null   // 版1.15.0
   };
 }
 
@@ -201,7 +202,7 @@ function activePhotos_(recordId) {
 
 function photoCounter_(photos) {
   var m = {};
-  photos.forEach(function (p) { if (photoKindOf_(p) === 'drawing') return; var k = p.itemId + '|' + p.side; m[k] = (m[k] || 0) + 1; });
+  photos.forEach(function (p) { if (photoKindOf_(p) !== 'photo') return; var k = p.itemId + '|' + p.side; m[k] = (m[k] || 0) + 1; });
   return function (itemId, side) { return m[itemId + '|' + side] || 0; };
 }
 

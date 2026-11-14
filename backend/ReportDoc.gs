@@ -405,7 +405,7 @@ function docBuild_(doc, rec, site, rows, allPhotos, events, version, nowIso, t0)
   var L = reportLabelsFor_(rec);   // 版1.12.0: 欄名(§10.2e。Report.gs)
   var body = doc.getBody();
   docSetupPage_(body);
-  var photos = allPhotos.filter(function (x) { return photoKindOf_(x) !== 'drawing'; });
+  var photos = allPhotos.filter(function (x) { return photoKindOf_(x) === 'photo'; });   // 版1.15.0: drawing_base は出さない
   var drawings = allPhotos.filter(function (x) { return photoKindOf_(x) === 'drawing'; })
     .sort(function (a, b) { return a.takenAt < b.takenAt ? -1 : (a.takenAt > b.takenAt ? 1 : 0); });
   var verdicts = events.filter(function (e) { return /^verdict_/.test(e.kind); });

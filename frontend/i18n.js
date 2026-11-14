@@ -262,6 +262,13 @@
     ['drawing.item_no', '項目{n}', 'Item {n}'],
     ['drawing.mark', '印 {label}', 'Tanda {label}'],
     ['drawing.view', '図面を拡大', 'Perbesar gambar kerja'],
+    // 版1.15.0(§7.7-2・§7.7-5): 書き直し・書き足しと番号ボタンの見分け
+    ['drawing.rewrite', '書き直す', 'Gambar ulang'],
+    ['drawing.append', '書き足す', 'Tambah tanda'],
+    ['drawing.base_unavailable', '元の画像を読み込めません。電波のよい所で、しばらくしてからやり直してください', 'Gambar asli tidak dapat dimuat. Coba lagi nanti di tempat dengan sinyal baik.'],
+    ['drawing.attn_ng', 'NGあり', 'Ada NG'],
+    ['drawing.attn_photo', '写真あり', 'Ada foto'],
+    ['drawing.attn_note', 'コメントあり', 'Ada komentar'],
     ['outbox.title', '未送信の操作', 'Operasi belum terkirim'],
     ['outbox.badge', '未送信 {n}', 'Tertunda {n}'],
     ['outbox.act.createRecord', '記録の作成', 'Buat catatan'],

@@ -72,7 +72,7 @@ describe('E-14b 図面の拡大表示', () => {
       const r = await page.locator('.photoview img').evaluate((i) => ({ w: i.naturalWidth, src: (i.src || '').slice(0, 8) }));
       const note = await page.locator('.photoview p').allInnerTexts();
       assert.ok(r.w > 0, label + ': 拡大画像が表示される ' + JSON.stringify(r) + JSON.stringify(note));
-      await page.locator('.photoview button').click();
+      await page.locator('.photoview').getByRole('button', { name: s.t('act.close') }).click(); // 版1.15.0: 自分の図面には「書き直す」も出る
     };
     await view('ローカル');
     await E.settle(s);

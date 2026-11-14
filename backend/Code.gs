@@ -142,12 +142,14 @@ var ACTIONS = {
       width: { t: 'int', req: 1, min: 1 }, height: { t: 'int', req: 1, min: 1 }, bytes: { t: 'int', req: 1, min: 1 },
       sha256: { t: 'str', req: 1, max: 64 }, stampText: { t: 'str', req: 1, max: 300 },
       // 版1.6(図面): 値の検証は PhotoUpload.gs が path 付きで行う(markers は配列/null のみ許すので型指定なし)
-      kind: { t: 'str', nullable: true, max: 20 }, markers: { t: 'any', nullable: true }
+      kind: { t: 'str', nullable: true, max: 20 }, markers: { t: 'any', nullable: true },
+      // 版1.15.0(図面の書き直し・書き足し): 値の検証は PhotoUpload.gs が path 付きで行う
+      basePhotoId: { t: 'str', nullable: true, max: 40 }, replaces: { t: 'str', nullable: true, max: 40 }
     }
   },
   deletePhoto: { w: true, idem: true, roles: ALL_ROLES, params: { photoId: { t: 'id', p: 'p', req: 1 } } },
   getPhotoThumbs: { roles: ALL_ROLES, params: { photoIds: { t: 'arr', req: 1, maxItems: 20 } } },
-  getPhoto: { roles: ALL_ROLES, params: { photoId: { t: 'id', p: 'p', req: 1 } } },
+  getPhoto: { roles: ALL_ROLES, params: { photoId: { t: 'id', p: 'p', req: 1 }, part: { t: 'str', nullable: true, max: 10 } } },
 
   generateReport: { w: true, idem: true, roles: QA_ROLES, params: { recordId: { t: 'id', p: 'r', req: 1 } } },
   listReports: { roles: QA_ROLES, params: { recordId: { t: 'id', p: 'r', req: 1 } } },
