@@ -274,11 +274,13 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 .dnum{display:inline-flex;align-items:center;justify-content:center;gap:2px}
 .dnum.attn-ng{border:2px solid #CC0000}
 .dnum.attn-info{border:2px solid #E07B00}
+.dnum.attn-measure{border:2px solid #1A5FB4}
 .dnum.attn-dim{opacity:.45}
 .dnum[aria-pressed="true"].attn-dim{opacity:1}
 .dnum .dbadges{align-self:flex-start;margin-top:3px;display:inline-flex;gap:1px;pointer-events:none}
 .dnum .dbadge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:8px;background:#E07B00;color:#fff;font-size:9px;line-height:1;padding:0 2px}
 .dnum .dbadge.ng{background:#CC0000;font-weight:700}
+.dnum .dbadge.measure{background:#1A5FB4}
 .dnum .dbadge .ico{width:11px;height:11px}
 .dnum[aria-pressed="true"],.dtool[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .dtools{display:flex;flex-wrap:wrap;gap:6px}

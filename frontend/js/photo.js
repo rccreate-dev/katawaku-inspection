@@ -297,12 +297,18 @@
    * 番号ボタンの見分け(§7.7-2 版1.15.0)。a = {result, photoCount, note}(その side の入力)。純関数。
    * NG → level 'ng'。写真あり・コメントあり → 'info'。どれでもない(OK・該当なし・未入力) → 'dim'
    */
+  /* 実測値の数(空・数でない値は数えない。版1.15.1) */
+  function valueCount(values) {
+    return (values || []).filter(function (v) { return v !== null && v !== undefined && String(v).trim() !== '' && isFinite(Number(v)); }).length;
+  }
   function drawingAttention(a) {
     a = a || {};
     var ng = a.result === 'ng';
     var photo = Number(a.photoCount) > 0;
     var note = typeof a.note === 'string' && a.note.trim() !== '';
-    return { ng: ng, photo: photo, note: note, level: ng ? 'ng' : ((photo || note) ? 'info' : 'dim') };
+    // 版1.15.1: OK で実測値がある項目(測定点あり)
+    var measure = a.result === 'ok' && Number(a.valueCount) > 0;
+    return { ng: ng, photo: photo, note: note, measure: measure, level: ng ? 'ng' : ((photo || note) ? 'info' : (measure ? 'measure' : 'dim')) };
   }
 
   /*
@@ -338,7 +344,7 @@
   }
 
   var api = {
-    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, drawingAttention: drawingAttention, encodeDrawing: encodeDrawing,
+    drawingNo: drawingNo, pointNo: pointNo, drawingLabel: drawingLabel, drawingLabels: drawingLabels, fitDrawing: fitDrawing, drawingNeedsLandscape: drawingNeedsLandscape, drawingAttention: drawingAttention, valueCount: valueCount, encodeDrawing: encodeDrawing,
     motionSign: motionSign, deviceAngle: deviceAngle, screenAngle: screenAngle, captureRotation: captureRotation, rotateCanvas: rotateCanvas, watchMotion: watchMotion, uprightCapture: uprightCapture,
     toBlob: toBlob, canvasOf: canvasOf,
     planUpload: planUpload,

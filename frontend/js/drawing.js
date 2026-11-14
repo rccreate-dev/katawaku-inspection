@@ -155,11 +155,13 @@
         if (at.ng) says.push(t('drawing.attn_ng'));
         if (at.photo) says.push(t('drawing.attn_photo'));
         if (at.note) says.push(t('drawing.attn_note'));
+        if (at.measure) says.push(t('drawing.attn_measure'));
         var aria = t('drawing.item_no', { n: it.no }) + (says.length ? ' ' + says.join('、') : '');
-        var badges = (at.ng || at.photo || at.note) ? h('span', { class: 'dbadges', 'aria-hidden': 'true' },
+        var badges = (at.ng || at.photo || at.note || at.measure) ? h('span', { class: 'dbadges', 'aria-hidden': 'true' },
           at.ng ? h('span', { class: 'dbadge ng' }, 'NG') : null,
           at.photo ? h('span', { class: 'dbadge', 'data-badge': 'photo' }, KW.icon('camera')) : null,
-          at.note ? h('span', { class: 'dbadge', 'data-badge': 'note' }, KW.icon('note')) : null) : null;
+          at.note ? h('span', { class: 'dbadge', 'data-badge': 'note' }, KW.icon('note')) : null,
+          at.measure ? h('span', { class: 'dbadge measure', 'data-badge': 'measure' }, KW.icon('ruler')) : null) : null;
         var b = h('button', { type: 'button', class: 'dnum', 'data-no': String(it.no), 'data-item': it.itemId, 'data-attn': at.level, 'aria-pressed': 'false', 'aria-label': aria, title: it.text || '' }, P.drawingNo(it.no), badges);
         b._attn = at.level;
         b.addEventListener('click', function () {

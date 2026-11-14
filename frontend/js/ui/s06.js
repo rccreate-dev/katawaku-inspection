@@ -349,7 +349,7 @@
           canEdit: function () { return editable && (detail.actions || []).indexOf('uploadPhotoChunk') >= 0; },
           items: function () { return visibleItems().map(function (i, k) { return { itemId: i.itemId, no: k + 1, measure: i.def.measure, text: KW.itemText(i.def), key: !!i.def.key, unit: i.def.unit || 'mm', values: ((work.items[i.itemId] || {}).values || []).slice(),
             // 版1.15.0(§7.7-2): 番号ボタンの見分け(入力中の値・送信待ちの写真を含む)
-            attention: KW.photo.drawingAttention({ result: (work.items[i.itemId] || {}).result, photoCount: itemPhotos(i.itemId).length, note: (work.items[i.itemId] || {}).note }) }; }); },
+            attention: KW.photo.drawingAttention({ result: (work.items[i.itemId] || {}).result, photoCount: itemPhotos(i.itemId).length, note: (work.items[i.itemId] || {}).note, valueCount: KW.photo.valueCount((work.items[i.itemId] || {}).values) }) }; }); },
           refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
         });
         el.appendChild(drawBox);

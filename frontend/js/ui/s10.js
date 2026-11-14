@@ -376,7 +376,7 @@
               .filter(function (o) { return o.def.audience !== 'foreman'; })
               .map(function (o) { return { itemId: o.itemId, no: o.no, measure: o.def.measure, text: KW.itemText(o.def), key: !!o.def.key, unit: o.def.unit || 'mm', values: ((work.qaItems[o.itemId] || {}).values || []).slice(),
                 // 版1.15.0(§7.7-2): 番号ボタンの見分け(管理者側の入力・写真・コメント)
-                attention: KW.photo.drawingAttention({ result: (work.qaItems[o.itemId] || {}).result, photoCount: C.photosFor(detail, work, blobs, o.itemId, 'qa').concat(mem.forItem(o.itemId, 'qa', blobs)).length, note: (work.qaItems[o.itemId] || {}).note }) }; });
+                attention: KW.photo.drawingAttention({ result: (work.qaItems[o.itemId] || {}).result, photoCount: C.photosFor(detail, work, blobs, o.itemId, 'qa').concat(mem.forItem(o.itemId, 'qa', blobs)).length, note: (work.qaItems[o.itemId] || {}).note, valueCount: KW.photo.valueCount((work.qaItems[o.itemId] || {}).values) }) }; });
           },
           refreshBlobs: function () { return KW.data.photoBlobsFor(id).then(function (b) { blobs = b; }); }
         });

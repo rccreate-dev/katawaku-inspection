@@ -26,10 +26,10 @@ describe('U-DRAW-10 図面を横向きにするか(版1.14.2 §7.7-1)', () => {
 
 describe('U-DRAW-11 番号ボタンの見分け(版1.15.0 §7.7-2)', () => {
   it('NG→ng、写真・コメントあり→info、他は dim。空白だけのコメントは数えない', () => {
-    assert.deepEqual(photo.drawingAttention({ result: 'ng' }), { ng: true, photo: false, note: false, level: 'ng' });
-    assert.deepEqual(photo.drawingAttention({ result: 'ok', photoCount: 1 }), { ng: false, photo: true, note: false, level: 'info' });
-    assert.deepEqual(photo.drawingAttention({ result: 'na', note: 'あ' }), { ng: false, photo: false, note: true, level: 'info' });
-    assert.deepEqual(photo.drawingAttention({ result: 'ng', photoCount: 2, note: 'x' }), { ng: true, photo: true, note: true, level: 'ng' });
+    assert.deepEqual(photo.drawingAttention({ result: 'ng' }), { ng: true, photo: false, note: false, measure: false, level: 'ng' });
+    assert.deepEqual(photo.drawingAttention({ result: 'ok', photoCount: 1 }), { ng: false, photo: true, note: false, measure: false, level: 'info' });
+    assert.deepEqual(photo.drawingAttention({ result: 'na', note: 'あ' }), { ng: false, photo: false, note: true, measure: false, level: 'info' });
+    assert.deepEqual(photo.drawingAttention({ result: 'ng', photoCount: 2, note: 'x' }), { ng: true, photo: true, note: true, measure: false, level: 'ng' });
     assert.equal(photo.drawingAttention({ result: 'ok' }).level, 'dim');
     assert.equal(photo.drawingAttention({ result: 'na' }).level, 'dim');
     assert.equal(photo.drawingAttention({}).level, 'dim');
@@ -37,6 +37,18 @@ describe('U-DRAW-11 番号ボタンの見分け(版1.15.0 §7.7-2)', () => {
     const sp = photo.drawingAttention({ result: 'ok', note: ' 　\n' });
     assert.equal(sp.note, false);
     assert.equal(sp.level, 'dim');
+  });
+  it('版1.15.1: OK で実測値あり→measure(NG・写真・コメントが優先)', () => {
+    const m = photo.drawingAttention({ result: 'ok', valueCount: 2 });
+    assert.equal(m.level, 'measure'); assert.equal(m.measure, true);
+    assert.equal(photo.drawingAttention({ result: 'ok', valueCount: 0 }).level, 'dim');
+    const n = photo.drawingAttention({ result: 'ng', valueCount: 3 });
+    assert.equal(n.level, 'ng'); assert.equal(n.measure, false);
+    const i = photo.drawingAttention({ result: 'ok', photoCount: 1, valueCount: 1 });
+    assert.equal(i.level, 'info'); assert.equal(i.measure, true);
+    assert.equal(photo.drawingAttention({ result: 'na', valueCount: 1 }).level, 'dim');
+    assert.equal(photo.valueCount([1, '', null, '-2.5', 'x', 0]), 3);
+    assert.equal(photo.valueCount(undefined), 0);
   });
 });
 

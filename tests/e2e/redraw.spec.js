@@ -1,4 +1,4 @@
-// E-34 図面の書き直し・書き足しと番号の見分け(SPEC 版1.15.0 §7.7-2・§7.7-5 / §12.5 E-34)。mock。ja と id、375px。
+// E-34 図面の書き直し・書き足しと番号の見分け(SPEC 版1.15.0〜1.15.1 §7.7-2・§7.7-5 / §12.5 E-34)。mock。ja と id、375px。
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -50,7 +50,7 @@ for (const lang of ['ja', 'id']) {
       const { page } = s;
       // 準備(API): 全項目 OK・重点項目の写真つき。i1=NG(写真・コメント)、i5=コメントだけ
       const { recordId: rid } = await E.apiReady(env, { lot: 'RD-' + lang });
-      await E.apiOk(env, 'saveDraft', { recordId: rid, items: [{ itemId: 'i1', result: 'ng', note: 'ずれ' }, { itemId: 'i5', result: 'ok', note: '確認' }] }, 'u_tanaka');
+      await E.apiOk(env, 'saveDraft', { recordId: rid, items: [{ itemId: 'i1', result: 'ng', note: 'ずれ' }, { itemId: 'i5', result: 'ok', note: '確認' }, { itemId: 'i4', result: 'ok', values: [3, -2] }] }, 'u_tanaka');
       await E.apiPhoto(env, 'u_tanaka', rid, 'i1', 'self');
       // 土台の無い図面(版1.14 以前の形)を API で直接作っておく(④で使う)
       const old = 'p_oooo' + Date.now().toString(36).padStart(12, '0').slice(-12);
@@ -79,11 +79,17 @@ for (const lang of ['ja', 'id']) {
       assert.match(await cls('i5'), /attn-info/, 'コメントだけでも橙枠');
       assert.equal(await btnOf(s, 'i5').locator('[data-badge=note]').count(), 1);
       assert.equal(await btnOf(s, 'i5').locator('[data-badge=photo]').count(), 0);
-      assert.match(await cls('i4'), /attn-dim/, '記録不要の項目は薄く');
+      // ⑧(版1.15.1) OK で実測値あり → 青枠と定規の印
+      assert.match(await cls('i4'), /attn-measure/, '測定点ありは青枠');
+      assert.equal(await btnOf(s, 'i4').locator('[data-badge=measure]').count(), 1, '定規の印');
+      assert.equal(await btnOf(s, 'i4').evaluate((e) => getComputedStyle(e).borderTopColor), 'rgb(26, 95, 180)');
+      assert.ok((await btnOf(s, 'i4').getAttribute('aria-label')).includes(s.t('drawing.attn_measure')));
+      assert.equal(await btnOf(s, 'i1').locator('[data-badge=measure]').count(), 0, 'NG には定規の印なし');
+      assert.match(await cls('i8'), /attn-dim/, '記録不要の項目は薄く');
       const st = await btnOf(s, 'i1').evaluate((e) => { const c = getComputedStyle(e); return { w: c.borderTopWidth, c: c.borderTopColor }; });
       assert.deepEqual(st, { w: '2px', c: 'rgb(204, 0, 0)' });
-      assert.equal(await btnOf(s, 'i4').evaluate((e) => getComputedStyle(e).opacity), '0.45');
-      assert.equal(await btnOf(s, 'i4').isDisabled(), false, '薄くても押せる');
+      assert.equal(await btnOf(s, 'i8').evaluate((e) => getComputedStyle(e).opacity), '0.45');
+      assert.equal(await btnOf(s, 'i8').isDisabled(), false, '薄くても押せる');
       const aria = await btnOf(s, 'i1').getAttribute('aria-label');
       for (const k of ['drawing.attn_ng', 'drawing.attn_photo', 'drawing.attn_note']) assert.ok(aria.includes(s.t(k)), `${k} が aria-label に入る: ${aria}`);
       assert.ok(await E.noHScroll(s), '横スクロールなし(M10)');
@@ -157,7 +163,7 @@ for (const lang of ['ja', 'id']) {
       const d3 = live(rows, 'drawing').find((p) => p.photoId !== d2.photoId);
       assert.ok(d3, '書き足した図面');
       assert.equal(d3.basePhotoId, old, 'basePhotoId=前の図面');
-      assert.deepEqual(d3.markers.map((m) => [m.label, !!m.fixed]), [['①', true], ['④', false]]);
+      assert.deepEqual(d3.markers.map((m) => [m.label, !!m.fixed]), [['①', true], ['④-1', false]]);
       assert.equal(rows.filter((p) => p.kind === 'drawing_base').length, 1, '書き足しでは元の画像の行を作らない');
       assert.equal(await page.locator('#drawings .thumb').count(), 2);
 
@@ -169,6 +175,53 @@ for (const lang of ['ja', 'id']) {
       assert.equal(await page.locator('.photoview [data-act=rewrite-drawing], .photoview [data-act=append-drawing]').count(), 0);
       await closeView(s);
       assert.ok(await E.noHScroll(s));
+      s.assertClean();
+      await s.close();
+    });
+
+    it('⑨(版1.15.1) 前のラウンドの自分の図面にも「書き足す」→ 前の図面は残し、1枚追加', async () => {
+      const s = await E.newSession(env, { lang });
+      const { page } = s;
+      const { recordId: rid } = await E.apiReady(env, { lot: 'RD9-' + lang });
+      const old = 'p_rrrr' + Date.now().toString(36).padStart(12, '0').slice(-12);
+      const ob64 = await jpegB64(page, 1000, 700);
+      await E.apiOk(env, 'uploadPhotoChunk', {
+        photoId: old, recordId: rid, side: 'self', index: 0, total: 1, mime: 'image/jpeg', data: ob64, thumb: ob64,
+        takenAt: new Date().toISOString(), width: 1000, height: 700, bytes: Buffer.from(ob64, 'base64').length, sha256: sha(ob64),
+        stampText: 'A現場(仮) 1F ・ 田中 ・ 2026-11-14 09:00', kind: 'drawing', markers: [{ itemId: 'i1', label: '①', x: 0.3, y: 0.3 }],
+      }, 'u_tanaka');
+      // 提出 → 打設停止 → 再提出(回が2に進む) → 打設停止 = 本番の所見と同じ「修正中・2回目」
+      await E.apiOk(env, 'submitRecord', { recordId: rid, round: 1 }, 'u_tanaka', true);
+      await E.apiOk(env, 'stopPour', { recordId: rid, reason: 'テスト' }, 'u_tanaka');
+      await E.apiOk(env, 'submitRecord', { recordId: rid, round: 1 }, 'u_tanaka', true);
+      await E.apiOk(env, 'stopPour', { recordId: rid, reason: 'テスト' }, 'u_tanaka');
+      const r2 = (await E.stateRows('Records')).find((r) => r.recordId === rid);
+      assert.deepEqual([r2.status, r2.round], ['fix', 2]);
+      await E.loginFast(s, '田中');
+      await openRecord(s, rid);
+      await page.locator(`#drawings .thumbwrap[data-pid="${old}"]`).waitFor();
+      assert.equal(await page.locator(`#drawings .thumbwrap[data-pid="${old}"] .x`).count(), 0, '前の回の図面は削除できない');
+      await openThumb(s, old);
+      await page.locator('.photoview [data-act=append-drawing]').click();
+      await page.locator('.dedit').waitFor();
+      await btnOf(s, 'i8').click();
+      await tapAt(s, 250, 120);
+      await page.locator('.dedit [data-act=save]').click();
+      await page.locator('.dedit').waitFor({ state: 'detached' });
+      assert.equal(await page.locator(`#drawings .thumbwrap[data-pid="${old}"]`).count(), 1, '前の図面は隠さない');
+      await E.settle(s);
+      const rows = await drawRows(rid);
+      assert.equal(rows.find((p) => p.photoId === old).deleted, false, '前の図面は残る');
+      const nw = live(rows, 'drawing').filter((p) => p.photoId !== old);
+      assert.equal(nw.length, 1, '図面が1枚増える');
+      assert.equal(nw[0].basePhotoId, old);
+      assert.equal(nw[0].round, 2);
+      assert.deepEqual(nw[0].markers.map((m) => [m.label, !!m.fixed]), [['①', true], ['⑧', false]]);
+      assert.equal(await page.locator('#drawings .thumb').count(), 2);
+      // 新しい図面(今の回)は従来どおり入れ替え(書き足す)
+      await openThumb(s, nw[0].photoId);
+      assert.equal(await page.locator('.photoview [data-act=rewrite-drawing]').count(), 1);
+      await closeView(s);
       s.assertClean();
       await s.close();
     });

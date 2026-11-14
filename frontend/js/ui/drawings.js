@@ -139,8 +139,9 @@
       }).catch(function () { return null; });
     }
 
-    /* 書き直す(土台あり: 今の印はすべて動かせる)/書き足す(土台なし: 前の印は fixed) */
-    function reedit(p) {
+    /* 書き直す(土台あり: 今の印はすべて動かせる)/書き足す(土台なし: 前の印は fixed)。
+     * keep=true(版1.15.1。前のラウンドの図面): 前の図面は消さずに残し、新しい図面を1枚追加する(replaces を送らない) */
+    function reedit(p, keep) {
       var append = !p.basePhotoId;
       notice = null;
       return loadBase(p, append).then(function (blob) {
@@ -149,7 +150,7 @@
         return KW.drawing.reedit({ blob: blob, side: o.side, items: o.items(), stampCtx: stampCtxOf(), markers: ms }).then(function (r) {
           if (!r) return null;
           r.base = null; // 土台は送り直さない
-          return saveResult(r, { replaces: p.photoId, basePhotoId: append ? p.photoId : p.basePhotoId });
+          return saveResult(r, { replaces: keep ? null : p.photoId, basePhotoId: append ? p.photoId : p.basePhotoId });
         });
       }, function (e) {
         notice = t(e && e.code === 'DRAWING_UNREADABLE' ? 'drawing.base_unavailable' : 'err.INTERNAL');
@@ -158,10 +159,15 @@
       }).then(build);
     }
 
-    /* M3 のボタン: 自分の図面で削除できる間(送信済み・本人・同じラウンド・編集可) */
-    function viewActions(p, own, editable) {
-      if (!own || !editable || !p.canDelete || p.local || p.mem) return [];
-      return [{ act: p.basePhotoId ? 'rewrite-drawing' : 'append-drawing', label: t(p.basePhotoId ? 'drawing.rewrite' : 'drawing.append'), run: function () { reedit(p); } }];
+    /* M3 のボタン: 自分の図面で削除できる間(送信済み・本人・同じラウンド・編集可)。
+     * 版1.15.1: 前のラウンドの自分の図面にも出す(前の図面は残し、1枚追加。5枚あれば出さない) */
+    function viewActions(p, own, editable, count) {
+      if (!own || !editable || p.local || p.mem) return [];
+      var me = KW.state.me || {}, detail = o.get().detail;
+      var keep = !p.canDelete && p.takenBy === me.userId && p.round != null && p.round < detail.round;
+      if (!p.canDelete && !keep) return [];
+      if (keep && count >= MAX) return [];
+      return [{ act: p.basePhotoId ? 'rewrite-drawing' : 'append-drawing', label: t(p.basePhotoId ? 'drawing.rewrite' : 'drawing.append'), run: function () { reedit(p, keep); } }];
     }
 
     function sideBlock(side) {
@@ -173,7 +179,7 @@
       node.appendChild(h('h4', null, C.lbl('drawing.by_' + side, o.get().detail), own ? h('span', { class: 'sub' }, ' ' + t('photo.count', { n: list.length, max: MAX })) : null));
       var strip = C.photoStrip(list, {
         onDelete: own && editable ? deleteDrawing : null,
-        onView: function (p) { KW.modal.photoView(p, { actions: viewActions(p, own, editable) }); }
+        onView: function (p) { KW.modal.photoView(p, { actions: viewActions(p, own, editable, list.length) }); }
       });
       if (own) {
         // 版1.14.0(§7.7-1): 「撮影する」=アプリ内カメラ(図面モード)/「写真から選ぶ」=ファイル選択(アルバム・スクリーンショット)

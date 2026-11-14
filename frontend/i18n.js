@@ -269,6 +269,7 @@
     ['drawing.attn_ng', 'NGあり', 'Ada NG'],
     ['drawing.attn_photo', '写真あり', 'Ada foto'],
     ['drawing.attn_note', 'コメントあり', 'Ada komentar'],
+    ['drawing.attn_measure', '測定点あり', 'Ada titik ukur'],
     ['outbox.title', '未送信の操作', 'Operasi belum terkirim'],
     ['outbox.badge', '未送信 {n}', 'Tertunda {n}'],
     ['outbox.act.createRecord', '記録の作成', 'Buat catatan'],
