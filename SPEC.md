@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.16.0 / 作成日: 2026-10-07(最終改訂 2026-11-14) / 作成: 設計担当
+- 版: 1.17.0 / 作成日: 2026-10-07(最終改訂 2026-11-14) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -545,16 +545,19 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | clockSuspect | bool | 必 | 端末時刻が不正と判定したとき `TRUE` |
 | deleted | bool | 必 | 論理削除(既定FALSE) |
 | deletedBy / deletedAt | id/dt | | |
-| kind | enum(photo,drawing,drawing_base) | | 版1.6。空=`photo`(旧行)。`drawing` は図面(§7.7)。**版1.15.0: `drawing_base` = 図面の元の画像(印なし。§7.7-5)。どの一覧・画面・PDF・枚数にも出さない見えない行**。**列は末尾に追加**(既存シートは `setupSheets()` が不足列を末尾に補う。§2.9a) |
+| kind | enum(photo,drawing,drawing_base,photo_text) | | **版1.17.0: `photo_text` = 検査写真に文字を書き込んだ画像(§7.8)**。版1.6。空=`photo`(旧行)。`drawing` は図面(§7.7)。**版1.15.0: `drawing_base` = 図面の元の画像(印なし。§7.7-5)。どの一覧・画面・PDF・枚数にも出さない見えない行**。**列は末尾に追加**(既存シートは `setupSheets()` が不足列を末尾に補う。§2.9a) |
 | markers | json | | 版1.6。`kind=drawing` のみ。確認箇所の印の配列(§7.7)。`photo` では空 |
-| basePhotoId | id(`p_`) | | **版1.15.0**。`kind=drawing` のみ。この図面の土台の画像の行(`drawing_base` の行、または書き足しの元にした前の図面の行。§7.7-5)。空=土台なし(版1.14 以前の図面)。**列は末尾に追加**(§2.9a) |
+| basePhotoId | id(`p_`) | | **版1.17.0**: `kind=photo_text` では元の写真(`kind=photo`)の行(必須)。**版1.15.0**。`kind=drawing` のみ。この図面の土台の画像の行(`drawing_base` の行、または書き足しの元にした前の図面の行。§7.7-5)。空=土台なし(版1.14 以前の図面)。**列は末尾に追加**(§2.9a) |
+| texts | json | | **版1.17.0**。`kind=photo_text` のみ。書き込んだ文字の配列(§7.8。`[{ "text","x","y","size","color" }]`)。他の種別では空。**列は末尾に追加**(§2.9a) |
 
 **図面の元の画像の行(`kind=drawing_base`。版1.15.0)の値**: `itemId` は空、`side` は図面と同じ `self`/`qa`、本体=印を焼き込む前の画像(図面と同じ寸法・同じ縮小)、`markers`・`basePhotoId` は空、`stampText` は図面と同じ。**この行は `RecordDetail`(`items[].photos`・`primePhotos`・`drawings`)・`getPhotoThumbs`・`getPhoto`(`part` なし)・PDF・写真や図面の上限の数に一切含めない**。実装の注意: 「`kind` が `drawing` でなければ検査写真」という判定をしている箇所は、`drawing_base` を検査写真として扱ってしまうので、`kind` が `photo`(空を含む)かどうかで判定し直すこと(backend・mock・frontend の全箇所)。
+
+**文字入りの画像の行(`kind=photo_text`。版1.17.0。§7.8)の値**: `itemId`・`side`=元の写真と同じ(`self`/`qa`。`prime` 不可)、`basePhotoId`=元の写真の `photoId`、本体=元の写真(スタンプ入り)に文字を焼き込んだJPEG(元の写真と同じ寸法)、`texts`=書いた文字、`stampText`=元の写真と同じ、`takenAt`=文字を書いて保存した時刻、`round`=保存したときの記録の `round`、`takenBy`=書いた人(=元の写真の撮影者)。**この行は単独では `RecordDetail` の一覧・写真の枚数・上限・PDF の並びに出さない**(元の写真の `text` として返し、PDF では元の写真の代わりの画像として使う)。1枚の元の写真について有効(未削除)な行は最大1つ(§5.4.4)。
 
 **図面の行(`kind=drawing`)の値**: `itemId` は空、`side` は `self` または `qa`(`prime` 不可)、`mime` は `image/jpeg`、本体=書き込み(印)を焼き込み済みのJPEG、`stampText`=§7.2 と同じ書式の文字列(ただし画素には焼き込まない)、`takenAt`=登録操作の時刻。
 
 ### 2.9a 既存シートへの列追加(版1.6)
-`setupSheets()` は、既存シートの **ヘッダが SPEC の先頭部分と一致し、列数がSPECより少ない** 場合(列の末尾追加だけの差)は、エラーにせず不足列のヘッダを末尾に書き足す(データ行は触らない)。それ以外の不一致(順序違い・余分な列・名前違い)は従来どおりエラー。版1.6 の対象は `Photos` の `kind`,`markers` のみ。**版1.15.0 は `Photos` の `basePhotoId`(`markers` の後ろ)**。本番反映のときに `setupSheets()` を実行する。
+`setupSheets()` は、既存シートの **ヘッダが SPEC の先頭部分と一致し、列数がSPECより少ない** 場合(列の末尾追加だけの差)は、エラーにせず不足列のヘッダを末尾に書き足す(データ行は触らない)。それ以外の不一致(順序違い・余分な列・名前違い)は従来どおりエラー。版1.6 の対象は `Photos` の `kind`,`markers` のみ。**版1.15.0 は `Photos` の `basePhotoId`(`markers` の後ろ)**。**版1.17.0 は `Photos` の `texts`(`basePhotoId` の後ろ)**。本番反映のときに `setupSheets()` を実行する。
 
 ### 2.10 Notes(コメント追記ログ)  PK=`noteId`  **追記専用**
 
@@ -902,7 +905,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 ```
 `result`/`severity` 未入力は `null`、`note` 未入力は `""`、`values` 未入力は `[]`。**職長に対しては、status が `draft`/`submitted` のとき `qa` を `null` で返す**(QAの下書きを見せない)。`fix`/`qa_ok`/`approved` では `qa` を返す(是正指示の確認用)。**版1.12.0: 同じ規則を「その記録を承認できない人」(`canApprove` が偽。1次検査者のQA、同じ現場の他のQA、職長)にも適用する**(承認者の下書きは、承認できる人にだけ見せる)。責任者が自分の1次検査を承認する場合は、責任者は承認できる人なので `qa` を返す。
 
-**PhotoMeta** `{ "photoId","itemId":"i9|null","side":"self|qa|prime","round":1,"takenBy":"u_tanaka","takenByName":"田中","takenAt":"…","width":1280,"height":960,"bytes":214532,"stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58","kind":"photo|drawing","markers":null }`(削除済みは含めない。**版1.6**: `kind` は常に返す(旧行は `photo`)。`markers` は `kind=drawing` のとき `[{ "itemId":"i9","label":"④-1","x":0.231,"y":0.412 }]`、`photo` では `null`。`x`,`y` は画像の左上を(0,0)・右下を(1,1)とした割合)。**版1.15.0**: `markers` の要素に `fixed`(bool。省略=false。true は土台の画像に焼き込み済みの印=書き足しの前の印。§7.7-5)、`kind=drawing` に `basePhotoId`(id または null)を加える。`kind=drawing_base` の行は PhotoMeta にしない
+**PhotoMeta** `{ "photoId","itemId":"i9|null","side":"self|qa|prime","round":1,"takenBy":"u_tanaka","takenByName":"田中","takenAt":"…","width":1280,"height":960,"bytes":214532,"stampText":"A現場(仮) 2F ・ 田中 ・ 2026-10-07 09:58","kind":"photo|drawing","markers":null }`(削除済みは含めない。**版1.6**: `kind` は常に返す(旧行は `photo`)。`markers` は `kind=drawing` のとき `[{ "itemId":"i9","label":"④-1","x":0.231,"y":0.412 }]`、`photo` では `null`。`x`,`y` は画像の左上を(0,0)・右下を(1,1)とした割合)。**版1.15.0**: `markers` の要素に `fixed`(bool。省略=false。true は土台の画像に焼き込み済みの印=書き足しの前の印。§7.7-5)、`kind=drawing` に `basePhotoId`(id または null)を加える。`kind=drawing_base` の行は PhotoMeta にしない。**版1.17.0**: `kind=photo` に `text`(null または `{ "photoId":"<photo_text の行の id>", "texts":[…], "takenAt":"…" }`。その写真の有効な文字入りの画像。§7.8)を加える。`kind=photo_text` の行は単独の PhotoMeta にしない
 
 **Note** `{ "noteId","itemId":"str|null","kind":"foreman|manager","authorUserId","authorName","authorRole","round","text","source":"submit|verdict|addNote","createdAt" }`
 
@@ -1214,6 +1217,12 @@ params:
   - `basePhotoId`(`kind="drawing"` のときだけ。省略可): 形式は `p_` の id で `photoId` と違うこと。**その行がすでにあれば**、同じ `recordId`・同じ `side`・`kind` が `drawing_base` か `drawing`(削除済みでもよい)であること。違えば `FIELD_INVALID`(path=`basePhotoId`)。**まだ無いときは受け付ける**(写真は並行して送るので、元の画像の行が後から届くことがある)。そのまま `Photos.basePhotoId` に書く。
   - `replaces`(`kind="drawing"` のときだけ。省略可): 書き直す前の図面の `photoId`。その行が **`kind=drawing`・同じ `recordId`・同じ `side`・撮影者が認証済みユーザー・`round` が記録の `round`** であること(=`deletePhoto` で消せる図面)。違えば `FIELD_INVALID`(path=`replaces`)。**ロック内**(手順2の既存行の確認の後、手順3の上限確認の前)で、新しい図面の行を追記するのと同じ処理の中で、その行を **論理削除**(`deleted=TRUE`・`deletedBy`・`deletedAt`。`deletePhoto` と同じ)する。すでに削除済みならそのまま(エラーにしない)。上限確認では、消す行を数えない(5枚あっても書き直せる)。`touch` は1回。冪等: 同じ `photoId` の再送は手順2で成功する(消す処理は繰り返さない)。
   - `markers` の要素は `{ "itemId","label","x","y","fixed" }`。`fixed` は省略可の bool(それ以外の型は `FIELD_INVALID`、path=`markers`)。保存は `itemId`/`label`/`x`/`y`/`fixed` だけ。
+- **写真への文字の書き込み(版1.17.0。§7.8。REQUIREMENTS §22-C)**:
+  - `kind="photo_text"`: `basePhotoId` は必須(`p_` の id で `photoId` と違うこと)。`side` は `self`/`qa`(`prime` は `FIELD_INVALID`、path=`side`)。`itemId` は必須(検査写真と同じ検査)。`markers`・`replaces` は null/省略。`texts` は **配列(1〜3件)**、各要素 `{ "text","x","y","size","color" }`: `text` は前後の空白を除いて1〜30文字(改行を含まない)、`x`・`y` は 0 以上 1 以下の数(文字の枠の左上の位置。画像に対する割合)、`size` は `s`/`m`/`l`、`color` は `white`/`red`/`yellow`。1つでも不正なら `FIELD_INVALID`(path=`texts`)。保存は `text`(前後の空白を除いたもの)/`x`/`y`/`size`/`color` だけ。他の種別で `texts` が null/省略以外なら `FIELD_INVALID`(path=`texts`)。
+  - **元の写真の検査**: `basePhotoId` の行が **すでにあれば**、`kind=photo`・同じ `recordId`・同じ `side`・同じ `itemId`・**撮影者が認証済みユーザー**・未削除であること(違えば `FIELD_INVALID`、path=`basePhotoId`。=他人の写真には書けない)。**まだ無いときは受け付ける**(写真は並行して送るので、元の写真が後から届くことがある。読むときに元の写真が無い・合わない文字入りの画像は使わない)。
+  - **権限・状態**: 検査写真の `uploadPhotoChunk` と同じ(§4.1。その side が編集できる間)。**ラウンドは問わない**(前の回の自分の写真にも書ける。ユーザー決定 2026-11-14)。容量・JPEG・SHA-256・サムネ・冪等の検査は検査写真と同じ。**写真の上限(`photoMaxPerItem`)・図面の上限の数に含めない**。Driveのファイル名は `{recordId}_{itemId}_{side}_{photoId}_text.jpg`。
+  - **最新の1枚だけ有効**: ロック内で行を追記するとき、同じ `basePhotoId` の未削除の `photo_text` の行のうち、`takenAt` が新しい行の `takenAt` 以下のものを論理削除する(`deletedBy`=認証済みユーザー)。新しい行より `takenAt` が新しい未削除の行がすでにあれば、**新しい行は削除済み(`deleted=TRUE`)として追記する**(古い保存が後から届いても最新を上書きしない)。応答は成功(`photo` は元の写真の PhotoMeta ではなく、追記した行の情報 `{photoId, kind:"photo_text", basePhotoId, texts}`)。
+  - **`RecordDetail`**: `items[].photos` の各写真(`kind=photo`)に `text` を付ける=同じ `basePhotoId` の未削除の `photo_text` の行のうち `takenAt` が最も新しいもの(同じなら `photoId` の大きい方)。元の写真と `itemId`・`side`・撮影者が合わない行は使わない。
 - **図面の上限(版1.6)**: 記録×side あたり未削除の図面は **5枚まで**(固定値。Config にしない)。超えるとき `PHOTO_LIMIT`(`{max:5}`)。図面は `photoMaxPerItem` の数に **含めない**(項目の写真枚数にも数えない)。逆に、検査写真は図面の数に含めない。
 - 図面も **本体 `bytes` ≤ `photoMaxBytes`**・JPEG・SHA-256・サムネ(§7.3 の検査)は検査写真と同じ。冪等性は `photoId` 単位(既存行の一致条件に `kind` も加える。不一致は `PHOTO_INVALID`)。Driveのファイル名は `{recordId}_drawing_{side}_{photoId}.jpg`。
 - **モード**(版1.4): **単発モード** = `total=1` かつ `index=0`。1リクエストで検証・組立・Drive保存・`Photos` 追記まで完了し `complete:true` を返す(CacheServiceを使わない)。`thumb` は同じリクエストに含める(`index===0` のとき必須、という従来の規則のまま)。**分割モード** = `total` 2〜12(後方互換。従来どおり)。`total=1` で `index≠0`、`index>=total`、`total` が1〜12の整数でない → `VALIDATION_FAILED`(`FIELD_INVALID`、`path`=`index`/`total`)。
@@ -1243,12 +1252,13 @@ params:
 - 権限: §4.1(`side`別。**図面も同じ権限・同じ状態条件**)。`itemId` は `side=prime` と `kind=drawing` で空、それ以外は必須(記録の項目に存在し `audience` が合うこと)。
 - エラー: `NOT_FOUND`/`FORBIDDEN_*`/`RECORD_LOCKED`/`NOT_CLAIMER`/`STATE_CONFLICT`(side=primeでqa_okでない)/`VALIDATION_FAILED`(`FIELD_INVALID`)/`PHOTO_*`/`CHUNK_MISSING`(分割のみ)/`LOCK_TIMEOUT`/`DRIVE_ERROR`。
 
-**deletePhoto** ★ Q `{ "photoId" }` → `{ "photoId", "deleted":true }`(論理削除。撮影者本人・`photo.round == record.round`・そのsideが編集可能な間のみ。他ラウンドの写真は消せない)。**削除済みの写真は `NOT_FOUND`**(存在しない `photoId` と同じ扱い。権限判定より先に評価し、削除済みかどうかを他人に知らせない)。エラー: `NOT_FOUND` / `FORBIDDEN_TEAM` / `RECORD_LOCKED`。
+**deletePhoto** ★ Q `{ "photoId" }` → `{ "photoId", "deleted":true }`(論理削除。撮影者本人・`photo.round == record.round`・そのsideが編集可能な間のみ。他ラウンドの写真は消せない)。**版1.17.0**: ①`kind=photo_text` の行(文字を全部消す=元の写真に戻す)は、撮影者本人・そのsideが編集可能な間なら **ラウンドを問わず** 消せる。②検査写真(`kind=photo`)を消すときは、同じ処理の中でその写真の未削除の `photo_text` の行もすべて論理削除する。**削除済みの写真は `NOT_FOUND`**(存在しない `photoId` と同じ扱い。権限判定より先に評価し、削除済みかどうかを他人に知らせない)。エラー: `NOT_FOUND` / `FORBIDDEN_TEAM` / `RECORD_LOCKED`。
 
-**getPhotoThumbs** `{ "photoIds":[最大20] }` → `{ "photos":[ {"photoId","dataUrl":"data:image/jpeg;base64,…"} ], "missing":["p_…"] }`(権限のない/存在しないIDは `missing`)
+**getPhotoThumbs** `{ "photoIds":[最大20] }` → `{ "photos":[ {"photoId","dataUrl":"data:image/jpeg;base64,…"} ], "missing":["p_…"] }`(権限のない/存在しないIDは `missing`)。**版1.17.0**: `kind=photo_text` の行の id も取れる(未削除で記録が見られれば)
 
 **getPhoto** `{ "photoId" }` → `{ "photoId", "dataUrl":"data:image/jpeg;base64,…", "width", "height" }`(本体。1枚ずつ。タイムアウト60秒)。エラー: `NOT_FOUND`。
 - **版1.15.0**: `{ "photoId", "part":"base" }` で、図面 `photoId`(未削除の `kind=drawing`)の**土台の画像**(`basePhotoId` の行の本体。削除済みの前の図面でもよい)を返す。応答の `photoId` は図面の id のまま。図面が見られない・図面に `basePhotoId` が無い・土台の行がまだ無い → `NOT_FOUND`。`part` は省略か `"base"` だけ(他は `FIELD_INVALID`、path=`part`)。`part` なしで `drawing_base` の行を指定したときは `NOT_FOUND`。
+- **版1.17.0**: `kind=photo_text` の行の id(未削除)も `part` なしで取れる(文字入りの本体)。元の写真の id を指定すれば、従来どおり元の写真(文字なし)を返す。
 
 #### 5.4.5 元請向けPDF(詳細は §10)
 
@@ -1614,6 +1624,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 ### 7.6 表示とキャッシュ
 - 一覧・詳細のサムネは `getPhotoThumbs`(1回20枚まで)で取得し、IndexedDB `photoCache` に保存(LRU 300枚)。未送信の写真は `photoBlobs` のローカルサムネを使う。
 - 拡大表示は `getPhoto`(本体)を都度取得し、`photoCache` に最大30枚保持。拡大画面にスタンプ文字列(`stampText`)を文字としても表示する。
+- **版1.17.0**: `text` のある写真は、サムネ・拡大表示とも **文字入りの画像**(`text.photoId`)を出し、サムネの隅に小さな「文」の印(`.tbadge`。`aria-label` に `photo.has_text`)を付ける(§7.8)。
 - 写真ルール: 職長の提出(S06/S07)では、NG項目は写真と備考が必須、重点項目(`key`)は `ok` でも写真必須(§5.3.1)。**QA側(S10)は写真任意**(NGは備考と重さが必須。写真が無くても判定できる)。**送信前チェックはクライアントも同じ `rule` 名で行う**(提出ボタンの前に赤枠表示)。
 
 ### 7.7 図面(確認箇所の書き込み)(版1.6。ユーザー決定)
@@ -1671,6 +1682,34 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 - **画面の先出し(§8.11)**: 「登録」で、前の図面をすぐ隠し(削除の先出しと同じ `work.deletedPhotos`)、新しい図面のサムネを出す。送信が確定失敗したら、新しい図面を失敗表示にし、前の図面を元に戻す(§8.11.4 の削除の失敗と同じ扱い)。
 - **PDF の凡例**(§10.2c・§10.5.4): `markers` の全部(`fixed` を含む)を従来どおり出す。`fixed` は表示に影響しない。
 - **できないこと**: 他人の図面の書き直し、`drawing_base` の行を一覧で見ること(「印なしで見る」は出さない。ユーザー決定)。
+### 7.8 写真への文字の書き込み(版1.17.0。段階2b。REQUIREMENTS §22-C。ユーザー決定 2026-11-13〜14)
+
+**1. 対象と人**: **検査写真(`kind=photo`、`side=self`/`qa`)だけ**(図面・元請サイン証跡は対象外)。書けるのは **その写真を撮った本人だけ**、その side が編集できる間(職長=`draft`/`fix`、管理者=確認中の自分。§4.1)。**前の回の自分の写真にも書ける**。管理者は職長の写真に書けない(他人の写真は変えない)。提出後は書けない(差し戻しで再び書ける)。
+
+**2. 保存のしかた(方式ア)**: 端末で、元の写真(スタンプ入り)に文字を焼き込んだJPEGを作り、**`kind=photo_text` の行**として検査写真と同じ経路(outbox の `uploadPhotoChunk`。単発)で送る。`basePhotoId`=元の写真、`texts`=書いた文字(後から直すための元データ)。**元の写真はそのまま残す**。直したら新しい `photo_text` の行を送り、サーバーが前の行を消す(§5.4.4。最新の1枚だけ有効)。**文字を全部消して保存** = 有効な `photo_text` の行を `deletePhoto`(元の写真に戻る)。端末にまだ送っていない `photo_text` があれば、その outbox の行(送信中でなければ)と本体を消してから新しいものを積む。
+
+**3. 入口(2つ)**:
+- **撮った直後の確認画面(M2。検査写真だけ)**: 「撮り直す」「回転」「使う」に加えて **「文字を書く」**(`photo.add_text`)。押すと文字の画面(M12)を開き、保存すると確認画面のプレビューが文字入りに変わり、ボタンは「文字を直す」(`photo.edit_text`)になる。「使う」で、元の写真 → 文字入りの画像 の順に outbox に積む。**文字を書いた後に「回転」を押すと、書いた文字は消える**(`photo.text_cleared` を出す。回してから書き直す)。「撮り直す」でも消える。
+- **写真の拡大表示(M3)**: 自分が撮った写真で、上の1の条件を満たす間、**「文字を書く」**(文字なし)/**「文字を直す」**(文字あり)を出す。送信前の写真でも出す。
+
+**4. 文字の画面(M12)**:
+- 元の写真(文字なし)を画面いっぱいに出す(縦横比はそのまま)。**元の写真の本体**: 端末に残っていればそれ(`photoBlobs`)、無ければ `getPhoto {photoId: 元の写真}`。取れない(圏外・`NOT_FOUND`)ときは `photo.original_unavailable`(元の写真を読み込めません。電波のよい所で、しばらくしてからやり直してください)を出し、M12 を開かない。
+- 今の文字(`text.texts`)があれば、同じ位置・大きさ・色で出す(動かせる・直せる・消せる)。
+- **「文字を追加」**(`text.add`): 文字の入力欄(`text.input`。30文字まで。1行)、大きさ(`text.size_s`=小・`text.size_m`=中・`text.size_l`=大)、色(`text.color_white`=白(黒縁)・`text.color_red`=赤・`text.color_yellow`=黄)を選ぶ小さなシートを出し、「OK」で写真の上(真ん中)に置く。**3つまで**(4つ目は `text.max`=文字は3つまでです を出し、ボタンを無効にする)。空・空白だけは置かない。
+- 置いた文字を **タップで選ぶ**(枠を出す)→ 選んだ文字を **指で動かせる**。選んだ文字には「直す」(`text.edit`。入力のシートを今の値で開く)・「消す」(`text.delete`)を出す。
+- **動かせる範囲**: 文字の枠が画像の中に収まり、**スタンプの帯に重ならない**(枠の下端 ≤ 帯の上端)。帯の高さは §7.2 と同じ計算(純関数 `KW.photo.stampBandHeight(width, height, stampText)`)。範囲の外に出そうなら端で止める(純関数 `KW.photo.clampTextBox(box, imgW, imgH, bandH)` → 直した `{x,y}`)。
+- **文字の描き方**(焼き込みと画面で同じ。純関数 `KW.photo.textStyle(size, color, imgH)` → `{fontPx, fill, stroke, strokePx}`): 太字の sans-serif、文字の高さ = 画像の高さ × **小 0.045・中 0.065・大 0.09**(最小 14px)。白=塗り `#FFFFFF`・縁 `#000000`(太さ=文字の高さ×0.12)、赤=塗り `#E60012`・縁 `#FFFFFF`(太さ=文字の高さ×0.08)、黄=塗り `#FFD400`・縁 `#000000`(太さ=文字の高さ×0.08)。`x`,`y` は文字の枠の左上(割合)。枠の幅は文字の描画幅、高さは文字の高さ×1.2。
+- **「保存」**: 元の写真の本体(元の寸法)に文字を焼き込み、検査写真と同じ符号化(`photoJpegQuality` から始めて `photoMaxBytes` に収める。§7.3)・サムネ(長辺 `photoThumbEdge`)・SHA-256 を作る。文字が0個なら、文字入りの画像を作らず「文字を全部消す」として扱う(上の2)。「キャンセル」は何も変えない。
+- 文言はすべて辞書経由(ja/id)。375px で横スクロールなし。ボタンのタップ領域は44px以上。
+
+**5. 表示**:
+- 写真の一覧(S06/S08/S10 の写真の並び)・拡大表示は、`text` があれば文字入りの画像を出し、サムネの隅に「文」の印(§7.6)。送信前の文字入りの画像は端末の画像を使う(先出し。§8.11.5)。
+- 管理者(S10)・S08 でも、職長の写真は文字入りで見える(書くことはできない)。
+
+**6. PDF(§10.2b-B・§10.5.5)**: 写真のブロックの画像は、その写真に有効な `photo_text` の行があれば **その行の本体(`driveFileId`。読めなければその行の `thumbFileId`)** を使う。無ければ元の写真(従来どおり)。並び・枚数・情報欄は元の写真で決める(文字入りの画像を別の写真として数えない)。
+
+**7. できないこと**: 図面・元請サイン証跡への書き込み、他人の写真への書き込み、元の写真の削除なしに文字入りの画像だけを残すこと(元の写真を消すと文字入りの画像も消える=§5.4.4 `deletePhoto`)。
+
 ---
 
 ## 8. オフライン・再送・競合・下書き
@@ -2046,7 +2085,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | `msg.*` | メッセージ | `msg.offline_required`,`msg.stop_queued_call`,`msg.update_available`,`msg.pin_remaining` |
 | `err.<CODE>` | §5.3の全エラーコード+`err.network`,`err.camera_denied`,`err.photo_too_large` | |
 | `rule.<RULE>` | §5.3.1の全rule | `rule.PHOTO_REQUIRED` |
-| `photo.*` `outbox.*` `admin.*` `pin.*` `time.*` | 各機能の文言 | `time.min_ago`=「{n}分前」。**版1.16.0**: `photo.turn_landscape`=横向きにして撮ってください(id `Putar ponsel ke posisi horizontal untuk memotret`) |
+| `photo.*` `outbox.*` `admin.*` `pin.*` `time.*` | 各機能の文言 | `time.min_ago`=「{n}分前」。**版1.16.0**: `photo.turn_landscape`=横向きにして撮ってください(id `Putar ponsel ke posisi horizontal untuk memotret`)。**版1.17.0**: `photo.add_text`=文字を書く(id `Tulis teks`)、`photo.edit_text`=文字を直す(id `Ubah teks`)、`photo.has_text`=文字あり(id `Ada teks`)、`photo.text_badge`=文(id `T`)、`photo.text_cleared`=回転したので、書いた文字を消しました(id `Teks dihapus karena foto diputar`)、`photo.original_unavailable`=元の写真を読み込めません。電波のよい所で、しばらくしてからやり直してください(id `Foto asli tidak dapat dimuat. Coba lagi nanti di tempat dengan sinyal baik.`)、`text.add`=文字を追加(id `Tambah teks`)、`text.input`=文字(30文字まで)(id `Teks (maks. 30 karakter)`)、`text.size`=大きさ(id `Ukuran`)、`text.size_s`=小(id `Kecil`)、`text.size_m`=中(id `Sedang`)、`text.size_l`=大(id `Besar`)、`text.color`=色(id `Warna`)、`text.color_white`=白(id `Putih`)、`text.color_red`=赤(id `Merah`)、`text.color_yellow`=黄(id `Kuning`)、`text.edit`=直す(id `Ubah`)、`text.delete`=消す(id `Hapus`)、`text.max`=文字は3つまでです(id `Maksimal 3 teks`)、`text.title`=写真に文字を書く(id `Tulis teks pada foto`) |
 | `drawing.*` | 図面(§7.7)の文言(版1.6) | `drawing.add`=図面を追加、`drawing.title`=図面、`drawing.pick_item`=番号を選んでタップ、`drawing.delete_mark`、`drawing.undo`、`drawing.save`、`drawing.zoom`、`drawing.rotate`、`drawing.hint`(=確認した箇所の番号を図面に書き込みます)。`err.drawing_unreadable` も追加。**版1.14.0**: `drawing.shoot`=撮影する(id `Ambil foto`)、`drawing.pick`=写真から選ぶ(id `Pilih dari galeri`)、`drawing.camera_fallback`=カメラが使えません。「写真から選ぶ」から取り込んでください(id `Kamera tidak dapat digunakan. Silakan ambil dari "Pilih dari galeri".`)。インドネシア語は暫定訳(P-22)。`drawing.add` は残す(2つのボタンの欄の `aria-label`)。**版1.15.0**: `drawing.rewrite`=書き直す(id `Gambar ulang`)、`drawing.append`=書き足す(id `Tambah tanda`)、`drawing.base_unavailable`=元の画像を読み込めません。電波のよい所で、しばらくしてからやり直してください(id `Gambar asli tidak dapat dimuat. Coba lagi nanti di tempat dengan sinyal baik.`)、`drawing.attn_ng`=NGあり(id `Ada NG`)、`drawing.attn_photo`=写真あり(id `Ada foto`)、`drawing.attn_note`=コメントあり(id `Ada komentar`)。**版1.15.1**: `drawing.attn_measure`=測定点あり(id `Ada titik ukur`) |
 
 - **段階別の上書きキー(版1.9)**: 出来形の記録だけ語を変えたいときは、基キーに `@<stage>` を付けた上書きキーを辞書に置く(ja/id の両方)。API `ts(key, stage, params?)`: `stage` が空でなく `<key>@<stage>` が辞書にあればそれ、無ければ `t(key, params)`。ステータスチップ・ボタン・トースト・履歴ラベル・確認文で `approved` や元請サインの語を出すときは、その記録の `stage` を渡す。上書きキーは当面 `@post_demold` だけ:
@@ -2259,7 +2298,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 - **大きさ(名目。doc 方式の実効値は §10.5.5)**: ブロックの高さ **81mm**(版1.14.1。旧84mm)、列幅 **写真 110mm / 情報欄 76mm**(合計186mm)。`<colgroup>` と `table-layout:fixed` で固定。
 - **写真の枠**: 写真のセルの内側の余白は **約0.5mm**。写真は **枠 109×80mm(版1.14.1。旧109×83mm)の中で、縦横比を保ったまま最大まで大きく**表示する(`scale = min(109/幅, 80/高さ)`、幅・高さは `Photos.width/height`。**`<img>` に `width` と `height` を mm(小数2桁)で両方指定**する。`object-fit` は使わない)。例: 横長16:9 → 109×61.31mm、4:3 → 106.67×80mm、縦長9:16 → 45×80mm、縦長3:4 → 60×80mm。`Photos.width/height` が正の数でないときは 4:3 の横長として扱う(106.67×80mm)。写真はセルの中で上下左右とも中央に置く。
 - **HTML方式だけの高さ(版1.14.0)**: HTML方式は用紙がレターサイズになる(§10.5。本文の高さ約255mm)ため、81mm×3 と見出しが1ページに収まらない。**HTML方式ではブロックの高さを 80mm、写真の枠を 109×79mm** にする(列幅・内容・並びは同じ)。doc 方式(A4)は上の 81mm・109×80mm。
-- **写真の画像は本体を使う(版1.14.0。REQUIREMENTS §22-E。旧: サムネを拡大)**: `Photos.driveFileId`(本体。長辺 `photoMaxEdge`=1280px)を読む。本体が読めないとき(削除済み・権限・例外)は **`thumbFileId`(サムネ)** を使う。どちらも読めなければ写真のセルは空(従来どおり)。**1つのPDFで読む本体の合計が `REPORT_PHOTO_MAIN_MAX_BYTES`(定数。**20,000,000 バイト**)を超えたら、残りの写真はサムネを使う**(PDFの大きさと生成時間の上限。1枚約300KB なら60枚で約18MB で、通常は全部本体になる)。サムネを使った写真には何も注記しない。定数は Report.gs に1か所(HTML方式・doc 方式で共通)。
+- **写真の画像は本体を使う(版1.14.0。REQUIREMENTS §22-E。旧: サムネを拡大)**: `Photos.driveFileId`(本体。長辺 `photoMaxEdge`=1280px)を読む。**版1.17.0: その写真に有効な文字入りの画像(`photo_text`。§7.8-6)があれば、その行の `driveFileId`(読めなければその行の `thumbFileId`)を読む**。本体が読めないとき(削除済み・権限・例外)は **`thumbFileId`(サムネ)** を使う。どちらも読めなければ写真のセルは空(従来どおり)。**1つのPDFで読む本体の合計が `REPORT_PHOTO_MAIN_MAX_BYTES`(定数。**20,000,000 バイト**)を超えたら、残りの写真はサムネを使う**(PDFの大きさと生成時間の上限。1枚約300KB なら60枚で約18MB で、通常は全部本体になる)。サムネを使った写真には何も注記しない。定数は Report.gs に1か所(HTML方式・doc 方式で共通)。
 - **情報欄の内容(上から。版1.14.0 で改訂。REQUIREMENTS §22-F。旧: 実測の値と要約の行があった)**:
   1. 項目No.と項目文: `No.{N} {★}{textJa}`(太字。★は重点項目だけ)
   2. 結果の行: `{1次検査側のラベル}: {結果}{(重さ)}{ ▲許容超n件} / {承認側のラベル}: {結果}{(重さ)}{ ▲許容超n件}`。ラベルは職長の記録=`職長`/`管理者`、管理者・責任者の記録=`1次検査`/`承認`(§10.2e)。結果は 合 / NG / 該当なし(未入力は `-`)。NG は赤・太字で、重さ(`selfSeverity`/`qaSeverity`=軽微/重大)を括弧で付ける。**`▲許容超n件`** は、その側の実測(§10.2d-1。`selfValues`/`qaValues`)に許容超の値が1つ以上あるときだけ、**その側の結果の後ろ**に半角スペース1つを挟んで出す(n=§10.2d-4 の `overCount`)。太字・`#CC0000`(HTML は §10.2d-6 と同じ `<span class="over" …>`)。許容超が無い側・許容なしの側・値の無い側には出さない。**判定には影響しない**(§10.2d の原則①)。
@@ -2781,6 +2820,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-DRAW-10(版1.15.0。§5.4.4・§7.7-5。mock と harness): ①`kind=drawing_base` を送ると成功し、`getRecord` の `drawings`・`items[].photos`・`primePhotos` に出ない。図面の上限(5枚)にも、項目の写真の上限にも数えない。`drawing_base` に `itemId`・`markers`・`basePhotoId`・`replaces`・`side=prime` を付けると `FIELD_INVALID`(path は各項目名)。②`basePhotoId` 付きの図面: PhotoMeta に `basePhotoId` が出る。土台の行がまだ無くても成功。土台の行が別の記録・別の side・`kind=photo` なら `FIELD_INVALID`(path=`basePhotoId`)。`photoId` と同じ値も同じ。③`getPhoto {photoId:図面, part:'base'}` が土台の本体を返す(削除済みの前の図面が土台でも返す)。土台が無い・まだ届いていない → `NOT_FOUND`。`part` なしで `drawing_base` の id → `NOT_FOUND`。`part:'x'` → `FIELD_INVALID`。④`replaces`: 図面が5枚の状態で `replaces` 付きの6枚目が成功し、前の図面が削除済み(`deletedBy`=本人)・未削除の図面は5枚のまま。`Records.version` は1つだけ増える。同じ `photoId` の再送は成功し、他の図面を消さない。他人の図面・別の side・`kind=photo`・前のラウンドの図面を `replaces` にすると `FIELD_INVALID`(path=`replaces`)。すでに削除済みの図面を `replaces` にしても成功(何も消さない)。⑤`markers` の `fixed`: true/false/省略は保存され PhotoMeta に出る(省略は出さないか false)。bool 以外は `FIELD_INVALID`(path=`markers`)。⑥元請PDF(HTML・doc の両方)に `drawing_base` の画像が出ず、`fixed` の印も凡例に出る。
 - U-DRAW-11(版1.15.0。ユニット。§7.7-2): `KW.photo.drawingAttention` が {result:'ng'}→level `ng`・ng true、{result:'ok', photoCount:1}→`info`・photo true、{result:'na', note:'あ'}→`info`・note true、{result:'ng', photoCount:2, note:'x'}→`ng` で photo・note も true、{result:'ok'}・{result:'na'}・{}→`dim`、空白だけのコメントは note false。**版1.15.1**: {result:'ok', valueCount:2}→`measure`・measure true、{result:'ok', valueCount:0}→`dim`、{result:'ng', valueCount:3}→`ng`・measure false、{result:'ok', photoCount:1, valueCount:1}→`info`・measure true、{result:'na', valueCount:1}→`dim`。
 - U-MEAS-01(版1.11.0。ユニット。`measureView_`=§10.2d-4。`tests/unit`。Report.gs を `vm` で評価するか、純関数を別ファイルに置くなら ReportDoc.gs も同じ関数を呼ぶこと。関数は `Math`/`Number`/`String` 以外のグローバルに依存しない): 入力 `row={ selfValues, qaValues, snapshot:{tol,unit} }` に対し期待(`valuesText` / `summaryText` / `overCount` / `n`): ①許容5・`[-5,-5,-2,-5,3,-1,5,-5]` → `-5、 -5、 -2、 -5、 +3、 -1、 +5、 -5` / `n=8 最小-5/最大+5/許容±5mm` / 0 / 8(**境界は許容内**)。②許容5・`[-6,0,5.5,2]` → `▲-6、 0、 ▲+5.5、 +2` / `n=4 最小-6/最大+5.5/許容±5mm ▲許容超2件` / 2。③許容3・`[-3,1]` → `-3、 +1` / `n=2 最小-3/最大+1/許容±3mm` / 0。④許容3・`[4]` → `▲+4` / `n=1 許容±3mm ▲許容超1件` / 1(n=1 は最小/最大を出さない)。⑤`tol:null`・`[2,-1,0]` → `+2、 -1、 0` / `n=3 最小-1/最大+2`(`▲`・`許容` を含まない)。⑥`tol` が `0`・`''`・`-1`・`'abc'`・欠落 → ⑤と同じ(許容なし)。`tol:2.5`・`[2.5,2.6]` → `+2.5、 ▲+2.6` / `n=2 最小+2.5/最大+2.6/許容±2.5mm ▲許容超1件`。⑦`tol:'5'`(数字の文字列)は許容5。⑧`[]`・`null`・`undefined`・`[null,'']`・`[NaN]` → **`null`**(その側は何も出さない)。⑨`['3','-2.5']` → `+3、 -2.5`。`['x',2]` → `+2` / `n=1`(無効な要素は数えない)。⑩`[-0,0]` → `0、 0` / `n=2 最小0/最大0`。⑪`unit:''`/欠落 → `mm`、`unit:'cm'` → `許容±5cm`。⑫`side:'self'` は `selfValues`・ラベル `職長`、`side:'qa'` は `qaValues`・ラベル `管理者`(同じ row で互いに影響しない)。⑬`values[i].over` と `overCount` が一致し、`values` は入力順(並べ替えない)。⑭呼ぶ前後で `row` を変更しない(副作用なし)。⑮`measureCell_(-3,2)` → `{v:-3,text:"-3",over:true}`、`measureCell_(2,2)` → `over:false`(境界)、`measureCell_("",2)`・`measureCell_(null,2)`・`measureCell_("x",2)` → `null`、`measureCell_(4,null)` → `over:false`。
+- C-TEXT-01(写真への文字。§5.4.4・§7.8 版1.17.0。mock・harness): ①田中の写真 P に `photo_text` T1(`texts` 2件)を送る → 成功、`getRecord` の P の `text.photoId`=T1・`texts` が保存どおり(前後の空白は除く)、P の項目の写真枚数は変わらない(`photoMaxPerItem` が5枚でも書ける)、T1 は `items[].photos` に単独で出ない。②T2(`takenAt` が新しい)を送る → T1 が削除済み・`text` は T2。③T1 より古い `takenAt` の T0 を後から送る → 成功するが削除済みで追記、`text` は T2 のまま。④`getPhotoThumbs`・`getPhoto` で T2 が取れ、`getPhoto` で P を指定すると元の画像(T2 と違う sha256)。⑤`deletePhoto` T2 → `text` が null、P は残る。⑥再び T3 を付けて P を `deletePhoto` → T3 も削除済み。⑦不正: `texts` 0件・4件・31文字・`size:'xl'`・`color:'blue'`・`x:1.2`・`side:'prime'`・`markers` あり → `FIELD_INVALID`(path どおり)。`kind=photo` に `texts` → `FIELD_INVALID`(path=`texts`)。⑧佐藤(確認中)が田中の写真に `basePhotoId` を向けて送る → `FIELD_INVALID`(path=`basePhotoId`)。別の項目・別の side の写真を指す → 同じ。⑨元の写真がまだ無い `basePhotoId` → 受け付け、後から P が届けば `text` に出る。⑩提出後(`submitted`)の田中 → `RECORD_LOCKED`。差し戻し(`fix`、round 2)後は、round 1 の自分の写真に書ける・その `photo_text` を `deletePhoto` できる。⑪PDF(harness の `lastReportHtml`)で、文字のある写真のブロックが文字入りの画像のファイルを使う(mock は省略)。
 - C-ADMIN-01: `adminIssueInvite`(first/pinReset の整合・古いコードの失効)、`adminSetUserStatus(disabled)`→そのユーザーの全actionが `USER_DISABLED`、自分自身は変更不可、`adminSetAbsence`/`adminCancelAbsence`、`adminGetJoinInfo` の `joinUrl` 形式。
 
 ### 12.4 ユニットテスト(U-)
@@ -2799,6 +2839,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-PHOTO-03(モード選択。対象は `planUpload`): `L ≤ photoSingleMaxChars` → `total=1`(`photoMaxBytes` 600,000 の最大 `L=800,000` も単発)。`L > photoSingleMaxChars` → 分割。`config` に `photoSingleMaxChars` が無い → 常に分割(旧サーバー互換)。送信直前(`nextIndex=0`)に config を見て決め直せるが、`nextIndex>0` では変えない。
 - U-PHOTO-04(撮った画像の向き。§7.1 版1.14.4): `deviceAngle` が {x:9.8,y:0}→90、{x:−9.8,y:0}→270、{x:0,y:9.8}→0、{x:0,y:−9.8}→180、{x:1,y:2}→null(3.0未満)、不正な値→null。`screenAngle` が 90→90、−90→270、270→270、未定義→`window.orientation`、両方無し→0。`captureRotation` が (90,0)→270、(270,0)→90、(90,90)→0、(180,0)→180、(null,0)→0。`motionSign` が iPhone/iPad の UA→−1、それ以外→1、`cfg.MOTION_SIGN` が 1/−1 ならそれ。
 - U-PHOTO-05(縦持ちでシャッターを止める。§7.1 版1.16.0): `portraitBlocked` が、null→false、{x:0,y:9.8}→true、{x:0,y:-9.8}(上下逆の縦)→true、{x:9.8,y:0}・{x:-9.8,y:0}(左右どちらの横)→false、{x:1,y:2}(平らに近い。最大3.0未満)→false、{x:5,y:6}(縦の軸から約40°)は wasBlocked=false→false・wasBlocked=true→true、{x:6,y:5}→false(wasBlocked に依らず)、{x:3,y:7}(約23°)→true、x・y が数でない→false。
+- U-TEXT-01(写真への文字。§7.8 版1.17.0): ①`textStyle('m','white',960)` → `fontPx` 62(=960×0.065 を四捨五入)・塗り `#FFFFFF`・縁 `#000000`・縁の太さ 7(=62×0.12 を四捨五入)。小 960→43、大 960→86、高さ 200 の小 → 14(最小)。赤・黄の色と縁。②`clampTextBox({x:-0.1,y:0.5,w:0.3,h:0.06}, 1280, 960, 77)` → x=0。右にはみ出す(x=0.9,w=0.3)→ x=0.7。下の帯に重なる(y=0.95,h=0.06。帯 77px=約0.080)→ y=1−0.080−0.06。帯の高さが0なら y=0.94。③`stampBandHeight` が §7.2 の帯と同じ(1行=max(28, 高さ×0.08)、2行のとき2行分)。④入力の検査(`KW.photo.validTexts(texts)`): 0件・4件・31文字・空白だけ・改行あり・x=1.1・size='xl'・color='blue' は不正、3件・30文字・x=0・y=1 は正しい(サーバーと同じ規則)。
 - U-TIME-01: JST整形が端末TZ(UTC/America/Los_Angeles/Asia/Jakarta)に依らず同一。
 - U-I18N-01: ja/idのキー集合が一致・値が空でない・コード内の `t('…')` の参照キーが全て存在・`err.*`/`rule.*`/`ev.*`/`st.*` が網羅。HTML/JSに日本語リテラルが無い(`i18n.js`・コメント除く)。**版1.9**: 段階別の上書きキー(`<基キー>@<stage>`。§9.4)は網羅検査の数え上げから除き、基キーがあること・ja/id の両方にあることだけを検査する。`ts(key,stage)` は上書きキーがあればそれ、無ければ基キーを返す(`stage` が空・未知でも基キー)。
 - U-HASH-01: PINハッシュ・招待ハッシュ・`paramsHash`・`canonicalJSON` が `tests/fixtures/hash-vectors.json`(テスト担当がNodeで生成して固定)と mock・harness の双方で一致。
@@ -2823,6 +2864,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 
 - E-33 撮った画像の向き(版1.14.4。§7.1。mock。375px): ①`rotateCanvas` が時計回りに回す(4×2 の左上の赤い点が、90°で 2×4 の右上に、270°で左下に移る)。②S06 で M2 を開き、`devicemotion`({x:9.8,y:0})を送ってシャッター → 登録された写真が縦長(高さ>幅。中身は左へ90°)。③傾きを送らずにシャッター → 回らない(従来どおりフレームの向き)。④図面モードでも傾きの処理を通る(傾き {x:9.8,y:0} で縦長に回り、M10 を開く前の「縦長なら右へ90°」で横長に戻る)。登録でき、図面は横長。
 - E-35 縦持ちではシャッターを押せない(版1.16.0。§7.1。mock。ja と id、375px): ①S06 で M2 を開き `devicemotion`({x:0,y:9.8})を送る → 400ms 以内にシャッターが無効になり、`.camturn` に `photo.turn_landscape` が出て `photo.landscape_hint` が隠れる。②{x:9.8,y:0} を送る → 案内が消えてシャッターが有効、撮影して登録できる。{x:-9.8,y:0}(逆向きの横)でも有効。③{x:0.5,y:1}(寝かせた状態)→ 有効。④傾きを送らない(null)→ 有効で `photo.landscape_hint` が出る。⑤図面モードの M2 では {x:0,y:9.8} でもシャッターが有効。⑥文言は辞書経由・横スクロールなし。
+- E-36 写真への文字の書き込み(版1.17.0。§7.8。mock。ja と id、375px): ①職長が S06 で撮影 → 確認画面に「文字を書く」→ M12 で「文字を追加」(大・赤・`かぶり不足`)→ 置いて少し動かす → 保存 → 確認画面のプレビューが変わり「文字を直す」に変わる → 「使う」→ サムネに「文」の印、mock に `photo` と `photo_text`(`texts` 1件、`basePhotoId`=写真)。②拡大表示 →「文字を直す」→ 今の文字が出る。2つ目・3つ目を足すと「文字を追加」が無効、`text.max` が出る。1つを消して保存 → mock の有効な `photo_text` は新しい1行(前の行は削除済み)、`texts` 2件。③文字を全部消して保存 → `photo_text` は全部削除済み、サムネの「文」の印が消える。④文字をスタンプの帯へ動かしても帯の上で止まる(焼き込んだ画像の帯の部分に文字の色が無い)。⑤確認画面で文字を書いた後「回転」→ `photo.text_cleared`、プレビューは文字なし。⑥管理者が S10 で職長の写真を開くと文字入りで見え、「文字を書く」「文字を直す」が出ない。自分(管理者)の写真には出る。⑦提出後(S08)は出ない。⑧圏外で、送信済みで端末に本体が無い写真の「文字を直す」→ `photo.original_unavailable`。⑨文言は辞書経由・横スクロールなし。
 - E-34 図面の書き直し・書き足しと番号の見分け(版1.15.0。§7.7-2・§7.7-5。mock。ja と id、375px): ①職長で S06 の項目 A を NG(写真・コメントつき)、項目 B を OK・写真あり、項目 C をコメントだけ、他を OK にして「写真から選ぶ」→M10: A のボタンに赤い枠と NG の印、B に橙の枠とカメラの印、C に橙の枠と吹き出しの印、他のボタンは薄い(押せる)。②番号①を置いて登録 → outbox に `drawing_base` と `drawing` の2行、mock の Photos に両方あり、`getRecord.drawings` は1件で `basePhotoId` が `drawing_base` の id。③サムネ→M3 に「書き直す」→M10 に土台と印①が出て、①を動かし②を足して登録 → 図面欄のサムネは1枚のまま、mock では前の図面が削除済み・新しい図面の `basePhotoId` が同じ・`replaces` が前の id・`drawing_base` は1行のまま。④`basePhotoId` の無い図面(mock に直接作る)のサムネ→M3 に「書き足す」→M10 で前の印は選べない(タップしても選択されない)、新しい印を置いて登録 → `markers` に前の印(`fixed:true`)と新しい印、`basePhotoId`=前の図面の id。⑤提出後は M3 に「書き直す」「書き足す」が出ない。⑥圏外で「書き直す」→ `drawing.base_unavailable`。⑧(版1.15.1)OK で実測値のある項目のボタンが青い枠と定規の印。⑨(版1.15.1)前のラウンドの自分の図面(mock に直接作る)の M3 に「書き足す」が出て、登録すると前の図面は残り、図面が1枚増える(`replaces` なし、`basePhotoId`=前の図面の id)。⑦文言は辞書経由(ja/id)・横スクロールなし。
 - E-23 先出し(待たない。mock を `--latency 2000` で起動。版1.10): ①田中が S06 で項目の回答・実測・コメントを入力 → 画面(ボタンの選択・進捗バー・入力欄)が **300ms以内**に反映される(サーバー応答を待たない)。保存状態行は『送信待ち/送信中… → 送信済み ✓』と変わる。②`fix` の記録の S08 でコメントを追記して『追加』 → **500ms以内**に入力欄が空になり『送信待ちのコメント』に本文が出る。約2秒後に確定コメントに入れ替わってカードが消え、この間 `getRecord` の呼び出しが **0回**(Playwright のリクエスト監視)。③『追加』の直後に続けて別のコメントも追記できる。④ja/id、375pxで崩れない。
 - E-24 先出しの失敗(ロールバックと導線。版1.10): ①`/__mock/fail`(`mode:"error"`,`code:"RECORD_LOCKED"`,`match:"addNote"`,`next:1`)で追記が失敗 → カードが赤『送信できませんでした』+[再送][破棄]。『再送』で成功しカードが消える。もう一度失敗させて『破棄』 → 本文が入力欄に戻り outbox は0件。②`saveDraft` を同様に失敗(`RECORD_LOCKED`)→ S06 の上部に赤バナー『送信できなかった入力があります』+『他の人が先に状態を変えました。入力は端末に残っています』、入力値は画面に残る。『破棄』→確認ダイアログ→サーバーの値で再表示。③送信済みの写真を削除して `deletePhoto` を失敗させる → 写真が再表示され『削除できませんでした』が出る。④いずれの失敗のときも、ヘッダのバッジが赤『未送信 {n} ・要対応 {m}』、画面を問わず出るバナー『送信できていない操作があります』が出て、[確認する]で S20 へ行ける。解消するとバナーが消える。
@@ -2974,6 +3016,12 @@ katawaku-inspection/
 - フロント: ①図面欄の2つのボタン(`js/ui/drawings.js`)②M2 の図面モード(`js/ui/modals.js` の `camera` にモードを追加。スタンプなし・縮小なし・JPEG 0.92 の Blob を返す)③`KW.drawing.edit` が File だけでなく Blob も受け取れること ④i18n の3キー(ja/id)。SW のキャッシュ版を上げる。
 - テスト: C-REP-01・03・07・08 の改訂、C-REP-10 の新設(harness)、本体→サムネの上限のユニットテスト、E-14 の改訂、U-I18N-01(新しいキー)。
 
+版1.17.0 の責務(SPEC §2.9・§2.9a・§5.1(PhotoMeta)・§5.4.4・§7.6・§7.8・§9.4・§10.2b-B・§10.5.5・§12。段階2b=写真への文字の書き込み。**action 数(51)・エラーコード・Config・Events の kind は変更なし。`Photos` に列 `texts` を追加**=本番反映で `setupSheets` が必要):
+- バックエンド: ①`Schema.gs` に `texts`、`kind` に `photo_text` ②`uploadPhotoChunk` の `photo_text`(`basePhotoId`・`texts` の検査、ロック内で最新の1枚だけを有効にする)③`deletePhoto` の `photo_text`(ラウンドを問わない)と、写真の削除で文字入りの画像も消す ④`RecordDetail` の `text`、`getPhotoThumbs`・`getPhoto` で `photo_text` を取れる ⑤PDF(Report.gs・ReportDoc.gs)の写真の画像の選び方 ⑥`photo_text` を検査写真として数えない(`kind` が `photo` かどうかで判定している箇所の確認)。
+- mock: 上と同じ契約(C-TEXT-01)。
+- フロント: ①M12(`js/phototext.js` と `js/ui/` の画面。画面ごとに分ける)②M2 の「文字を書く」(検査写真だけ)③M3 の「文字を書く」「文字を直す」④写真の並びで文字入りの画像と「文」の印(`js/ui/components.js`)⑤outbox に積む・前の未送信の行を消す・全部消すときの `deletePhoto` ⑥純関数 `textStyle`・`clampTextBox`・`stampBandHeight`・`validTexts`(`js/photo.js`)⑦辞書(ja/id)⑧`sw.js` の版。
+- テスト: C-TEXT-01(mock・harness)、U-TEXT-01、E-36、U-I18N-01。
+
 版1.16.0 の責務(SPEC §7.1・§9.4・§12。段階2a=縦持ちでシャッターを止める・4:3。**API・シート・サーバーの変更なし**(画面だけ。本番反映は push だけ)):
 - フロント: ①`KW.photo.portraitBlocked`(`js/photo.js`)②M2 の判定・シャッターの無効化・`.camturn` の案内(`js/ui/modals.js`。検査写真だけ)③`startCamera` の 4:3 の条件 ④`photo.turn_landscape`(ja/id)と `turn` のアイコン ⑤`sw.js` の版を上げる。
 - テスト: U-PHOTO-05、E-35、U-I18N-01。
@@ -3055,6 +3103,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | P-49 | 元請PDFの実測の見せ方の細部(版1.11.0。ユーザー依頼 2026-10-20 の方向+設計判断。**細部はユーザー未確認**) | ①許容超は 値の絶対値>許容(境界は許容内)・許容は0より大きい数のときだけ「あり」(§10.2d-1)②表示は「▲+値」(赤太字)と要約 `n=… 最小/最大/許容±…`、許容超が1件以上なら `▲許容超n件`(§10.2d-2〜3)③職長と管理者は別の系列で混ぜない(§10.2d-1)④実測が無い項目は空欄・許容が無い項目は値と最小/最大だけ(§10.2d-5)⑤出来形にも同じ規則(§10.2d-7)⑥項目表は全列折り返し・実測列を24→46mm・旧注記は廃止(§10.2b-A)⑦図面の凡例は項目ごとの見出し行+番号行・6列・系列Sは図面を書いた側(§10.2c-3)。 | 本書の値で実装する。ユーザーが見て直すなら設計担当が SPEC を直してから実装 |
 | P-50 | 1次検査者と承認者の細部(版1.12.0。方針はユーザー決定 2026-11-04、**細部①〜⑤もユーザー確認済み 2026-11-04**。⑥はインドネシア語の暫定訳のみ未確認) | ①管理者・責任者の1次検査の記録は `team` を空にし、編集は本人だけ(同じ現場の他の管理者は1次検査側を書けない)②提出・30分経過の通知は責任者全員へ(QAへは送らない)③QA のボードの「確認待ち」から承認できない記録を除く ④職長に見せる範囲は詳細まで(承認者の下書きは `draft`/`submitted` のあいだ見せない=従来の職長と同じ)⑤PDF の欄名は管理者・責任者の記録だけ変える(職長の記録は従来どおり)⑥履歴の語 `ev.submitted`・`ev.verdict_ok` を役割を含まない語に変える(§6.9・§9.2c・§10.2e) |
 | P-51 | 責任者の現場管理の細部(版1.13.0。方針はユーザー決定 2026-11-10。細部①〜⑩も **2026-11-10 にユーザー確認済み**(「この案で実装へ」)。§14.2 の20) | ①代行者は作成時に1人以上必須(責任者自身も代行者に選べる)②主担当の交代=新しい主担当の追加で前の人は自動で外れる。主担当・最後の代行者は終了できない ③職長の班の変更=終了→追加。職長の担当の終了で参加も取り消し(QRから申請し直せる)④閉鎖で申請中の参加申請は却下(再開でも戻さない)⑤閉鎖後の元請待ちの記録は責任者だけが元請サイン記録・PDF作成。閉鎖中は管理者・職長にその現場が見えない ⑥現場名の重複は不可(閉鎖済みを含む)⑦アプリで登録できる役割は職長・管理者だけ。同じ氏名は注意のみ ⑧閉鎖で終了日を自動で入れない ⑨上限: 現場名40・階60個・工区20個・各10文字 ⑩インドネシア語は暫定訳 |
+| P-55 | 段階2b の細部(版1.17.0。方針はユーザー決定 2026-11-13〜14=REQUIREMENTS §22-C。**以下の細部はユーザー未確認**) | ①保存は別の行(`kind=photo_text`)で、列 `texts` を足す(`setupSheets` が必要)②最新の1枚だけ有効(`takenAt` で決める)③文字の大きさ 小・中・大=画像の高さの 4.5%・6.5%・9%(1280×960 なら約43・62・86px)④赤は縁が白、黄は縁が黒 ⑤確認画面で文字を書いた後に「回転」すると文字は消える ⑥文字は1行(改行なし)⑦文言のインドネシア語は暫定訳 | 実機で使いにくければ値を変える |
 | P-54 | 段階2a の細部(版1.16.0。方針はユーザー決定 2026-11-14=REQUIREMENTS §22-D。**以下の細部はユーザー未確認**) | ①縦持ちと判定するのは縦の軸から 35° 以内、止めるのをやめるのは横の軸から 45° 以内 ②寝かせた状態の境目は 3.0 m/s²(版1.14.4 と同じ。水平から約18°)③判定は 200ms ごと ④4:3 は検査写真・図面の両方で求める(図面は紙なので 4:3 のほうが合う)⑤文言のインドネシア語は暫定訳 | 実機で使いにくければ①〜③の値を変える |
 | P-53 | 段階1b の細部(版1.15.0。方針はユーザー決定 2026-11-13〜14=REQUIREMENTS §22-B。**以下の細部はユーザー未確認**) | ①書き足しの土台は前の図面の本体(印が焼き込み済み)で、`drawing_base` を作らない ②土台の行が後から届くことを許す(`basePhotoId` の行が無くても受け付ける)③土台が取れないときは書き直さない(案内だけ)④番号ボタンの色: NG=赤 `#CC0000`、写真・コメント=橙 `#E07B00`、その他は不透明度 0.45 ⑤コメントは空白だけなら「なし」⑥インドネシア語の新しい文言は暫定訳(P-22) |
 | P-52 | 写真・図面・記録表の改善 段階1a の細部(版1.14.0。方針はユーザー決定 2026-11-13=REQUIREMENTS §22。**以下の細部はユーザー未確認**) | ①本体の合計上限 `REPORT_PHOTO_MAIN_MAX_BYTES`=20,000,000 バイト(超えた分はサムネ)②HTML方式(レター用紙)だけブロック 80mm・枠 109×79mm ③doc 方式で収まらないときの予備値(行 81mm・枠の高さ 80mm)→**版1.14.1 で採用**(実PDFで最初の写真ページに2枚しか入らなかったため。ユーザー決定 2026-11-13)④写真の並びで同じ項目の中は 1次検査側→承認側、各 `takenAt` 順。項目に紐づかない写真は最後 ⑤M2 図面モードの JPEG 品質 0.92(縮小は M10 の 1800px)⑥カメラが使えないときは案内だけで、M2 の中にファイル選択を出さない ⑦インドネシア語の新しい文言は暫定訳(P-22)。生成時間は本番反映前に測る(§14.2 の21) |
@@ -3179,3 +3228,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-14 | 1.15.0 | ユーザー決定(2026-11-13〜14。REQUIREMENTS §22-B と追加の依頼)。**段階1b: 図面の書き直し・書き足しと、番号ボタンの見分け**。①§2.9: `Photos.kind` に `drawing_base`(図面の元の画像。見えない行)、列 `basePhotoId` を末尾に追加(§2.9a。`setupSheets` が必要)②§5.1 PhotoMeta: 図面に `basePhotoId`、`markers[].fixed`③§5.4.4 `uploadPhotoChunk`: `kind=drawing_base`、`basePhotoId`(行が後から届いてもよい)、`replaces`(ロック内で前の図面の論理削除と追記を1回で。上限に数えない)、`markers[].fixed`。`getPhoto` に `part:'base'`④§7.7-2: 番号ボタンの見分け(NG=赤枠、写真・コメントあり=橙枠と印、他は薄く。`drawingAttention`)⑤§7.7-5 新設: 保存のしかた(案ア)・M3 の「書き直す」「書き足す」・`fixed` の印・土台が取れないとき・先出し ⑥§9.4 新しいキー6つ ⑦§12: C-DRAW-10、U-DRAW-11、E-34 ⑧§13.2 版1.15.0 の責務、§14 P-53。action 数(51)・エラーコード・Config・Events の kind は変更なし。 |
 | 2026-11-14 | 1.15.1 | 実機の所見とユーザー決定(2026-11-14。REQUIREMENTS §22-B 版1.14.6)。§7.7-2 に「測定点あり」(`attn-measure`。OK で実測値あり=青い枠と定規の印)と `drawingAttention` の `valueCount`・`measure`。§7.7-5 に前のラウンドの自分の図面の書き直し・書き足し(前の図面は残し、新しく1枚追加。`replaces` なし。5枚なら出さない)。§9.4 に `drawing.attn_measure`。§12 の U-DRAW-11・E-34 に追加。**API・シート・サーバーの変更なし**(画面だけ) |
 | 2026-11-14 | 1.16.0 | ユーザー決定(2026-11-14。REQUIREMENTS §22-D 版1.14.7)。**段階2a: 縦持ちでシャッターを止める・4:3**。§7.1 に縦持ちの判定(`portraitBlocked`。寝かせたら止めない・逆向きの横も可・35°/45° のゆとり)、止めている間の画面(`.camturn`)、`getUserMedia` の 4:3。§9.4 に `photo.turn_landscape`。§12 に U-PHOTO-05・E-35。P-54。**API・シート・サーバーの変更なし** |
+| 2026-11-14 | 1.17.0 | ユーザー決定(2026-11-13〜14。REQUIREMENTS §22-C 版1.14.7)。**段階2b: 写真への文字の書き込み**。§2.9 に `kind=photo_text`・列 `texts`(`basePhotoId` を元の写真に使う)、§5.1 PhotoMeta の `text`、§5.4.4 の `photo_text` の受け付け(最新の1枚だけ有効・ラウンドを問わない・他人の写真は不可)と `deletePhoto`・`getPhotoThumbs`・`getPhoto`、§7.6 の「文」の印、§7.8(新設)、§9.4 の文言、§10.2b-B の画像の選び方、§12 に C-TEXT-01・U-TEXT-01・E-36。P-55。**action 数は変わらない。列の追加で `setupSheets` が必要** |
