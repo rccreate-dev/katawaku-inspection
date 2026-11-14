@@ -228,7 +228,14 @@
       function reload(opts) {
         return KW.data.loadDetail(id, opts).then(function (r) {
           if (!ctx.alive()) return;
-          if (r.detail) { detail = r.detail; cached = r.cached; draw(); }
+          if (r.detail) {
+            detail = r.detail; cached = r.cached; draw();
+            // 版1.18.0(§8.11.9-3): キャッシュで先に描いたときは、裏の getRecord で新しければ描き直す
+            C.revalidate(ctx, r, function (d) {
+              if (detail && typeof detail.version === 'number' && d.version <= detail.version) return;
+              detail = d; cached = false; draw();
+            });
+          }
           else if (!detail) {
             KW.clear(el);
             el.appendChild(C.banner('warn', t(r.error && r.error.code === 'NETWORK' ? 'err.network' : 'err.' + (r.error && r.error.code || 'NOT_FOUND'))));
@@ -245,7 +252,7 @@
           detail = row.detail; cached = false; draw();
         });
       }
-      reload({ maxAgeMs: 15000 });
+      reload({ maxAgeMs: 15000, cacheFirst: true });
       drawPending();
       ctx.on('poll:done', function () { if (!noteTyping()) reload(); });
       ctx.on('records:refresh', function (rid) { if (rid === id) reload(); });

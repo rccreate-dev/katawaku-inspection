@@ -124,6 +124,7 @@
   /*
    * 詳細を取得(オンラインなら最新。圏外/失敗ならキャッシュ)。{detail, cached, error}
    * opts.maxAgeMs: 書き込み応答の record を反映してから maxAgeMs 以内で、要約より古くなければ getRecord を呼ばずキャッシュで返す
+   * opts.cacheFirst: キャッシュの詳細があれば先に返し(fromCache)、裏の getRecord の結果を revalidate で渡す(§8.11.9-3)
    */
   function loadDetail(recordId, opts) {
     var cachedP = getRow(recordId);
@@ -133,11 +134,27 @@
         var ok = r && r.detail && r.freshAt && (Date.now() - r.freshAt) <= maxAge &&
           !(r.summary && typeof r.summary.version === 'number' && typeof r.detail.version === 'number' && r.detail.version < r.summary.version);
         if (ok) return { detail: r.detail, cached: false, fromCache: true };
-        return loadDetail(recordId);
+        return loadDetail(recordId, opts.cacheFirst ? { cacheFirst: true } : null);
       });
     }
     if (!KW.isOnline()) {
       return cachedP.then(function (r) { return { detail: r && r.detail, cached: true, error: r && r.detail ? null : { code: 'NETWORK' } }; });
+    }
+    // 版1.18.0(§8.11.9-3): キャッシュがあれば先に返し、裏で getRecord を呼ぶ。revalidate -> {detail, newer, error}
+    if (opts && opts.cacheFirst) {
+      return cachedP.then(function (r) {
+        if (!r || !r.detail) return loadDetail(recordId);
+        var shown = r.detail;
+        var revalidate = KW.api.call('getRecord', { recordId: recordId }).then(function (res) {
+          if (!res.ok) return { detail: null, newer: false, error: res.network ? { code: 'NETWORK' } : (res.error || { code: 'NETWORK' }) };
+          return putDetail(res.data.record).then(function (kept) {
+            kept = kept || res.data.record;
+            var newer = typeof kept.version === 'number' && !(typeof shown.version === 'number' && kept.version <= shown.version);
+            return { detail: kept, newer: newer, error: null };
+          });
+        }, function (e) { return { detail: null, newer: false, error: { code: 'NETWORK', message: String(e && e.message || e) } }; });
+        return { detail: shown, cached: false, fromCache: true, revalidate: revalidate };
+      });
     }
     return KW.api.call('getRecord', { recordId: recordId }).then(function (res) {
       if (res.ok) return putDetail(res.data.record).then(function (kept) { return { detail: kept || res.data.record, cached: false }; });

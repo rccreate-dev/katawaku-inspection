@@ -395,7 +395,7 @@
         }
       }
 
-      C.loadWork(id, { maxAgeMs: 15000 }).then(function (r) {
+      C.loadWork(id, { maxAgeMs: 15000, cacheFirst: true }).then(function (r) {
         if (!ctx.alive()) return;
         KW.clear(el);
         if (!r.detail) {
@@ -405,6 +405,15 @@
         }
         detail = r.detail; work = r.work; blobs = r.blobs; knownVersion = detail.version;
         drawAll();
+        // 版1.18.0(§8.11.9-3): キャッシュで先に描いたときは、裏の getRecord で新しければ差し替える。入力中なら作り直さない
+        C.revalidate(ctx, r.res, function (d) {
+          if (!detail || (typeof detail.version === 'number' && d.version <= detail.version)) return;
+          Promise.all([KW.outbox.forRecord(id), KW.data.photoBlobsFor(id)]).then(function (v) {
+            // 未送信・変更のある項目は端末側を優先して重ねる(mergeDraft)。打っている途中・保存待ちのときだけ見送る
+            if (!ctx.alive() || Object.keys(pending).length || headerPatch || C.typingIn(el)) return;
+            knownVersion = d.version; detail = d; blobs = v[1]; work = mergeDraft(detail, work, v[0]); drawAll();
+          });
+        });
       });
 
       // 状態変化・班内の他端末の変更
@@ -544,13 +553,29 @@
         });
       }
 
-      C.loadWork(id, { maxAgeMs: 15000 }).then(function (r) {
+      C.loadWork(id, { maxAgeMs: 15000, cacheFirst: true }).then(function (r) {
         if (!ctx.alive()) return;
         if (!r.detail) { KW.clear(el); el.appendChild(C.banner('warn', t('err.network'))); return; }
         detail = r.detail; work = r.work; blobs = r.blobs;
-        if ((detail.actions || []).indexOf('submitRecord') < 0) { KW.app.go('#/record/' + id, true); return; }
-        var v = KW.validate.validateSubmit(recFor(detail, work, blobs, 'self'));
-        if (v.length) { KW.app.go('#/record/' + id + '/edit?v=1', true); return; }
+        var away = null;
+        if ((detail.actions || []).indexOf('submitRecord') < 0) away = '#/record/' + id;
+        else if (KW.validate.validateSubmit(recFor(detail, work, blobs, 'self')).length) away = '#/record/' + id + '/edit?v=1';
+        // 版1.18.0(§8.11.9-3): キャッシュの詳細で戻す判定になったときは、裏の getRecord を待って判定し直す
+        // (送信済みの写真がまだキャッシュに載っていない等で、古い詳細だけを根拠に入力画面へ戻さない)
+        if (away && r.res && r.res.revalidate) {
+          r.res.revalidate.then(function (x) {
+            if (!ctx.alive()) return;
+            if (x.error) KW.app.go(away, true); else ctx.rerender(); // 届いた詳細は保存済み(freshAt)なので開き直しで getRecord は呼ばない
+          });
+          return;
+        }
+        if (away) { KW.app.go(away, true); return; }
+        // 新しい詳細が届いたら、提出できる条件を判定し直すため開き直す
+        C.revalidate(ctx, r.res, function () {
+          var ov = document.getElementById('overlay');
+          if (ov && ov.children.length) return; // PIN の入力中などは開き直さない(提出はサーバーが最終判定する)
+          ctx.rerender();
+        });
         pendingRows().then(function (rows) {
           draw(rows);
           KW.sync.flush();

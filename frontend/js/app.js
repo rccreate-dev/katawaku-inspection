@@ -274,10 +274,16 @@
     }).then(function () { return app.startSession(); });
   };
 
-  app.startSession = function () {
+  /*
+   * opts.bootstrapP: 起動時に me と並列で呼んだ getBootstrap の Promise(版1.18.0 §8.11.9-1)。無ければここで呼ぶ。
+   * opts.drawnRole: 応答を待たずにキャッシュで画面を描いたときの役割(§8.11.9-2)。このときは画面を作り直さず、
+   *   ホームを表示中で役割が変わったときだけ描き直す
+   */
+  app.startSession = function (opts) {
+    opts = opts || {};
     renderChrome();
     if (S.me && S.me.status === 'locked') { app.go('#/locked', true); return Promise.resolve(); }
-    return KW.sync.bootstrap(true).then(function () {
+    return (opts.bootstrapP || KW.sync.bootstrap(true)).then(function () {
       KW.data.syncRecords(true).then(function () { KW.sync.refreshCounts(); });
       return KW.db.kvGet('pendingJoin');
     }).then(function (pj) {
@@ -287,6 +293,12 @@
         return;
       }
       var cur = parseHash().path;
+      if (opts.drawnRole) {
+        renderChrome(); renderBanners();
+        if (cur === '/register' || cur === '/locked') app.go('#/', true);
+        else if (cur === '/' && S.me && S.me.role !== opts.drawnRole) route(true);
+        return;
+      }
       app.go((cur === '/register' || cur === '/locked') ? '#/' : (location.hash || '#/'), true);
     });
   };
@@ -365,12 +377,17 @@
       window.addEventListener('hashchange', function () { route(); });
       if (!S.token) { route(); return null; }
       if (!KW.isOnline()) { route(); return null; }
-      return KW.api.call('me', {}).then(function (res) {
+      // 版1.18.0(§8.11.9-1・2): me と getBootstrap を並列に呼ぶ。前回の me・bootstrap があれば応答を待たずに描く
+      var drawnRole = (S.me && S.bootstrap && S.me.status !== 'locked') ? S.me.role : null;
+      var meP = KW.api.call('me', {});
+      var bootstrapP = KW.sync.bootstrap(true);
+      if (drawnRole) route();
+      return meP.then(function (res) {
         if (res.ok) {
           S.me = res.data.user; KW.db.kvSet('me', S.me);
-          return app.startSession();
+          return app.startSession({ bootstrapP: bootstrapP, drawnRole: drawnRole });
         }
-        if (res.network) { route(); return null; }
+        if (res.network) { if (!drawnRole) route(); return null; }
         return null; // auth:error ハンドラが遷移する
       });
     }).then(function () { updateBadge(); }).catch(function (e) {

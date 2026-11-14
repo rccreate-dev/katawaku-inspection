@@ -329,6 +329,33 @@
   };
 
   /*
+   * 版1.18.0(§8.11.9-3): キャッシュで先に描いた記録の画面で、裏の getRecord を待つ間『最新を確認中…』を出す。
+   * res = loadDetail(..., {cacheFirst}) の結果。res.revalidate が無ければ何もしない。
+   * onNewer(detail): 版が大きい詳細が届いたとき(画面が生きている間だけ)。通信失敗は黙る。その他の失敗はトースト。
+   */
+  // 通信失敗は黙る。認証系は auth:error の処理(登録・ロックの画面へ)に任せる
+  var QUIET_CODES = { NETWORK: 1, UNAUTHENTICATED: 1, DEVICE_REVOKED: 1, USER_DISABLED: 1, USER_LOCKED: 1, CLIENT_OUTDATED: 1 };
+  /* 画面 el の中の入力欄に今フォーカスがあるか(打っている途中の欄を作り直さないため) */
+  C.typingIn = function (el) {
+    var a = document.activeElement;
+    return !!(a && el && el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+  };
+  C.revalidate = function (ctx, res, onNewer) {
+    if (!res || !res.revalidate) return;
+    var view = document.getElementById('view');
+    var pill = h('div', { class: 'checking', role: 'status' }, t('msg.checking_latest'));
+    if (view && view.parentNode) view.parentNode.insertBefore(pill, view);
+    function done() { if (pill.parentNode) pill.parentNode.removeChild(pill); }
+    ctx.cleanup(done);
+    res.revalidate.then(function (r) {
+      done();
+      if (!ctx.alive()) return;
+      if (r.error) { if (!QUIET_CODES[r.error.code]) C.toast(KW.errText(r.error), 'bad'); return; }
+      if (r.newer && r.detail) onNewer(r.detail);
+    }, function (e) { done(); KW.reportError(e); });
+  };
+
+  /*
    * 記録の保存状態(S06/S08/S10 共通。SPEC §8.11.6)と、送信できなかった入力のバナー(§8.11.4)。
    * ヘッダ直下に置く。ctx は画面の ctx(画面を離れると更新を止める)。
    * o.beforeDiscard(): 入力の破棄の直前に呼ぶ(画面の作業コピーの保存を止める)。o.afterDiscard(): 破棄の後(既定は画面を作り直す)

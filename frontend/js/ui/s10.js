@@ -404,9 +404,16 @@
           }
           detail = r.detail; work = r.work; blobs = r.blobs; rows = r.rows;
           drawAll();
+          // 版1.18.0(§8.11.9-3): キャッシュで先に描いたときは、裏の getRecord で新しければ差し替える。入力中なら作り直さない
+          C.revalidate(ctx, r.res, function (d) {
+            if (!detail || (typeof detail.version === 'number' && d.version <= detail.version)) return;
+            // 未送信・変更のある項目は端末側を優先して重ねる(loadWork の mergeDraft)。打っている途中・保存待ち・判定の送信中は見送る
+            if (!ctx.alive() || Object.keys(pending).length || commentDirty || busyVerdict || sendingVerdict || C.typingIn(el)) return;
+            reload({ maxAgeMs: 15000 }); // 届いた詳細は保存済み(freshAt)なので getRecord は呼ばない
+          });
         });
       }
-      reload({ maxAgeMs: 15000 });
+      reload({ maxAgeMs: 15000, cacheFirst: true });
 
       // 先出しした写真の削除が失敗: 隠していた写真を元に戻す(§8.11.4)
       ctx.on('photo:delete_failed', function (rid, pid) {
