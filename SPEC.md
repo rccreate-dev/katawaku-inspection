@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.20.6 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
+- 版: 1.20.7 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -1669,6 +1669,15 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
    - i18n: `act.open_send` を追加(ja「開く・送る」/ id「Buka / Kirim」)。`scr.M6.desc` を ja「元請に渡すPDFを作ります。「開く・送る」を押すと、iPhone では送り先を選ぶ画面が出ます(PDFの名前は 現場名・階・工区・打設箇所・ステータス・生成日)。Android では保存して開きます。」/ id「Membuat PDF untuk kontraktor. Tekan "Buka / Kirim": di iPhone muncul layar untuk memilih tujuan kirim (nama PDF: lokasi, lantai, zona, bagian cor, status, tanggal). Di Android, PDF disimpan lalu dibuka.」に変更。`act.open` は他の画面で使うので残す。
    - サーバー・mock・シートの変更なし。`SW_VERSION` を上げる。
    - テスト: **E-38** を「ボタンは `act.open_send` 1つ。ファイルを渡せる端末では `navigator.share` に PDF が1つ・名前が `getReportFile.fileName`・`application/pdf` で渡り、新しいタブは開かない。過去の版も同じ。ファイルを渡せない端末では `blob:` のタブが開く」に直す。
+   - (版1.20.7 で廃止。16)共有画面では PDF の中身を確かめられないため。
+
+16. **「開く」と「ファイルで送る」に戻す(版1.20.7。ユーザー決定 2026-11-15。REQUIREMENTS §24-10)**: 15 と 12 をやめ、M6 を **版1.20.2 の形**に戻す。
+   - 最新の版のカード: **「ファイルで送る」**(`act.send_file`。主ボタン `btn small`。`data-pdf="send"`)と **「開く」**(`act.open`。`btn small ghost`。`data-pdf="open"`)。過去の版の行は「開く」だけ。
+   - 「開く」: 名前を付けたファイルを `blob:` で新しいタブに開き、中身を確かめる(Android は保存して開く)。iPhone ではこの画面から送ると名前は「unknown」になる(ブラウザの仕組みで、アプリからは変えられない。1.20.4・1.20.5 で確かめた)。
+   - 「ファイルで送る」: `navigator.share({ files: [file], title })` で共有画面に渡す(名前は 8 の名前)。ファイルを渡せない端末では保存し `msg.pdf_saved` を出す。閉じた(`AbortError`)ときは何も出さない。`NotAllowedError` は `msg.pdf_ready_tap`。
+   - i18n: `act.send_file`(ja「ファイルで送る」/ id「Kirim berkas」)・`msg.pdf_saved`(ja「PDFを保存しました。保存したファイルを送ってください」/ id「PDF disimpan. Kirim berkas yang disimpan」)を戻す。`act.open_send` を削除。`scr.M6.desc` を ja「元請に渡すPDFを作ります。「開く」で内容を確かめ、「ファイルで送る」で元請に送ってください。」/ id「Membuat PDF untuk kontraktor. Periksa isinya dengan "Buka", lalu kirim ke kontraktor dengan "Kirim berkas".」に変更。
+   - サーバー側の名前(14: ドライブ名・PDFの Title)はそのまま。サーバー・mock・シートの変更なし。`SW_VERSION` を上げる。
+   - テスト: **E-38** を版1.20.2 の形に戻す(「ファイルで送る」は `navigator.share` に PDF 1つ・`fileName`・`application/pdf`、「開く」は `blob:`、過去の版は「開く」)。
 
 ## 7. 写真
 
@@ -3347,6 +3356,7 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |
 | 2026-11-15 | 1.19.1 | ユーザー決定(2026-11-15)「記録の詳細の画面に 元請サイン 元請はPDFに記入の表示は不要」: S08 のサイン欄で、元請サインが記録されていない記録は元請の枠を出さない(職長・承認者の2枠を2列)。記録済みの古い記録は従来どおり3枠。§6.11-7・§6.11-10(E-37)を更新。API・シートの変更なし。 |
 | 2026-11-15 | 1.20.0 | ユーザー決定(2026-11-15。REQUIREMENTS §24)「PDFを開くとドライブの画面が出る。社内の複数人が使うアプリでドライブが一瞬でも表示されるのはやめてください」「過去の資料を開く際もドライブが見えないように」: §6.12 新設。①参照の action `getReportFile` を追加(51→52)②M6 の開く・送るは受け取ったPDFで行い、ドライブのURLを使わない。「共有」→「ファイルで送る」(PDFファイルを送る)③`pdfShareMode` の初期値を `private` に ④i18n 5キー追加・`scr.M6.desc` 変更 ⑤C-REPF-01・E-38。シートの列の変更なし。 |
+| 2026-11-15 | 1.20.7 | ユーザー決定(2026-11-15。REQUIREMENTS §24-10)「PDFの内容が確認できないのは問題です。開くでPDFを表示、ファイルを送るで送信出来るように戻してください」: §6.12-16 新設。15・12 を廃止し、M6 を版1.20.2 の形(「ファイルで送る」+「開く」)に戻す。i18n `act.send_file`・`msg.pdf_saved` を戻し `act.open_send` を削除、`scr.M6.desc` 変更。E-38 を戻す。フロントのみ(GAS・mock・シートの変更なし)。 |
 | 2026-11-15 | 1.20.6 | ユーザー決定(2026-11-15。REQUIREMENTS §24-9)実機で「unknownとなっています」→「ボタンを1つにまとめる」: §6.12-15 新設。M6 のボタンを「開く・送る」(`act.open_send`)1つにし、ファイルを渡せる端末(iPhone など)では共有画面に名前付きのPDFを渡す。Android は保存して開く、渡せない端末は `blob:` で開く。i18n 1キー追加・`scr.M6.desc` 変更。E-38 を更新。フロントのみ(GAS・mock・シートの変更なし)。 |
 | 2026-11-15 | 1.20.5 | ユーザー決定(2026-11-15。REQUIREMENTS §24-8)「名前は変わりません。PDFを開けますが送信出来なくなりました」→「生成した時にその資料に指示した現場名等を付けられませんか」: §6.12-14 新設。13 を廃止し「開く」を 1.20.3 の形に戻す(`sw.js` は `katawaku-pdf` を消す)。`generateReport` はドライブのファイル名を 8 の名前にし、PDFの文書情報の Title に同じ名前を書く(`pdfSetTitle_`)。mock・harness の最小PDFを合わせる。C-REPF-01⑥ほか名前の形のテストを更新。シートの列・action 数の変更なし。 |
 | 2026-11-15 | 1.20.4 | ユーザー決定(2026-11-15。REQUIREMENTS §24-7)実機で「ファイル名は指示したとおりになっていません。unknownとなっています」→「名前の付いた場所で開く」: §6.12-13 新設。「開く」は端末内の Cache Storage に置いた名前付きの URL(`pdf/{reportId}/{名前}`)で開き、`sw.js` が返す。フロントのみ(GAS・mock・シートの変更なし)。E-38 を更新。 |

@@ -508,8 +508,7 @@
   };
 
   /* ---- M6 元請提出用PDF ---- */
-  // 版1.20.0(SPEC §6.12): PDF はアプリが getReportFile で直接受け取り、端末の中で開く。
-  // 版1.20.3(§6.12-12): 「ファイルで送る」は出さない。開いたPDFから端末の機能で送る
+  // 版1.20.0(SPEC §6.12): PDF はアプリが getReportFile で直接受け取り、端末の中で開く・送る。
   // ドライブの URL(Report.url)は開かない・送らない・コピーしない(ドライブの画面を一瞬も出さない)
   function b64ToBytes(b64) {
     var bin = atob(b64), u = new Uint8Array(bin.length);
@@ -553,15 +552,13 @@
       if (isAndroid) { savePdf(p); return true; }   // Android は保存して端末のPDFアプリで開く
       return !!window.open(p.url, '_blank');
     }
-    /** 版1.20.6(SPEC §6.12-15): 「開く・送る」。Android は保存して開く。PDFを共有画面に渡せる端末(iPhone など)は名前付きのファイルを渡す。渡せない端末は開く */
-    function openSendPdf(p) {
-      if (isAndroid) return openPdf(p);
-      var data = { files: [p.file] };
+    function sendPdf(p) {
+      var data = { files: [p.file], title: p.file.name };
       if (navigator.canShare && navigator.share && navigator.canShare(data)) {
-        // 閉じた(AbortError)ときは何も出さない。ブラウザに止められた(NotAllowedError)ときは「もう一度押す」
         return navigator.share(data).then(function () { return true; }, function (e) { return !(e && e.name === 'NotAllowedError'); });
       }
-      return openPdf(p);
+      savePdf(p); C.toast(t('msg.pdf_saved'));
+      return true;
     }
     /** ボタンを押したとき: 受け取り済みならすぐ実行。まだなら受け取ってから実行し、ブラウザに止められたら「もう一度」 */
     function withPdf(reportId, btn, fn) {
@@ -596,7 +593,8 @@
           h('div', { class: 'row' }, h('b', null, 'v' + r.version), C.statusChip(r.recordStatus, false, rec.stage)),
           h('div', { class: 'sub' }, C.fmt(r.generatedAt) + ' / ' + (r.generatedByName || '')),
           h('div', { class: 'gap' },
-            pdfBtn(r.reportId, 'btn small', t('act.open_send'), openSendPdf, { 'data-pdf': 'open' }))));
+            pdfBtn(r.reportId, 'btn small', t('act.send_file'), sendPdf, { 'data-pdf': 'send' }),
+            pdfBtn(r.reportId, 'btn small ghost', t('act.open'), openPdf, { 'data-pdf': 'open' }))));
         prefetch(r.reportId);   // 作成が終わったら受け取り始める(1回押すだけで開けるように)
       }
       function loadHist() {
@@ -607,7 +605,7 @@
           res.data.reports.forEach(function (r) {
             hist.appendChild(h('div', { class: 'row card' },
               h('span', null, 'v' + r.version + ' / ' + C.fmt(r.generatedAt) + ' / ' + KW.ts('st.' + r.recordStatus, rec.stage)),
-              pdfBtn(r.reportId, 'link', t('act.open_send'), openSendPdf, { 'data-pdf': 'open', 'data-version': String(r.version) })));
+              pdfBtn(r.reportId, 'link', t('act.open'), openPdf, { 'data-pdf': 'open', 'data-version': String(r.version) })));
           });
         });
       }
