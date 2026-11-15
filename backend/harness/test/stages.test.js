@@ -441,10 +441,10 @@ test('ST-40 PDF: 出来形は見出し「型枠工事 出来形検査記録」�
   html = h.control('lastReportHtml', {}).data.html;
   assert.ok(html.includes('出来形確認済'));
   assert.ok(!html.includes('打設可') && !html.includes('打設予定日時') && !html.includes('打設停止'));
-  // ファイル名 {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf
+  // ファイル名(版1.20.5): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf
   const files = h.control('drive', {}).data.paths.filter((p) => p.endsWith('.pdf'));
   assert.equal(files.length, 2);
-  files.forEach((f) => assert.match(f.split('/').pop(), /^A現場\(仮\) 2F P1_出来形_v[12]_\d{8}-\d{4}\.pdf$/));
+  files.forEach((f) => assert.match(f.split('/').pop(), /^A現場\(仮\) 2F P1 出来形確認済 \d{4}-\d{2}-\d{2}(\(2\))?\.pdf$/));
 });
 
 test('ST-41 PDF: 打設前は従来どおり(見出し「打設前検査記録」・打設予定日時の行あり・ファイル名に「打設前」・approved は「打設可」)', () => {
@@ -457,5 +457,5 @@ test('ST-41 PDF: 打設前は従来どおり(見出し「打設前検査記録�
   assert.ok(!html.includes('出来形'));
   const files = h.control('drive', {}).data.paths.filter((p) => p.endsWith('.pdf'));
   assert.equal(files.length, 1);
-  assert.match(files[0].split('/').pop(), /^A現場\(仮\) 1F L1_打設前_v1_\d{8}-\d{4}\.pdf$/);
+  assert.match(files[0].split('/').pop(), /^A現場\(仮\) 1F L1 打設可 \d{4}-\d{2}-\d{2}\.pdf$/);
 });

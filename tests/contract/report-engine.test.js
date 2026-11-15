@@ -117,7 +117,7 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
       assert.equal(h.sha256(buf), r.report.sha256);
       if (!harness) assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v`), 'mock は常に最小PDF(本文の文言は mock 固有=§11.3。harness は方式で本文が違うので見ない)');
       const fname = decodeURIComponent(url.split('/').pop());
-      assert.match(fname, /^A現場\(仮\) 1F RE1_打設前_v\d+_\d{8}-\d{4}\.pdf$/, 'PDF名(§10.2a)は方式で変わらない: ' + fname);
+      assert.match(fname, /^A現場\(仮\) 1F RE1 打設可 \d{4}-\d{2}-\d{2}(\(\d+\))?\.pdf$/, 'PDF名(§10.2a。版1.20.5)は方式で変わらない: ' + fname);
     }
     assert.equal(new Set(shapes).size, 1, '応答の形(キー集合)が方式で変わらない');
     const list = await qa.ok('listReports', { recordId });
@@ -154,7 +154,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
       assert.ok(!('url' in r.report));
       const url = await h.reportUrl(r.report.reportId);
       assert.match(url, /^https?:\/\//);
-      names.push(decodeURIComponent(url.split('/').pop()).replace(/_v\d+_\d{8}-\d{4}\.pdf$/, ''));
+      names.push(decodeURIComponent(url.split('/').pop()).replace(/ \d{4}-\d{2}-\d{2}(\(\d+\))?\.pdf$/, '')); // 版1.20.5: 日付と (n) を除いて比べる
       const res = await fetch(url);
       assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 5).toString('latin1'), '%PDF-');
       return r;

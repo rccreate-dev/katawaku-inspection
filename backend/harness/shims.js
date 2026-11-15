@@ -6,7 +6,7 @@
  * 実GASの制約に近づけるため、範囲外アクセスや大きすぎるキャッシュ値は例外にする。
  */
 const crypto = require('crypto');
-const { createDocShim } = require('./docshim');
+const { createDocShim, minimalPdf } = require('./docshim');
 
 function toSigned(buf) {
   const out = new Array(buf.length);
@@ -57,7 +57,7 @@ function createShims(state) {
       const html = this._buf.toString('utf8');
       const m = /<!--REPORT (.*?)-->/.exec(html);
       const line = 'MOCK REPORT ' + (m ? m[1] : 'unknown');
-      const text = `%PDF-1.4\n% ${line.replace(/[^\x20-\x7e]/g, '?')}\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`;
+      const text = minimalPdf([line.replace(/[^\x20-\x7e]/g, '?')]);
       return new Blob(Buffer.from(text, 'ascii'), 'application/pdf', this._name);
     }
   }

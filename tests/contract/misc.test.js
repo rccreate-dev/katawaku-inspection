@@ -233,7 +233,8 @@ describe('C-REP 元請向けPDF', () => {
     // 件名(SPEC §10.2a): ファイル名は「現場名 階 [工区] 打設箇所」+ _v版_日時。recordId は含まない
     const fname = decodeURIComponent(url.split('/').pop());
     // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。段階名=打設前/出来形
-    assert.match(fname, /^A現場\(仮\) 1F RP1_打設前_v1_\d{8}-\d{4}\.pdf$/, 'ファイル名=' + fname);
+    // 版1.20.5(§6.12-14): ドライブ名も {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf
+    assert.match(fname, /^A現場\(仮\) 1F RP1 打設可 \d{4}-\d{2}-\d{2}\.pdf$/, 'ファイル名=' + fname);
     assert.ok(!fname.includes(recordId), 'ファイル名に recordId を含まない');
   });
 });

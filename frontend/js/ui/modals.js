@@ -522,30 +522,11 @@
     });
   }
   var isAndroid = /Android/i.test(navigator.userAgent || '');
-  // 版1.20.4(§6.12-13): PDF を名前付きの場所(pdf/{reportId}/{名前})で開く。中身は端末の中(Cache Storage)だけに置き、sw.js が返す
-  // (blob: で開くと iPhone で送ったときの名前が「unknown」になるため)
-  var PDF_CACHE = 'katawaku-pdf';
-  function canNamedOpen() {
-    return !!(window.caches && navigator.serviceWorker && navigator.serviceWorker.controller);
-  }
-  /** 受け取ったPDFを名前付きの場所に置き、その URL を返す。置けなければ null(blob: で開く) */
-  function putNamed(reportId, file) {
-    if (!canNamedOpen()) return Promise.resolve(null);
-    var u = new URL('pdf/' + encodeURIComponent(reportId) + '/' + encodeURIComponent(file.name), new URL('./', location.href)).href;
-    var res = new Response(file, { headers: {
-      'Content-Type': 'application/pdf', 'Content-Length': String(file.size),
-      'Content-Disposition': "inline; filename*=UTF-8''" + encodeURIComponent(file.name),
-      'Cache-Control': 'no-store'
-    } });
-    return caches.open(PDF_CACHE).then(function (c) { return c.put(u, res); }).then(function () { return u; }, function () { return null; });
-  }
 
   M.report = function (rec) {
     var clientId = KW.newClientId();
     var pdfs = {};   // reportId -> Promise<{file,url}>(M6 を閉じるまで持つ)
     var urls = [];
-    // 前に開いた PDF は、次に M6 を開いたときに端末から消す(開いたタブで送り終えるまでは残す)
-    var cleared = window.caches ? caches.delete(PDF_CACHE).catch(function () { /* 無視 */ }) : Promise.resolve();
     /** PDF を受け取る(同じ版は1回だけ)。失敗したら覚えずに次の押下で取り直す */
     function fetchPdf(reportId) {
       if (pdfs[reportId]) return pdfs[reportId];
@@ -557,9 +538,7 @@
           var file = new File([bytes], d.fileName, { type: 'application/pdf' });
           var url = URL.createObjectURL(file);
           urls.push(url);
-          return cleared.then(function () { return putNamed(reportId, file); }).then(function (named) {
-            return { file: file, url: url, openUrl: named || url, ready: true };
-          });
+          return { file: file, url: url, ready: true };
         });
       });
       pdfs[reportId] = pr;
@@ -572,7 +551,7 @@
     }
     function openPdf(p) {
       if (isAndroid) { savePdf(p); return true; }   // Android は保存して端末のPDFアプリで開く
-      return !!window.open(p.openUrl, '_blank');
+      return !!window.open(p.url, '_blank');
     }
     /** ボタンを押したとき: 受け取り済みならすぐ実行。まだなら受け取ってから実行し、ブラウザに止められたら「もう一度」 */
     function withPdf(reportId, btn, fn) {

@@ -661,21 +661,28 @@ module.exports = function install(C) {
   };
 
   // ===== PDF ===========================================================
+  /** 版1.20.1/1.20.5(§6.12-8・14): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf。rows はその記録の Reports(この版を含む) */
+  const reportSendName = (rec, site, r, rows) => {
+    const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
+    const st = r.recordStatus === 'qa_ok' ? 'approved' : r.recordStatus;
+    const label = st === 'approved' ? (rec.stage === 'post_demold' ? '出来形確認済' : '打設可') : ({ draft: '入力中', submitted: '確認待ち', fix: '是正中' }[st] || st);
+    const day = String(r.generatedAt).slice(0, 10);
+    const n = rows.filter((x) => String(x.generatedAt).slice(0, 10) === day && x.version <= r.version).length;
+    return `${subject.replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60)} ${label} ${day}${n >= 2 ? `(${n})` : ''}.pdf`;
+  };
   H.generateReport = (rc) => {
     const rec = ctxRec(rc); const actor = rc.actor;
     const { buildPdf } = require('./pdfstub');
     const version = table('Reports').filter((r) => r.recordId === rec.recordId).reduce((m, r) => Math.max(m, r.version), 0) + 1;
-    const stamp = U.fmtDt(nowMs()).slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
     const site = siteRow(rec.siteId);
-    // 件名: 現場名 階 [工区] 打設箇所(SPEC §10.2a)
-    const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
-    // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。subject 部分だけ sanitize
-    const stageName = { pre_pour: '打設前', post_demold: '出来形' }[rec.stage] || rec.stage;
-    const name = `${String(subject).replace(/[\\\/:*?"<>|]/g, '_').trim().slice(0, 60)}_${stageName}_v${version}_${stamp}.pdf`;
-    const buf = buildPdf(rec.recordId, version, rec.status, rec.stage);
+    const genAt = nowDt();
+    // 版1.20.5(§6.12-14・§10.2a): ドライブのファイル名も送る名前にそろえ、PDFの Title に名前(.pdf なし)を入れる
+    const prevRows = table('Reports').filter((r) => r.recordId === rec.recordId);
+    const name = reportSendName(rec, site, { generatedAt: genAt, recordStatus: rec.status, version }, prevRows.concat([{ generatedAt: genAt, version }]));
+    const buf = buildPdf(rec.recordId, version, rec.status, rec.stage, name.replace(/\.pdf$/, ''));
     C.S().reports.set(name, buf);
     const driveFileId = C.driveSave(`reports/${rec.siteId}_${site.name}/${name}`, buf);
-    const row = insert('Reports', { reportId: U.newId('f'), recordId: rec.recordId, version, recordStatus: rec.status, driveFileId, url: `${rc.baseUrl || 'http://127.0.0.1:8787'}/files/reports/${encodeURIComponent(name)}`, sha256: U.sha256(buf), generatedBy: actor.userId, generatedAt: nowDt() });
+    const row = insert('Reports', { reportId: U.newId('f'), recordId: rec.recordId, version, recordStatus: rec.status, driveFileId, url: `${rc.baseUrl || 'http://127.0.0.1:8787'}/files/reports/${encodeURIComponent(name)}`, sha256: U.sha256(buf), generatedBy: actor.userId, generatedAt: genAt });
     ev('report_generated', { siteId: rec.siteId, recordId: rec.recordId, round: rec.round, detail: { reportId: row.reportId, version } });
     C.touch(rec);
     return { report: C.reportView(row) };
@@ -685,14 +692,9 @@ module.exports = function install(C) {
     const r = rc.ctx.report;
     const f = C.S().driveFiles.get(r.driveFileId);
     if (!f || !f.buf || f.trashed) fail('DRIVE_ERROR', 'PDFを読み込めません');
-    // 版1.20.1(§6.12-8): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf(ドライブのファイル名は変えない)
+    // 版1.20.1(§6.12-8): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf
     const rec = ctxRec(rc); const site = siteRow(rec.siteId);
-    const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
-    const st = r.recordStatus === 'qa_ok' ? 'approved' : r.recordStatus;
-    const label = st === 'approved' ? (rec.stage === 'post_demold' ? '出来形確認済' : '打設可') : ({ draft: '入力中', submitted: '確認待ち', fix: '是正中' }[st] || st);
-    const day = String(r.generatedAt).slice(0, 10);
-    const n = table('Reports').filter((x) => x.recordId === r.recordId && String(x.generatedAt).slice(0, 10) === day && x.version <= r.version).length;
-    const fileName = `${subject.replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60)} ${label} ${day}${n >= 2 ? `(${n})` : ''}.pdf`;
+    const fileName = reportSendName(rec, site, r, table('Reports').filter((x) => x.recordId === r.recordId));
     return { reportId: r.reportId, recordId: r.recordId, version: r.version, fileName, mime: 'application/pdf', bytes: f.buf.length, sha256: U.sha256(f.buf), base64: f.buf.toString('base64') };
   };
   H.listReports = (rc) => ({ reports: table('Reports').filter((r) => r.recordId === ctxRec(rc).recordId).sort((a, b) => b.version - a.version).map(C.reportView) });

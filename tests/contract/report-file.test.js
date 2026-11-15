@@ -8,6 +8,18 @@ const h = require('../helpers/client');
 
 const C1 = 'r_seedc10000000000'; // s_c(鈴木が主担当)。approved(旧 qa_ok)
 
+/** 版1.20.5: PDFの最後の trailer の /Info が指す辞書の Title(UTF-16BE の16進)を読む */
+function pdfTitle(buf) {
+  const s = buf.toString('latin1');
+  const info = /\/Info\s+(\d+)\s+0\s+R/.exec(s.slice(s.lastIndexOf('trailer')));
+  if (!info) return null;
+  const m = new RegExp('(?:^|\\s)' + info[1] + ' 0 obj\\s*<<\\s*/Title <FEFF([0-9A-F]*)>').exec(s);
+  if (!m) return null;
+  let t = '';
+  for (let i = 0; i < m[1].length; i += 4) t += String.fromCharCode(parseInt(m[1].slice(i, i + 4), 16));
+  return t;
+}
+
 describe('C-REPF getReportFile(§6.12)', () => {
   beforeEach(() => h.reset());
 
@@ -35,6 +47,9 @@ describe('C-REPF getReportFile(§6.12)', () => {
     const day = String(v2.generatedAt).slice(0, 10);
     assert.match(day, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(f2.fileName, `A現場(仮) 1F RF1 打設可 ${day}(2).pdf`);
+    // ⑥(版1.20.5。§6.12-14)PDFの中の Title は fileName(.pdf なし)。ドライブのファイル名も fileName
+    assert.equal(pdfTitle(buf2), f2.fileName.replace(/\.pdf$/, ''), 'PDFの Title');
+    assert.equal(decodeURIComponent((await h.reportUrl(v2.reportId)).split('/').pop()), f2.fileName, 'ドライブの名前');
 
     // ② 作り直したあとも過去の版(v1)を取れる。責任者も取れる
     const f1 = await lead.ok('getReportFile', { reportId: v1.reportId });

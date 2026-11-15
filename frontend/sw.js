@@ -4,10 +4,8 @@
  * ・同一 SW_VERSION の間は、シェルのファイルを実行時に取得して上書きしない(JS/CSS/i18n が新旧混在になるのを防ぐ)。
  * ・唯一の例外はナビゲーション(HTMLへの遷移)だけ stale-while-revalidate。
  * ・APIは一切キャッシュしない(別オリジンは素通し)。
- * ・版1.20.4(SPEC §6.12-13): pdf/{reportId}/{名前}.pdf は、画面が katawaku-pdf に入れた元請提出用PDFを返す(名前付きで開くため)。
- *   無ければアプリの先頭へ戻す。サーバーには取りに行かない。 */
-var SW_VERSION = '1.0.0-47';
-var PDF_CACHE = 'katawaku-pdf';
+ * ・版1.20.5(SPEC §6.12-14): 版1.20.4 の名前付きの場所(pdf/…)はやめた。そのとき端末に置いた katawaku-pdf は activate で消す。 */
+var SW_VERSION = '1.0.0-48';
 var CACHE = 'katawaku-shell-' + SW_VERSION;
 var SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'manifest.webmanifest',
@@ -32,7 +30,7 @@ self.addEventListener('install', function (e) {
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k.indexOf('katawaku-shell-') === 0 && k !== CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.filter(function (k) { return (k.indexOf('katawaku-shell-') === 0 && k !== CACHE) || k === 'katawaku-pdf'; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 
@@ -45,13 +43,6 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // API(別オリジン)は素通し
-  var scope = new URL(self.registration.scope);
-  if (url.pathname.indexOf(scope.pathname + 'pdf/') === 0) {
-    e.respondWith(caches.open(PDF_CACHE).then(function (c) { return c.match(url.href); }).then(function (hit) {
-      return hit || Response.redirect(scope.href, 302);
-    }));
-    return;
-  }
   if (req.mode === 'navigate') {
     // ナビゲーションのみ: キャッシュを返しつつ裏で取得して更新
     e.respondWith(caches.open(CACHE).then(function (cache) {

@@ -292,7 +292,7 @@ function createDocShim(state, hooks) {
     ds.counts.converted++;
     ds.last = doc;
     const line = ('MOCK DOC REPORT ' + doc.title).replace(/[^\x20-\x7e]/g, '?');
-    const t = `%PDF-1.4\n% ${line}\n% page ${doc.body.pageWidth}x${doc.body.pageHeight}\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`;
+    const t = minimalPdf([line, `page ${doc.body.pageWidth}x${doc.body.pageHeight}`]);
     return Buffer.from(t, 'ascii');
   };
   ds.onTrashed = () => { ds.counts.trashed++; };
@@ -301,4 +301,15 @@ function createDocShim(state, hooks) {
   return ds;
 }
 
-module.exports = { createDocShim, jpegSize };
+/** 版1.20.5: 試験用の最小PDF(本物と同じく xref・trailer・startxref を持つ。コメント行に印の文字) */
+function minimalPdf(lines) {
+  let out = '%PDF-1.4\n' + lines.map((l) => '% ' + l + '\n').join('');
+  const off = out.length;
+  out += '1 0 obj\n<< /Type /Catalog >>\nendobj\n';
+  const xref = out.length;
+  out += 'xref\n0 2\n0000000000 65535 f \n' + String(off).padStart(10, '0') + ' 00000 n \n';
+  out += 'trailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+  return out;
+}
+
+module.exports = { createDocShim, jpegSize, minimalPdf };

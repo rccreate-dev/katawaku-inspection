@@ -547,8 +547,9 @@ function act_generateReport(ctx) {
   var version = prev.reduce(function (m, r) { return Math.max(m, r.version); }, 0) + 1;
   var now = Util.now(), nowIso = Util.fmtDt(now);
   var stamp = nowIso.slice(0, 10).replace(/-/g, '') + '-' + nowIso.slice(11, 13) + nowIso.slice(14, 16);
-  // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。段階名=打設前/出来形(subject の次)
-  var name = Util.sanitizeName(reportSubject_(rec, site)) + '_' + (STAGE_LABEL_[rec.stage] || rec.stage) + '_v' + version + '_' + stamp + '.pdf';
+  // 版1.20.5(§6.12-14・§10.2a): ドライブのファイル名も送る・開くときの名前 {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf にそろえる
+  var name = reportSendName_(rec, site, { generatedAt: nowIso, recordStatus: rec.status, version: version },
+    prev.concat([{ generatedAt: nowIso, version: version }]));
   var file, bytes;
   // 生成方式(SPEC §10.5.1): Config reportEngine を trim・小文字化して 'doc' のときだけ doc 方式。それ以外は html
   var engine = reportEngine_(), used = 'html', fallbackReason = '';
@@ -569,8 +570,9 @@ function act_generateReport(ctx) {
       var html = buildReportHtml_(rec, site, rows, photos, notes, events, version, nowIso);
       blob = HtmlService.createHtmlOutput(html).getBlob().getAs('application/pdf');
     }
-    blob.setName(name);
-    bytes = blob.getBytes();
+    // 版1.20.5(§6.12-14): PDFの中の「タイトル」に名前(.pdf なし)を書く。iPhone で開いた画面から送るときの名前に使われる見込み
+    bytes = pdfSetTitle_(blob.getBytes(), name.replace(/\.pdf$/, ''));
+    blob = Utilities.newBlob(bytes, 'application/pdf', name);
     var folder = subFolder_(subFolder_(driveRoot_(), 'reports'), Util.sanitizeName(site.siteId + '_' + site.name));
     file = folder.createFile(blob);
     // 版1.20.2(§6.12-9): PDFはドライブで共有しない(pdfShareMode は廃止。値に関わらず共有しない)
@@ -633,6 +635,55 @@ function reportSendName_(rec, site, row, rows) {
   var n = rows.filter(function (x) { return dayOf(x) === day && x.version <= row.version; }).length;
   return Util.sanitizeName(reportSubject_(rec, site || { name: '' })) + ' ' + statusLabel_({ status: st, stage: rec.stage }) + ' ' + day +
     (n >= 2 ? '(' + n + ')' : '') + '.pdf';
+}
+
+/**
+ * 版1.20.5(SPEC §6.12-14): PDFの文書情報の Title を書き足す(PDFの「追記更新」。元の中身は1バイトも変えず、末尾に足すだけ)。
+ * 最後の startxref が指す相互参照(表または XRef ストリーム)から /Root・/Size・/ID を読み、/Info を新しい Title だけの辞書にする。
+ * 読めない・暗号化されているPDFはそのまま返す(作成は止めない)。bytes は GAS の byte 配列(-128〜127)。
+ */
+function pdfSetTitle_(bytes, title) {
+  var n = bytes.length, parts = [];
+  for (var i = 0; i < n; i += 8192) {
+    var chunk = [];
+    for (var j = i; j < Math.min(n, i + 8192); j++) chunk.push(bytes[j] & 255);
+    parts.push(String.fromCharCode.apply(null, chunk));
+  }
+  var s = parts.join('');
+  var sx = s.lastIndexOf('startxref');
+  if (sx < 0) return bytes;
+  var mPrev = /^startxref\s+(\d+)/.exec(s.slice(sx));
+  if (!mPrev) return bytes;
+  var prev = +mPrev[1];
+  var dict;
+  if (s.substr(prev, 4) === 'xref') {
+    var tr = s.indexOf('trailer', prev);
+    if (tr < 0) return bytes;
+    dict = s.slice(tr, s.indexOf('startxref', tr) > 0 ? s.indexOf('startxref', tr) : s.length);
+  } else {
+    var st = s.indexOf('stream', prev);
+    dict = s.slice(prev, st > 0 ? st : s.length);
+  }
+  if (/\/Encrypt\b/.test(dict)) return bytes;
+  var mRoot = /\/Root\s+(\d+\s+\d+\s+R)/.exec(dict);
+  if (!mRoot) return bytes;
+  var mSize = /\/Size\s+(\d+)/.exec(dict);
+  var size = mSize ? +mSize[1] : 0;
+  var re = /(\d+)\s+\d+\s+obj\b/g, m;
+  while ((m = re.exec(s))) size = Math.max(size, +m[1] + 1);
+  var mId = /\/ID\s*(\[[^\]]*\])/.exec(dict);
+  var hex = 'FEFF';
+  for (var k = 0; k < title.length; k++) hex += ('000' + title.charCodeAt(k).toString(16).toUpperCase()).slice(-4);
+  var obj = size, objOff = n + 1;
+  var add = '\n' + obj + ' 0 obj\n<< /Title <' + hex + '> >>\nendobj\n';
+  var xrefOff = n + add.length;
+  add += 'xref\n' + obj + ' 1\n' + ('0000000000' + objOff).slice(-10) + ' 00000 n\r\n' +
+    'trailer\n<< /Size ' + (size + 1) + ' /Root ' + mRoot[1] + ' /Info ' + obj + ' 0 R /Prev ' + prev + (mId ? ' /ID ' + mId[1] : '') + ' >>\n' +
+    'startxref\n' + xrefOff + '\n%%EOF\n';
+  var out = new Array(n + add.length);
+  for (var a = 0; a < n; a++) out[a] = bytes[a];
+  for (var b = 0; b < add.length; b++) out[n + b] = add.charCodeAt(b);
+  return out;
 }
 
 /** サイン欄の氏名の下に会社名を出す(空なら何も出さない) */

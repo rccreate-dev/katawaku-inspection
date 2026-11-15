@@ -319,7 +319,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     assert.equal(await count('escalate_60'), 1);
   });
 
-  it('C-STAGE-05: 合格(approved)の出来形の generateReport のファイル名(復号後)は {subject}_出来形_v1_{YYYYMMDD-HHmm}.pdf、打設前は {subject}_打設前_v1_...', async () => {
+  it('C-STAGE-05: 合格(approved)の出来形の generateReport のファイル名(復号後)は {subject} 出来形確認済 {YYYY-MM-DD}.pdf、打設前は {subject} 打設可 …(版1.20.5)', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'approved' });
@@ -329,9 +329,10 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const keep = async (r) => { names.set(r.report.reportId, decodeURIComponent((await h.reportUrl(r.report.reportId)).split('/').pop())); return r; };
     const r1 = await keep(await qa.ok('generateReport', { recordId: post.recordId }));
     assert.equal(r1.report.version, 1);
-    assert.match(name(r1), /^A現場\(仮\) 2F S5A_出来形_v1_\d{8}-\d{4}\.pdf$/, name(r1));
+    // 版1.20.5(§6.12-14): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf。出来形は「出来形確認済」、打設前は「打設可」
+    assert.match(name(r1), /^A現場\(仮\) 2F S5A 出来形確認済 \d{4}-\d{2}-\d{2}\.pdf$/, name(r1));
     const r2 = await keep(await qa.ok('generateReport', { recordId: pre.recordId }));
-    assert.match(name(r2), /^A現場\(仮\) 2F S5A_打設前_v1_\d{8}-\d{4}\.pdf$/, name(r2));
+    assert.match(name(r2), /^A現場\(仮\) 2F S5A 打設可 \d{4}-\d{2}-\d{2}\.pdf$/, name(r2));
     assert.ok(!name(r1).includes(post.recordId));
     // 版2・工区ありの現場(s_c: 工区 東,西)。subject は変えず、段階名は subject の次
     const { recordId: cz } = await (async () => {
@@ -340,7 +341,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
       assert.equal(r.res.ok, true, JSON.stringify(r.res.error));
       await h.advanceToQaOk(sg, sz, r.recordId);
       const g = await keep(await sz.ok('generateReport', { recordId: r.recordId }));
-      assert.match(name(g), /^C現場\(仮\) 1F 西 S5B_出来形_v1_\d{8}-\d{4}\.pdf$/, name(g));
+      assert.match(name(g), /^C現場\(仮\) 1F 西 S5B 出来形確認済 \d{4}-\d{2}-\d{2}\.pdf$/, name(g));
       return r;
     })();
     void cz;

@@ -115,6 +115,17 @@ const detailOf = (e) => (typeof e.detail === 'string' ? JSON.parse(e.detail) : e
 const repUrl = (rep) => h.control('state', { sheet: 'Reports' }).data.rows.find((r) => r.reportId === rep.reportId).url;
 const pdfName = (rep) => decodeURIComponent(repUrl(rep).split('/files/reports/')[1]);
 const pdfFile = (rep) => h.state.driveFindFile(pdfName(rep));
+/** 版1.20.5: PDFの最後の trailer の /Info が指す辞書の Title(UTF-16BE の16進)を読む */
+const pdfTitle = (buf) => {
+  const s = buf.toString('latin1');
+  const info = /\/Info\s+(\d+)\s+0\s+R/.exec(s.slice(s.lastIndexOf('trailer')));
+  if (!info) return null;
+  const m = new RegExp('(?:^|\\s)' + info[1] + ' 0 obj\\s*<<\\s*/Title <FEFF([0-9A-F]*)>').exec(s);
+  if (!m) return null;
+  let t = '';
+  for (let i = 0; i < m[1].length; i += 4) t += String.fromCharCode(parseInt(m[1].slice(i, i + 4), 16));
+  return t;
+};
 
 test('C-REP-02 方式の切替: html 側(行なし/空/html/HTML/xyz/docs)と doc 側(doc/" Doc "/DOC)', () => {
   const id = makeQaOk();
@@ -139,7 +150,9 @@ test('C-REP-02 方式の切替: html 側(行なし/空/html/HTML/xyz/docs)と do
     assert.ok(!('url' in rep), '版1.20.2: 応答に url を入れない');
     assert.match(repUrl(rep), /^https?:\/\//);
     assert.match(rep.sha256, /^[0-9a-f]{64}$/);
-    assert.match(pdfName(rep), /^.+ 1F D\d+_打設前_v\d+_\d{8}-\d{4}\.pdf$/);
+    // 版1.20.5(§6.12-14): ドライブ名も {件名} {ステータス} {日付}[(n)].pdf。PDFの Title は名前(.pdf なし)
+    assert.match(pdfName(rep), /^.+ 1F D\d+ 打設可 \d{4}-\d{2}-\d{2}(\(\d+\))?\.pdf$/);
+    assert.equal(pdfTitle(pdfFile(rep).blob._buf), pdfName(rep).replace(/\.pdf$/, ''));
     assert.equal(pdfFile(rep).blob._buf.subarray(0, 5).toString('latin1'), '%PDF-');
   });
   const rows = h.control('state', { sheet: 'Reports' }).data.rows.filter((r) => r.recordId === id);
@@ -251,7 +264,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   const sum = d.tables.find((t) => t.cols === 4 && t.rows === 3);
   assert.ok(sum); [30, 52, 52, 52].forEach((mm, i) => near(sum.colWidths[i], MMK(mm), 0.5));
   // ⑥ 内容
-  const subject = pdfName(rep).split('_')[0];
+  const subject = pdfName(rep).replace(/ 打設可 \d{4}-.*$/, '');
   assert.ok(d.text.includes(subject) && d.text.includes('打設前'));
   assert.ok(d.text.includes('職長の備考TEXT') && d.text.includes('管理者の備考TEXT'));
   assert.ok(d.text.includes('元請サイン証跡STAMP'));
@@ -369,7 +382,8 @@ test('C-REP-04 フォールバック: create/image/convert/slow でも PDF(HTML�
     // ① PDF ができる(HTML方式)。Reports が1行増える。名前・保存先・共有は通常どおり
     assert.ok(h.state.lastHtml && h.state.lastHtml.length > 500, mode + ': HTML方式で作った');
     assert.equal(h.control('state', { sheet: 'Reports' }).data.rows.length, before + 1);
-    assert.match(pdfName(rep), /_打設前_v1_\d{8}-\d{4}\.pdf$/);
+    assert.match(pdfName(rep), / 打設可 \d{4}-\d{2}-\d{2}\.pdf$/);
+    assert.equal(pdfTitle(pdfFile(rep).blob._buf), pdfName(rep).replace(/\.pdf$/, ''), 'フォールバックでも Title');
     assert.equal(pdfFile(rep).blob._buf.subarray(0, 5).toString('latin1'), '%PDF-');
     assert.equal(pdfFile(rep).sharing, null, '版1.20.0: pdfShareMode の初期値は private(共有しない)');
     // ② Events
@@ -517,7 +531,7 @@ test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステー�
   const sign = m.cellTexts(1)[1];
   assert.ok(sign[2].includes('山田太郎') && sign[2].includes('紙に署名') && sign[2].includes('記録者: 佐藤'), sign[2]);
   assert.ok(sign[0].includes('PIN認証による電子サイン') && sign[1].includes('判定: 合格'));
-  assert.match(pdfName(rep), /_出来形_v1_/);
+  assert.match(pdfName(rep), / 出来形確認済 \d{4}-\d{2}-\d{2}\.pdf$/);
 });
 
 test('C-REP-03 元請サインの記録が無い記録(版1.19.0 の通常)の元請欄は空欄の線と「署名・押印」', () => {
