@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.19.0 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
+- 版: 1.19.1 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -1575,7 +1575,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 5. **元請サインを記録済みの古い記録**: `primeSigned*` 列・`signatures.prime`・Events `prime_signed`・`side=prime` の写真は残し、画面とPDFに従来どおり出す。
 6. **PDF(§10.2 の3)**: 元請の欄は、元請サインの記録が無ければ「氏名 ______ 日付 ______ / 署名・押印」の空欄(従来の未記録時と同じ)。見出し「サイン欄(3者)」と1次検査者・承認者の欄は変えない。`generateReport` の状態条件は `approved`(と、`approved` とみなす `qa_ok`)。
 7. **画面**:
-   - S08: 「元請サインを記録」ボタンと M5 を出さない(`actions` に `recordPrimeSign` が入らないため)。サイン欄の元請の枠は、`signatures.prime` があれば従来どおり(氏名・方法・日時)、無ければ「元請はPDFに記入」(`lbl.sig_prime_on_pdf`)。
+   - S08: 「元請サインを記録」ボタンと M5 を出さない(`actions` に `recordPrimeSign` が入らないため)。サイン欄の元請の枠は、`signatures.prime` があれば従来どおり(氏名・方法・日時)。**無ければ元請の枠そのものを出さない**(版1.19.1。ユーザー決定 2026-11-15。サイン欄は職長・承認者の2つを2列で並べる)。
    - S09: 「元請待ち」の一覧(`scr.S09.prime`)を出さない。
    - S03・S11・S22: `qa_ok` を一覧の選択肢・件数に出さない(来ても `approved` と同じに扱う)。
    - S10 の合格の PIN の画面の見出しは、合格で打設可(出来形は出来形確認済)になることが分かる語にする(`scr.S10.pin_title`。段階の上書きキーあり。§9.4 の版1.19.0 の表)。
@@ -1585,11 +1585,13 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | キー | ja | id |
 |---|---|---|
 | `lbl.sig_prime_on_pdf` | 元請はPDFに記入 | Kontraktor mengisi di PDF |
+
+(版1.19.1: `lbl.sig_prime_on_pdf` は S08 で使わなくなった。辞書には残す)
 | `scr.S10.pin_title`(変更) | 合格のPIN確認(打設可になります) | Konfirmasi PIN kelulusan (menjadi boleh cor) |
 | `scr.S10.pin_title@post_demold` | 合格のPIN確認(出来形確認済になります) | Konfirmasi PIN kelulusan (hasil pekerjaan terkonfirmasi) |
 
    元請サイン用のキー(`act.prime_sign`・`msg.prime_signed`・`scr.M5.*`・`scr.S09.prime*`・`st.qa_ok`・`method.*`・`ev.prime_signed`・`rule.PRIME_SIGNER_REQUIRED`・`scr.S23.close_qaok`・`err.CLOSE_CONFIRM_REQUIRED`)は辞書に残す(古い記録の履歴・方法の表示に使うものがあるため。使わないものも消さない)。
-10. **テスト(§12 の読み替え)**: `recordPrimeSign` で `approved` にしていたテスト(C-STATE-01/03/09、C-PERM-03/04、C-IDEM-01、C-RESP-01、C-OWN-04、C-STAGE-04、C-PHOTO-04 の prime、E-03・E-15・E-28・E-31 の元請サイン)は、**合格で `approved` になる**ことを確かめる形に直す。`qa_ok` の記録を前提にしていたテスト(C-REP-01・C-STAGE-05・C-DRAW など)は `approved` の記録を使う。新しく **C-NOPRIME-01**(①`submitVerdict(ok)` で `approved`・Events `verdict_ok` の `to=approved` ②`recordPrimeSign` は PIN の有無・正誤によらず `STATE_CONFLICT` で PIN の誤りを数えない ③`uploadPhotoChunk(side=prime)` は `STATE_CONFLICT` ④`actions` に `recordPrimeSign` が無い ⑤`approved` の打設前の記録で `stopPour`・`generateReport` ができる)、harness だけの **C-NOPRIME-02**(シートの行が `qa_ok` の記録を `getRecord`・`listRecords(statuses=[approved])`・`stopPour`・`generateReport` が `approved` として扱う)、**E-37**(QA が合格すると S08 が「打設可」になり、「元請サインを記録」ボタンが無く、サイン欄の元請の枠に「元請はPDFに記入」。S09 に「元請待ち」の見出しが無い)を足す。
+10. **テスト(§12 の読み替え)**: `recordPrimeSign` で `approved` にしていたテスト(C-STATE-01/03/09、C-PERM-03/04、C-IDEM-01、C-RESP-01、C-OWN-04、C-STAGE-04、C-PHOTO-04 の prime、E-03・E-15・E-28・E-31 の元請サイン)は、**合格で `approved` になる**ことを確かめる形に直す。`qa_ok` の記録を前提にしていたテスト(C-REP-01・C-STAGE-05・C-DRAW など)は `approved` の記録を使う。新しく **C-NOPRIME-01**(①`submitVerdict(ok)` で `approved`・Events `verdict_ok` の `to=approved` ②`recordPrimeSign` は PIN の有無・正誤によらず `STATE_CONFLICT` で PIN の誤りを数えない ③`uploadPhotoChunk(side=prime)` は `STATE_CONFLICT` ④`actions` に `recordPrimeSign` が無い ⑤`approved` の打設前の記録で `stopPour`・`generateReport` ができる)、harness だけの **C-NOPRIME-02**(シートの行が `qa_ok` の記録を `getRecord`・`listRecords(statuses=[approved])`・`stopPour`・`generateReport` が `approved` として扱う)、**E-37**(QA が合格すると S08 が「打設可」になり、「元請サインを記録」ボタンが無く、サイン欄に元請の枠が無い(版1.19.1)。S09 に「元請待ち」の見出しが無い)を足す。
 
 ## 7. 写真
 
@@ -3265,3 +3267,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-14 | 1.17.0 | ユーザー決定(2026-11-13〜14。REQUIREMENTS §22-C 版1.14.7)。**段階2b: 写真への文字の書き込み**。§2.9 に `kind=photo_text`・列 `texts`(`basePhotoId` を元の写真に使う)、§5.1 PhotoMeta の `text`、§5.4.4 の `photo_text` の受け付け(最新の1枚だけ有効・ラウンドを問わない・他人の写真は不可)と `deletePhoto`・`getPhotoThumbs`・`getPhoto`、§7.6 の「文」の印、§7.8(新設)、§9.4 の文言、§10.2b-B の画像の選び方、§12 に C-TEXT-01・U-TEXT-01・E-36。P-55。**action 数は変わらない。列の追加で `setupSheets` が必要** |
 | 2026-11-14 | 1.18.0 | ユーザー決定(2026-11-14「案Aと案Bを進める」)。**読み取り側の待ち短縮(旧 仮置き P-45)を確定**。§8.11.9 を仮置きから外し、細部を確定: ①起動時の `me`/`getBootstrap` を並列に ②保存済みの `me`・`bootstrap` があれば応答を待たずに描く(ホーム表示中に役割が変わったときだけ描き直す。認証系エラーは従来どおり S01/S02) ③S06/S07/S08/S10 はキャッシュの詳細で先に描き、裏の `getRecord` で版が大きければ差し替える(S06・S10 は未送信・変更・保存待ちが無いときだけ。S07 は開き直す)。その間 `msg.checking_latest`(`.checking`)。`KW.data.loadDetail` に `cacheFirst`。§9.4 の注記、§12 の E-29(時間の目安を 1500ms に)、§13 の責務、§14 P-45・§14.2 の14①、付録A-1・5 を更新。サーバー・action・シートの変更なし。あわせて REQUIREMENTS §15 に keepWarm の本番設置(2026-11-14)を記録 |
 | 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |
+| 2026-11-15 | 1.19.1 | ユーザー決定(2026-11-15)「記録の詳細の画面に 元請サイン 元請はPDFに記入の表示は不要」: S08 のサイン欄で、元請サインが記録されていない記録は元請の枠を出さない(職長・承認者の2枠を2列)。記録済みの古い記録は従来どおり3枠。§6.11-7・§6.11-10(E-37)を更新。API・シートの変更なし。 |

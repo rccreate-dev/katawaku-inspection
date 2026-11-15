@@ -165,6 +165,7 @@ textarea{width:100%;min-height:72px;border:1px solid var(--line);border-radius:8
 
 /* 3者サイン */
 .sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px}
+.sigs.two{grid-template-columns:repeat(2,1fr)}
 .sig{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:8px;min-width:0;font-size:13px;overflow-wrap:anywhere}
 .sig b{display:block;font-size:12px;color:var(--muted)}
 .sig.done{border-color:var(--good);background:var(--good-soft)}
@@ -264,7 +265,7 @@ label.lbl{display:block;font-size:14px;font-weight:700;color:var(--muted);margin
 }
 @media (max-width:360px){
   .app{padding-inline:12px}
-  .sigs{grid-template-columns:1fr}
+  .sigs,.sigs.two{grid-template-columns:1fr}
 }
 
 /* 実測入力の行: [＋/－][数値][測定点を追加] */

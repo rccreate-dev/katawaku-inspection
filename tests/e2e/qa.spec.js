@@ -120,7 +120,7 @@ describe('E-03/E-04 QA: 確認中→判定→差し戻し→是正→再提出',
 });
 
 describe('E-03 QA: 合格→PIN→打設可→元請PDF(版1.19.0)', () => {
-  it('鈴木(s_c主担当)が全okで合格(誤PIN→正PIN)で approved、PDF生成。元請サインのボタンは無く、元請の枠は「元請はPDFに記入」', async () => {
+  it('鈴木(s_c主担当)が全okで合格(誤PIN→正PIN)で approved、PDF生成。元請サインのボタンも元請の枠も無い(版1.19.1)', async () => {
     const s = await E.newSession(env);
     await E.login(s, '鈴木');
     const { page } = s;
@@ -141,7 +141,8 @@ describe('E-03 QA: 合格→PIN→打設可→元請PDF(版1.19.0)', () => {
     // 元請サインはアプリで記録しない(PDFに直接書いてもらう)
     assert.equal(await page.getByRole('button', { name: s.t('act.prime_sign') }).count(), 0, '元請サインのボタンが無い');
     assert.equal(await page.locator('.sig.done').count(), 2, '職長と承認者のサインが済');
-    assert.equal((await page.locator('[data-prime="pdf"]').innerText()).trim(), s.t('lbl.sig_prime_on_pdf'));
+    assert.equal(await page.locator('.sig').count(), 2, '元請の枠は出さない(版1.19.1)');
+    assert.ok(!(await page.locator('.sigs').innerText()).includes(s.t('lbl.sig_prime')), '「元請サイン」の見出しが無い');
     const rec = (await E.stateRows('Records')).find((r) => r.recordId === C2);
     assert.equal(rec.status, 'approved'); assert.ok(!rec.primeSignerName, '元請サインは記録されない');
     s.assertClean(); await s.close();
@@ -149,7 +150,7 @@ describe('E-03 QA: 合格→PIN→打設可→元請PDF(版1.19.0)', () => {
 });
 
 describe('E-37 元請サインの記録の廃止(版1.19.0。SPEC §6.11)', () => {
-  it('旧「元請待ち」の C1 は打設可。元請サインのボタンが無く、元請の枠は「元請はPDFに記入」。S09 に「元請待ち」の見出しが無い', async () => {
+  it('旧「元請待ち」の C1 は打設可。元請サインのボタンと元請の枠が無い。S09 に「元請待ち」の見出しが無い', async () => {
     const C1 = 'r_seedc10000000000'; // 旧 qa_ok(元請サイン未)。版1.19.0 から approved
     const s = await E.newSession(env);
     await E.login(s, '鈴木');
@@ -162,7 +163,9 @@ describe('E-37 元請サインの記録の廃止(版1.19.0。SPEC §6.11)', () =
     await chip.waitFor();
     assert.equal((await chip.innerText()).trim(), s.t('st.approved'), '打設可');
     assert.equal(await page.getByRole('button', { name: s.t('act.prime_sign') }).count(), 0, '「元請サインを記録」ボタンが無い');
-    assert.equal((await page.locator('[data-prime="pdf"]').innerText()).trim(), s.t('lbl.sig_prime_on_pdf'), '元請の枠は「元請はPDFに記入」');
+    assert.equal(await page.locator('.sig').count(), 2, '元請の枠は出さない(版1.19.1)');
+    const sigText = await page.locator('.sigs').innerText();
+    assert.ok(!sigText.includes(s.t('lbl.sig_prime')) && !sigText.includes(s.t('lbl.sig_prime_on_pdf')), '「元請サイン」「元請はPDFに記入」が無い');
     assert.ok(await page.getByRole('button', { name: s.t('act.report') }).count() > 0, '元請PDFのボタンはある');
     s.assertClean(); await s.close();
   });

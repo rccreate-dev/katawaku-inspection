@@ -113,9 +113,9 @@ describe('E-31 1次検査者と承認者 (ja, 375px)', () => {
     await l.page.locator('.chip.st-approved').first().waitFor();
     assert.equal(await l.page.getByRole('button', { name: l.t('act.prime_sign') }).count(), 0, '元請サインのボタンが無い');
     const sigHeads = await l.page.locator('.sig b').allInnerTexts();
-    assert.deepEqual(sigHeads, [l.t('lbl.sig_first'), l.t('lbl.sig_approver'), l.t('lbl.sig_prime')], '3者サイン欄の見出し');
+    assert.deepEqual(sigHeads, [l.t('lbl.sig_first'), l.t('lbl.sig_approver')], 'サイン欄の見出し(版1.19.1: 元請の枠は出さない)');
     assert.ok((await l.page.locator('.sig').first().innerText()).includes('(' + l.t('role.qa') + ')'), '1次検査者の氏名の横に役割');
-    assert.equal(await l.page.locator('.sig.done').count(), 2, '元請の枠は「元請はPDFに記入」');
+    assert.equal(await l.page.locator('.sig.done').count(), 2, '職長(1次検査者)と承認者');
     await clean(l, 'S08(責任者)');
     const recA = (await E.stateRows('Records')).find((r) => r.recordId === recordId);
     assert.equal(recA.status, 'approved'); assert.equal(recA.ownerRole, 'qa');
@@ -169,7 +169,7 @@ describe('E-31 1次検査者と承認者 (id, 375px)', () => {
     await E.goHash(s, '#/record/' + recordId);
     await s.page.locator('.sig b').first().waitFor();
     const heads = await s.page.locator('.sig b').allInnerTexts();
-    assert.deepEqual(heads, [E.T('lbl.sig_first', null, 'id'), E.T('lbl.sig_approver', null, 'id'), E.T('lbl.sig_prime', null, 'id')]);
+    assert.deepEqual(heads, [E.T('lbl.sig_first', null, 'id'), E.T('lbl.sig_approver', null, 'id')]);
     await clean(s, 'S08(id)');
     s.assertClean(); await s.close();
   });

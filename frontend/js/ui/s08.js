@@ -154,13 +154,12 @@
         if (d.status === 'fix' && d.qaComment) el.appendChild(C.banner('bad', [h('b', null, t('lbl.qa_comment')), h('div', { class: 'cmt mgr' }, d.qaComment)]));
         // 3者サイン
         var sg = d.signatures || {};
-        el.appendChild(h('div', { class: 'sigs' },
+        el.appendChild(h('div', { class: 'sigs' + (sg.prime ? '' : ' two') },
           // 版1.12.0: 1次検査者が管理者・責任者なら見出しを読み替え、氏名の横に役割を出す(SPEC §9.2c)
           C.sigBox(C.lbl('lbl.sig_foreman', d), sg.foreman && (sg.foreman.name + (C.isMgrOwned(d) ? '(' + C.roleName(d.ownerRole) + ')' : '')), sg.foreman && sg.foreman.at),
           C.sigBox(C.lbl('lbl.sig_qa', d), sg.qa && sg.qa.name, sg.qa && sg.qa.at),
-          // 版1.19.0(§6.11-7): 元請のサインはPDFに直接書く。古い記録で記録済みなら従来どおり出す
-          sg.prime ? C.sigBox(t('lbl.sig_prime'), sg.prime.signerName, sg.prime.at, h('div', null, t('method.' + sg.prime.method)))
-            : h('div', { class: 'sig' }, h('b', null, t('lbl.sig_prime')), h('div', { class: 'state', 'data-prime': 'pdf' }, t('lbl.sig_prime_on_pdf')))));
+          // 版1.19.1(§6.11-7): 元請のサインはPDFに直接書くので、元請の枠は出さない。古い記録で記録済みのときだけ従来どおり出す
+          sg.prime ? C.sigBox(t('lbl.sig_prime'), sg.prime.signerName, sg.prime.at, h('div', null, t('method.' + sg.prime.method))) : null));
         if ((d.primePhotos || []).length) el.appendChild(C.photoStrip(d.primePhotos));
         // 期限
         var tm = d.timing || {};
