@@ -205,7 +205,8 @@ describe('C-REP 元請向けPDF', () => {
     const { recordId } = await h.makeQaOk(t, qa);
     const r1 = await qa.ok('generateReport', { recordId });
     assert.equal(r1.report.version, 1); assert.equal(r1.report.recordStatus, 'approved'); assert.equal(r1.report.recordId, recordId);
-    assert.match(r1.report.url, /^https?:\/\//); assert.match(r1.report.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(!('url' in r1.report), '版1.20.2: 応答にドライブのURLを入れない'); assert.match(r1.report.sha256, /^[0-9a-f]{64}$/);
+    assert.ok((await qa.ok('listReports', { recordId })).reports.every((x) => !('url' in x)), 'listReports にも url が無い');
     assert.equal(r1.report.generatedBy, 'u_sato'); assert.equal(r1.report.generatedByName, '佐藤');
     const r2 = await qa.ok('generateReport', { recordId });
     assert.equal(r2.report.version, 2);
@@ -221,7 +222,8 @@ describe('C-REP 元請向けPDF', () => {
     const qa = await h.login('u_sato');
     const { recordId } = await h.makeQaOk(t, qa, { lot: 'RP1' });
     const r = await qa.ok('generateReport', { recordId });
-    const res = await fetch(r.report.url);
+    const url = await h.reportUrl(r.report.reportId);
+    const res = await fetch(url);
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type'), /application\/pdf/);
     const buf = Buffer.from(await res.arrayBuffer());
@@ -229,7 +231,7 @@ describe('C-REP 元請向けPDF', () => {
     assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v1 approved stage=pre_pour`), '版1.9: 末尾に stage={stage}');
     assert.equal(h.sha256(buf), r.report.sha256, 'sha256 は実バイト列のハッシュ');
     // 件名(SPEC §10.2a): ファイル名は「現場名 階 [工区] 打設箇所」+ _v版_日時。recordId は含まない
-    const fname = decodeURIComponent(r.report.url.split('/').pop());
+    const fname = decodeURIComponent(url.split('/').pop());
     // 版1.9(§10.2a): {subject}_{段階名}_v{version}_{YYYYMMDD-HHmm}.pdf。段階名=打設前/出来形
     assert.match(fname, /^A現場\(仮\) 1F RP1_打設前_v1_\d{8}-\d{4}\.pdf$/, 'ファイル名=' + fname);
     assert.ok(!fname.includes(recordId), 'ファイル名に recordId を含まない');

@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.20.1 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
+- 版: 1.20.2 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -651,7 +651,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | enabledStages | `pre_pour,post_demold` | カンマ区切り。作成可能な段階。**版1.9 の既定は `pre_pour,post_demold`**。`during_pour` などは入れない(項目が無く、サーバーも有効項目0件の段階は作成させない)。既存の本番シートの値は自動では変わらない(§2.6.1b) |
 | pollIntervalSec | `60` | クライアントのポーリング間隔 |
 | driveRootFolderId | (setupで作成) | |
-| pdfShareMode | `private`(版1.20.0。旧初期値 `anyone_with_link`) | または `anyone_with_link`(P-32・§6.12-4) |
+| pdfShareMode | `private` | **版1.20.2で廃止**。値は使わず、PDFは常に共有しない(§6.12-9)。行は残してよい |
 | mailEnabled | `TRUE` | |
 | appBaseUrl | (要設定) | メール内リンク用 |
 | retentionYears | `10` | 保管年数(表示・運用用。自動削除はしない P-18) |
@@ -933,7 +933,7 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **AdminSite**(版1.13.0。§5.4.8 の `site`。責任者だけが受け取る) `{ "siteId","name","status":"active|closed","floors":["1F","2F"],"zones":[],"primeContractor":"","address":"","startDate":"date|null","endDate":"date|null","createdAt","updatedAt" }`(**`joinKey`・`driveFolderId` は含めない**。QRは従来どおり `adminGetJoinInfo`。`floors`/`zones` はシートのカンマ区切りを配列にしたもの)
 
-**Report** `{ "reportId","recordId","version":1,"recordStatus":"qa_ok|approved","url":"https://drive.google.com/file/d/…/view","sha256":"…","generatedBy","generatedByName","generatedAt" }`
+**Report** `{ "reportId","recordId","version":1,"recordStatus":"qa_ok|approved","sha256":"…","generatedBy","generatedByName","generatedAt" }`(版1.20.2: `url` を返さない。§6.12-9)
 
 **ItemPatch**(`saveDraft`/`saveQaDraft` の `items[]`): `{ "itemId":"i4", "result":"ok|ng|na|null", "severity":"minor|major|null", "values":[2,-1], "note":"…" }`。`itemId` 以外は任意で、**指定したキーだけ更新**(`null` で消去、`values:[]` で消去)。未知のキー・未知の `itemId`・範囲外(`values` は有限数・最大10件、`note` ≤1000文字)は `VALIDATION_FAILED`(`FIELD_INVALID`)。職長は `audience=qa` の項目、QAは `audience=foreman` の項目を書けない(**版1.12.0: 役割ではなく側で決める**。`saveDraft`(1次検査側。1次検査者が QA・責任者でも)は `audience=qa` の項目を書けず、`saveQaDraft`(承認側)は `audience=foreman` の項目を書けない)。
 
@@ -1605,7 +1605,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
    - 権限は `listReports` と同じ(役割=管理者・責任者、現場の担当の検査。担当外は `FORBIDDEN_SITE`、職長は `FORBIDDEN_ROLE`)。**記録の状態は問わない**(過去の版を開くため)。
    - サーバーは `Reports.driveFileId` のファイルの中身を読み、`base64`(PDFの全体)・`bytes`(バイト数)・`sha256`(中身から計算した値)・`fileName`(ドライブのファイル名=§10.2a の名前)を返す。読めなければ `DRIVE_ERROR`。Events は書かない。
    - action 数は **51 → 52**(§5.5 の「PDF」、§8.11.2 の「C 参照」に入る。U-CLASS-01・C-KEEP-01・C-REP-05/06 の数も52に読み替える)。
-3. **M6(元請提出用PDF)の画面**: `Report.url` は画面で使わない(開かない・送らない・コピーしない。応答の `url` は互換のため残す)。
+3. **M6(元請提出用PDF)の画面**: `Report.url` は画面で使わない(開かない・送らない・コピーしない。版1.20.2 で応答からも外した=9)。
    - 「開く」(最新の版・過去の版の各行とも): `getReportFile` で受け取り、`sha256` を確かめて PDF のファイルにし、**端末の中で開く**(新しいタブで `blob:` の URL。Android は `download` 付きで保存し、端末のPDFアプリで開く)。
    - 「ファイルで送る」(`act.send_file`。旧「共有」): 受け取ったPDFファイルを `navigator.share({ files })` で送る(LINE・メールなど)。ファイルを送れない端末では保存し、`msg.pdf_saved` を出す。
    - 受け取り中はそのボタンを押せなくし `msg.pdf_loading` を出す。受け取ったPDFは M6 を閉じるまで端末のメモリに持つ(同じ版をもう一度受け取らない)。受け取りのあと、ブラウザの制限で開けない・送れないときは `msg.pdf_ready_tap`(もう一度押すと、すぐ開く・送る)。`sha256` が合わなければ `msg.pdf_broken`。通信できなければ `err.network`。
@@ -1632,6 +1632,15 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
    - 生成日 = `Reports.generatedAt` の JST の日付を `YYYY-MM-DD`(例 `2026-11-15`。「/」はファイル名に使えないため)。
    - 同じ記録で同じ日に作った版が2つ以上あるときは、その日の2つ目から `(2)`・`(3)`…を拡張子の前に付ける(その日の版を `version` の小さい順に数える)。
    - 例: `C現場(仮) 1F 東 L1 打設可 2026-11-15.pdf`、同じ日の2つ目 `C現場(仮) 1F 東 L1 打設可 2026-11-15(2).pdf`。過去に作った版も、取り出すときにこの名前になる。
+9. **ドライブの場所を端末に渡さない・共有しない(版1.20.2。ユーザー決定 2026-11-15。REQUIREMENTS §24-5)**: ドライブは社内専用ではないため、利用者がドライブのPDFを見られる・開ける道を無くす。
+   - `Report`(`generateReport`・`listReports` の応答)から **`url` を外す**。`Reports` シートの `url`・`driveFileId` 列はサーバー内でだけ使う(列は変えない)。ほかの応答にもドライブのURL・ファイルIDを入れない(写真も従来どおり入れない)。
+   - `generateReport` はPDFを**常に共有しない**(`file.setSharing` を呼ばない)。`Config.pdfShareMode` は廃止し、値に関わらず共有しない(4 の「作成済みのPDFの共有は変えない」は 10 で置き換える)。
+   - mock も同じ(応答に `url` を入れない。`/files/reports/` の配信はテスト専用として残す)。
+10. **作成済みのPDFの共有を止める(GASエディタ専用。action ではない。ACTIONS に登録しない)**:
+   - `checkReportSharing()`: 何も変えない。`Reports` の全行のファイルについて、共有されている件数を数え、ルート・`reports`・現場ごとの `reports/…` フォルダの共有状態(`getSharingAccess`)と編集者・閲覧者の**人数**をログに出す。戻り値 `{ reports, shared, changed:0, missing, failed, folders:[{folder, access, editors, viewers}] }`。現場名・ファイル名・URL・メールアドレスは出さない(フォルダは `reports/現場1` のように番号で出す)。
+   - `unshareReportFiles()`: 共有されているPDFを `setSharing(PRIVATE, NONE)` で共有しない状態に変える(`changed` に数える)。**フォルダは変えない**(見るだけ)。シート・Config・Events には書かない。何度実行してもよい。
+   - 本番では `checkReportSharing` → 結果を責任者に報告 → 承認のあと `unshareReportFiles` の順で実行する。フォルダが共有されていたら、変える前に責任者に報告する。
+11. **テスト(版1.20.2)**: C-REP-01・C-REP-02・C-STAGE-05 は応答に `url` が無いことを確かめ、PDFの中身・ドライブのファイル名は `Reports` 行(`/__mock/state`)から読む。**C-REP-07**(harness): ①`pdfShareMode=anyone_with_link` でも共有しない ②`generateReport`・`listReports` に `url` が無い ③`checkReportSharing` は数えるだけで変えない ④`unshareReportFiles` で共有が止まり、2回目は0件 ⑤シートに書かない。**E-38** に「API の応答にドライブのURL・`/files/reports/`・`"url":` が無い」を追加。
 
 ## 7. 写真
 
@@ -3309,4 +3318,5 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |
 | 2026-11-15 | 1.19.1 | ユーザー決定(2026-11-15)「記録の詳細の画面に 元請サイン 元請はPDFに記入の表示は不要」: S08 のサイン欄で、元請サインが記録されていない記録は元請の枠を出さない(職長・承認者の2枠を2列)。記録済みの古い記録は従来どおり3枠。§6.11-7・§6.11-10(E-37)を更新。API・シートの変更なし。 |
 | 2026-11-15 | 1.20.0 | ユーザー決定(2026-11-15。REQUIREMENTS §24)「PDFを開くとドライブの画面が出る。社内の複数人が使うアプリでドライブが一瞬でも表示されるのはやめてください」「過去の資料を開く際もドライブが見えないように」: §6.12 新設。①参照の action `getReportFile` を追加(51→52)②M6 の開く・送るは受け取ったPDFで行い、ドライブのURLを使わない。「共有」→「ファイルで送る」(PDFファイルを送る)③`pdfShareMode` の初期値を `private` に ④i18n 5キー追加・`scr.M6.desc` 変更 ⑤C-REPF-01・E-38。シートの列の変更なし。 |
+| 2026-11-15 | 1.20.2 | ユーザー決定(2026-11-15。REQUIREMENTS §24-5)「ドライブは社内専用ではないので利用者に一瞬でも見れてしまう、アクセスできてしまうのを回避してください」: §6.12-9〜11 新設。`Report` 応答から `url` を外す。PDFは常に共有しない(`pdfShareMode` 廃止)。作成済みPDFの共有を止めるエディタ専用関数 `checkReportSharing`・`unshareReportFiles`。C-REP-07・E-38 追加分。シートの列・action 数の変更なし。 |
 | 2026-11-15 | 1.20.1 | ユーザー決定(2026-11-15)「送信した時に表示される資料の名称を 現場名・階・工区・打設箇所・ステータス・生成日 にしてください」: §6.12-8 新設。`getReportFile.fileName` を `{件名} {ステータス} {YYYY-MM-DD}[(n)].pdf` に(日付の形と同じ日の2つ目以降の `(2)` はユーザー決定)。ドライブのファイル名(§10.2a)は変えない。C-REPF-01⑤・E-38 を更新。 |

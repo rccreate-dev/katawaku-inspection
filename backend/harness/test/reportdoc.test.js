@@ -111,7 +111,9 @@ const gen = (id) => {
 };
 const reportEvents = (id) => h.control('state', { sheet: 'Events' }).data.rows.filter((e) => e.recordId === id && e.kind === 'report_generated');
 const detailOf = (e) => (typeof e.detail === 'string' ? JSON.parse(e.detail) : e.detail);
-const pdfName = (rep) => decodeURIComponent(rep.url.split('/files/reports/')[1]);
+// 版1.20.2: 応答に url は無いので、Reports 行の url(サーバー内)から名前を読む
+const repUrl = (rep) => h.control('state', { sheet: 'Reports' }).data.rows.find((r) => r.reportId === rep.reportId).url;
+const pdfName = (rep) => decodeURIComponent(repUrl(rep).split('/files/reports/')[1]);
 const pdfFile = (rep) => h.state.driveFindFile(pdfName(rep));
 
 test('C-REP-02 方式の切替: html 側(行なし/空/html/HTML/xyz/docs)と doc 側(doc/" Doc "/DOC)', () => {
@@ -134,7 +136,8 @@ test('C-REP-02 方式の切替: html 側(行なし/空/html/HTML/xyz/docs)と do
       assert.ok(h.state.lastHtml && h.state.lastHtml.length > 500);
     }
     // ③ どちらでも同じ形: url・PDF・名前・Reports の列と値の形
-    assert.match(rep.url, /^https?:\/\//);
+    assert.ok(!('url' in rep), '版1.20.2: 応答に url を入れない');
+    assert.match(repUrl(rep), /^https?:\/\//);
     assert.match(rep.sha256, /^[0-9a-f]{64}$/);
     assert.match(pdfName(rep), /^.+ 1F D\d+_打設前_v\d+_\d{8}-\d{4}\.pdf$/);
     assert.equal(pdfFile(rep).blob._buf.subarray(0, 5).toString('latin1'), '%PDF-');
@@ -523,4 +526,34 @@ test('C-REP-03 元請サインの記録が無い記録(版1.19.0 の通常)の�
   gen(id);
   const sign = h.state.docShim.last.cellTexts(1)[1];
   assert.ok(sign[2].includes('氏名 ______________ 日付 ______________') && sign[2].includes('署名・押印'));
+});
+
+test('C-REP-07(版1.20.2 §6.12-9・10): 応答に url が無い。pdfShareMode に関わらず共有しない。checkReportSharing は数えるだけ、unshareReportFiles は共有を止める', () => {
+  setEngine('html');
+  const id = makeQaOk();
+  // ① pdfShareMode=anyone_with_link でも共有しない(廃止)
+  h.control('patch', { sheet: 'Config', key: 'pdfShareMode', set: { value: 'anyone_with_link' } });
+  h.ctx.clearRefCache();
+  const rep1 = gen(id);
+  assert.ok(!('url' in rep1), '応答に url が無い');
+  assert.equal(pdfFile(rep1).sharing, null, 'anyone_with_link でも共有しない');
+  const list = sato('listReports', { recordId: id });
+  assert.ok(list.data.reports.every((r) => !('url' in r)), 'listReports にも url が無い');
+  // ② 版1.20.0 より前に作った共有済みのPDFを再現
+  const rep2 = gen(id);
+  pdfFile(rep1).setSharing('ANYONE_WITH_LINK', 'VIEW');
+  const reportsBefore = JSON.stringify(h.control('state', { sheet: 'Reports' }).data.rows);
+  const c = h.ctx.checkReportSharing();
+  assert.equal(c.reports, 2); assert.equal(c.shared, 1); assert.equal(c.changed, 0); assert.equal(c.failed, 0); assert.equal(c.missing, 0);
+  assert.equal(pdfFile(rep1).sharing.access, 'ANYONE_WITH_LINK', 'check は変えない');
+  assert.equal(JSON.stringify(c.folders.slice(0, 2).map((f) => f.folder)), JSON.stringify(['(ルート)', 'reports']));
+  assert.ok(c.folders.length >= 3, '現場ごとの reports フォルダも見る');
+  assert.ok(c.folders.every((f) => f.access === 'PRIVATE' && f.editors === 0 && f.viewers === 0));
+  assert.ok(!JSON.stringify(c).includes('現場(仮)'), '現場名・ファイル名をログに出さない');
+  // ③ 止める
+  const u = h.ctx.unshareReportFiles();
+  assert.equal(u.shared, 1); assert.equal(u.changed, 1); assert.equal(u.failed, 0);
+  assert.equal(pdfFile(rep1).sharing, null); assert.equal(pdfFile(rep2).sharing, null);
+  assert.equal(h.ctx.unshareReportFiles().shared, 0, 'もう一度実行しても何も変えない');
+  assert.equal(JSON.stringify(h.control('state', { sheet: 'Reports' }).data.rows), reportsBefore, 'シートには書かない');
 });

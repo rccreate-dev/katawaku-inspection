@@ -185,6 +185,10 @@ function createShims(state) {
     getFoldersByName(name) { return iter(this.folders.filter((f) => f.name === name)); }
     getFilesByName(name) { return iter(this.files.filter((f) => f.name === name)); }
     getFiles() { return iter(this.files.slice()); }
+    getFolders() { return iter(this.folders.slice()); }
+    getSharingAccess() { return 'PRIVATE'; }
+    getEditors() { return []; }
+    getViewers() { return []; }
     createFile(blobOrName, content, mime) {
       if (state.driveFail && state.driveFail.createFile > 0 && --state.driveFail.createFile === 0) {
         throw new Error('Service error: Drive (注入された失敗)');
@@ -218,7 +222,8 @@ function createShims(state) {
     }
     setDescription(d) { this.description = String(d); return this; }
     getDescription() { return this.description; }
-    setSharing(access, perm) { this.sharing = { access, perm }; return this; }
+    setSharing(access, perm) { this.sharing = access === 'PRIVATE' ? null : { access, perm }; return this; }
+    getSharingAccess() { return this.sharing ? this.sharing.access : 'PRIVATE'; }
     getDateCreated() { return new Date(this.created); }
     setTrashed(t) {
       if (t && !this.trashed) {
@@ -238,7 +243,7 @@ function createShims(state) {
   const driveRoot = new Folder('(root)', null);
   const DriveApp = {
     Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE' },
-    Permission: { VIEW: 'VIEW', EDIT: 'EDIT' },
+    Permission: { VIEW: 'VIEW', EDIT: 'EDIT', NONE: 'NONE' },
     createFolder(name) { return driveRoot.createFolder(name); },
     getFolderById(id) { const n = nodes.get(id); if (!n || !(n instanceof Folder)) throw new Error('No item with the given ID could be found'); return n; },
     getFileById(id) { const n = nodes.get(id); if (!n || !(n instanceof File)) throw new Error('No item with the given ID could be found'); return n; },

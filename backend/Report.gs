@@ -26,7 +26,8 @@ function dtShort_(s) { return s ? String(s).slice(0, 16).replace('T', ' ') : '';
 
 function reportView_(r) {
   return {
-    reportId: r.reportId, recordId: r.recordId, version: r.version, recordStatus: r.recordStatus, url: r.url, sha256: r.sha256,
+    // 版1.20.2(§6.12-9): ドライブのURL(Reports.url)は応答に入れない(端末にドライブの場所を渡さない)
+    reportId: r.reportId, recordId: r.recordId, version: r.version, recordStatus: r.recordStatus, sha256: r.sha256,
     generatedBy: r.generatedBy, generatedByName: userName_(r.generatedBy), generatedAt: r.generatedAt
   };
 }
@@ -572,9 +573,7 @@ function act_generateReport(ctx) {
     bytes = blob.getBytes();
     var folder = subFolder_(subFolder_(driveRoot_(), 'reports'), Util.sanitizeName(site.siteId + '_' + site.name));
     file = folder.createFile(blob);
-    if (Cfg.get('pdfShareMode') === 'anyone_with_link') {
-      try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* 組織ポリシーで不可なら非共有のまま(P-32) */ }
-    }
+    // 版1.20.2(§6.12-9): PDFはドライブで共有しない(pdfShareMode は廃止。値に関わらず共有しない)
     // Drive の「詳細」で方式を確認できるよう説明に残す(失敗しても生成は成功させる。SPEC §10.5.8)
     try {
       file.setDescription(fallbackReason ? 'engine=html (fallback from doc: ' + fallbackReason.slice(0, 100) + ')' : 'engine=' + used);
@@ -640,4 +639,48 @@ function reportSendName_(rec, site, row, rows) {
 function companyLine_(userId) {
   var c = userCompany_(userId);
   return c ? '<br>' + esc_(c) : '';
+}
+
+/* ---------- 版1.20.2(SPEC §6.12-10): 作成済みPDFの共有を止める(GASエディタ専用。ACTIONS に登録しない) ---------- */
+
+/** 共有の状態を数える。dryRun=true なら変えない。名前・URL・メールアドレスはログに出さない(件数だけ) */
+function reportSharingScan_(dryRun) {
+  var out = { reports: 0, shared: 0, changed: 0, missing: 0, failed: 0, folders: [] };
+  Repo.all('Reports').forEach(function (row) {
+    out.reports += 1;
+    var file;
+    try { file = DriveApp.getFileById(row.driveFileId); } catch (e) { out.missing += 1; return; }
+    try {
+      if (String(file.getSharingAccess()) === String(DriveApp.Access.PRIVATE)) return;
+      out.shared += 1;
+      if (!dryRun) { file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); out.changed += 1; }
+    } catch (e) { out.failed += 1; }
+  });
+  // フォルダは変えない(見るだけ)。ルート・reports・現場ごとの reports フォルダ
+  var look = function (label, f) {
+    try {
+      out.folders.push({ folder: label, access: String(f.getSharingAccess()), editors: f.getEditors().length, viewers: f.getViewers().length });
+    } catch (e) { out.folders.push({ folder: label, error: true }); }
+  };
+  var root = driveRoot_();
+  look('(ルート)', root);
+  var rep = subFolder_(root, 'reports');
+  look('reports', rep);
+  var it = rep.getFolders(), n = 0;
+  while (it.hasNext()) { n += 1; look('reports/現場' + n, it.next()); }
+  return out;
+}
+
+/** 見るだけ(何も変えない)。共有されているPDFの件数とフォルダの共有状態をログに出す */
+function checkReportSharing() {
+  var out = reportSharingScan_(true);
+  Logger.log(JSON.stringify(out));
+  return out;
+}
+
+/** 作成済みのPDFのうち共有されているものを「共有しない」に変える。フォルダは変えない */
+function unshareReportFiles() {
+  var out = reportSharingScan_(false);
+  Logger.log(JSON.stringify(out));
+  return out;
 }

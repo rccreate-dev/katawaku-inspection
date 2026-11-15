@@ -482,7 +482,7 @@ function absenceView(b) {
   return { absenceId: b.absenceId, userId: b.userId, userName: userName(b.userId), dateFrom: b.dateFrom, dateTo: b.dateTo, reason: b.reason || '', registeredBy: b.registeredBy, registeredByName: userName(b.registeredBy), createdAt: b.createdAt };
 }
 function reportView(r) {
-  return { reportId: r.reportId, recordId: r.recordId, version: r.version, recordStatus: r.recordStatus, url: r.url, sha256: r.sha256, generatedBy: r.generatedBy, generatedByName: userName(r.generatedBy), generatedAt: r.generatedAt };
+  return { reportId: r.reportId, recordId: r.recordId, version: r.version, recordStatus: r.recordStatus, sha256: r.sha256, generatedBy: r.generatedBy, generatedByName: userName(r.generatedBy), generatedAt: r.generatedAt };
 }
 
 // ---------------------------------------------------------------------------

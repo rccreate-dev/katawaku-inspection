@@ -106,6 +106,12 @@ const driveInfo = async () => {
   return { paths, bodies: paths.filter((x) => x.startsWith('photos/')).length, thumbs: paths.filter((x) => x.startsWith('thumbs/')).length, files: d.files || [] };
 };
 const driveLog = async () => (await mock('driveLog', {})).log;
+/** 版1.20.2: 応答に url は無い。テストだけがサーバー内の Reports 行からPDFの置き場所(ドライブのURL相当)を読む */
+const reportUrl = async (reportId) => {
+  const row = (await stateRows('Reports')).find((r) => r.reportId === reportId);
+  if (!row) throw new Error('Reports に無い: ' + reportId);
+  return row.url;
+};
 const eventsOf = async (recordId) => (await stateRows('Events')).filter((e) => e.recordId === recordId);
 
 // ---------------------------------------------------------------------------
@@ -306,4 +312,4 @@ async function makeQaOk(tanaka, qa, opts = {}) {
   return { recordId };
 }
 
-module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, LEGACY_ITEM_IDS, PRE_POUR_ITEM_IDS, POST_DEMOLD_ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, issueCode, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, fillSelf, advanceToQaOk, primeSign, getRecord, makeQaOk };
+module.exports = { API_URL, BASE, APP_VERSION, PINS, KEY_ITEMS, ITEM_IDS, LEGACY_ITEM_IDS, PRE_POUR_ITEM_IDS, POST_DEMOLD_ITEM_IDS, SAMPLE, rand, newClientId, newRecordId, newPhotoId, sha256, canonicalJSON, post, call, hasMock, mock, mockOnly, reset, stateRows, reportUrl, stateCounts, mailsList, driveInfo, driveLog, eventsOf, Session, login, freshLogin, issueCode, jst, jstDate, serverNow, pourPlanned, photoChunks, photoParams, uploadPhoto, uploadDrawing, bigJpeg, okPatches, createRecordFor, makeFilledDraft, makeSubmitted, fillQa, fillSelf, advanceToQaOk, primeSign, getRecord, makeQaOk };

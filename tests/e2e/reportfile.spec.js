@@ -1,4 +1,4 @@
-// E-38(版1.20.0。SPEC §6.12): 元請提出用PDFは、アプリが getReportFile で受け取って端末の中で開く・送る。
+// E-38(版1.20.0。SPEC §6.12。版1.20.2 で応答に url が無いことを追加): 元請提出用PDFは、アプリが getReportFile で受け取って端末の中で開く・送る。
 //   ドライブのURL(Report.url)を開くリンクが画面に無く、最新の版・過去の版とも「開く」で blob: のPDFが開く。
 //   「ファイルで送る」は navigator.share に PDF のファイル1つを渡す。mock、ja、375px
 'use strict';
@@ -34,6 +34,12 @@ describe('E-38 元請提出用PDFをアプリで開く・送る(ドライブを�
     s.page.on('request', (r) => {
       if (r.method() !== 'POST') return;
       try { const a = JSON.parse(r.postData() || '{}').action; if (a === 'getReportFile') calls.push(a); } catch (e) { /* 無視 */ }
+    });
+    // 版1.20.2(§6.12-9): 端末に届く応答にドライブのURL・PDFの置き場所を入れない
+    const leaks = [];
+    s.page.on('response', async (res) => {
+      if (res.request().method() !== 'POST') return;
+      try { const tx = await res.text(); if (/drive\.google\.com|\/files\/reports\/|"url"\s*:/.test(tx)) leaks.push(tx.slice(0, 200)); } catch (e) { /* 無視 */ }
     });
     await E.login(s, '鈴木');
     const { page } = s;
@@ -95,6 +101,7 @@ describe('E-38 元請提出用PDFをアプリで開く・送る(ドライブを�
     await popup.close();
     const hrefs2 = await page.evaluate(() => [...document.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')));
     assert.ok(!hrefs2.some((x) => /drive\.google\.com|\/files\/reports\//.test(x)), '過去の版にもURLのリンクが無い');
+    assert.deepEqual(leaks, [], 'API の応答にドライブのURLが無い');
     s.assertClean(); await s.close();
   });
 });

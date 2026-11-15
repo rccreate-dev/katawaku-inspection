@@ -324,11 +324,13 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const qa = await h.login('u_sato');
     const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'approved' });
     const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'approved' });
-    const name = (r) => decodeURIComponent(r.report.url.split('/').pop());
-    const r1 = await qa.ok('generateReport', { recordId: post.recordId });
+    const names = new Map();
+    const name = (r) => names.get(r.report.reportId);
+    const keep = async (r) => { names.set(r.report.reportId, decodeURIComponent((await h.reportUrl(r.report.reportId)).split('/').pop())); return r; };
+    const r1 = await keep(await qa.ok('generateReport', { recordId: post.recordId }));
     assert.equal(r1.report.version, 1);
     assert.match(name(r1), /^A現場\(仮\) 2F S5A_出来形_v1_\d{8}-\d{4}\.pdf$/, name(r1));
-    const r2 = await qa.ok('generateReport', { recordId: pre.recordId });
+    const r2 = await keep(await qa.ok('generateReport', { recordId: pre.recordId }));
     assert.match(name(r2), /^A現場\(仮\) 2F S5A_打設前_v1_\d{8}-\d{4}\.pdf$/, name(r2));
     assert.ok(!name(r1).includes(post.recordId));
     // 版2・工区ありの現場(s_c: 工区 東,西)。subject は変えず、段階名は subject の次
@@ -337,7 +339,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
       const r = await h.createRecordFor(sg, { siteId: 's_c', floor: '1F', zone: '西', lot: 'S5B', stage: 'post_demold' });
       assert.equal(r.res.ok, true, JSON.stringify(r.res.error));
       await h.advanceToQaOk(sg, sz, r.recordId);
-      const g = await sz.ok('generateReport', { recordId: r.recordId });
+      const g = await keep(await sz.ok('generateReport', { recordId: r.recordId }));
       assert.match(name(g), /^C現場\(仮\) 1F 西 S5B_出来形_v1_\d{8}-\d{4}\.pdf$/, name(g));
       return r;
     })();
@@ -348,7 +350,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const qa = await h.login('u_sato');
     const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5C', upTo: 'approved' });
     const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5C', upTo: 'approved' });
-    const body = async (r) => Buffer.from(await (await fetch(r.report.url)).arrayBuffer()).toString('latin1');
+    const body = async (r) => Buffer.from(await (await fetch(await h.reportUrl(r.report.reportId))).arrayBuffer()).toString('latin1');
     assert.ok((await body(await qa.ok('generateReport', { recordId: post.recordId }))).includes(`MOCK REPORT ${post.recordId} v1 approved stage=post_demold`));
     assert.ok((await body(await qa.ok('generateReport', { recordId: post.recordId }))).includes(`MOCK REPORT ${post.recordId} v2 approved stage=post_demold`));
     assert.ok((await body(await qa.ok('generateReport', { recordId: pre.recordId }))).includes(`MOCK REPORT ${pre.recordId} v1 approved stage=pre_pour`));

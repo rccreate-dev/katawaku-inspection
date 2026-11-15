@@ -104,7 +104,7 @@ var DEFAULT_CONFIG = [
   { key: 'enabledStages', value: 'pre_pour,post_demold', type: 'str', description: '作成可能な段階(カンマ区切り)。既定は打設前+出来形(版1.9)' },
   { key: 'pollIntervalSec', value: '60', type: 'int', description: 'クライアントのポーリング間隔(秒)' },
   { key: 'driveRootFolderId', value: '', type: 'str', description: 'Driveルートフォルダ(setupSheetsが作成)' },
-  { key: 'pdfShareMode', value: 'private', type: 'str', description: 'private(版1.20.0 の初期値。ドライブで共有しない) または anyone_with_link' },
+  { key: 'pdfShareMode', value: 'private', type: 'str', description: '版1.20.2で廃止(値は使わない。PDFは常に共有しない)' },
   { key: 'mailEnabled', value: 'TRUE', type: 'bool', description: 'メール通知の有効/無効' },
   { key: 'appBaseUrl', value: '', type: 'str', description: 'PWAの公開URL(メール・QR内リンク用。要設定)' },
   { key: 'retentionYears', value: '10', type: 'int', description: '保管年数(表示・運用用。自動削除なし)' },

@@ -59,7 +59,7 @@ async function makeReportable(lot, { drawings = 0, extraQa = 0 } = {}) {
   await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
   return { recordId, qa, t };
 }
-const REPORT_KEYS = ['reportId', 'recordId', 'version', 'url', 'sha256', 'generatedBy', 'generatedByName', 'generatedAt', 'recordStatus'];
+const REPORT_KEYS = ['reportId', 'recordId', 'version', 'sha256', 'generatedBy', 'generatedByName', 'generatedAt', 'recordStatus'];
 
 describe('C-REP reportEngine(HTTPから見える部分)', () => {
   beforeEach(() => h.reset());
@@ -109,12 +109,14 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
       const r = await qa.ok('generateReport', { recordId });
       shapes.push(Object.keys(r.report).sort().join(','));
       for (const k of REPORT_KEYS) assert.ok(k in r.report, `report.${k}`);
+      assert.ok(!('url' in r.report), '版1.20.2: url を返さない');
+      const url = await h.reportUrl(r.report.reportId);
       assert.equal(Object.keys(r).join(','), 'report', 'data は { report } だけ');
-      const buf = Buffer.from(await (await fetch(r.report.url)).arrayBuffer());
+      const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
       assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
       assert.equal(h.sha256(buf), r.report.sha256);
       if (!harness) assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v`), 'mock は常に最小PDF(本文の文言は mock 固有=§11.3。harness は方式で本文が違うので見ない)');
-      const fname = decodeURIComponent(r.report.url.split('/').pop());
+      const fname = decodeURIComponent(url.split('/').pop());
       assert.match(fname, /^A現場\(仮\) 1F RE1_打設前_v\d+_\d{8}-\d{4}\.pdf$/, 'PDF名(§10.2a)は方式で変わらない: ' + fname);
     }
     assert.equal(new Set(shapes).size, 1, '応答の形(キー集合)が方式で変わらない');
@@ -149,9 +151,11 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
         assert.notEqual(await lastHtml(), '', `${JSON.stringify(v)}: lastHtml が更新される`);
       }
       shapes.push(Object.keys(r.report).sort().join(','));
-      assert.match(r.report.url, /^https?:\/\//);
-      names.push(decodeURIComponent(r.report.url.split('/').pop()).replace(/_v\d+_\d{8}-\d{4}\.pdf$/, ''));
-      const res = await fetch(r.report.url);
+      assert.ok(!('url' in r.report));
+      const url = await h.reportUrl(r.report.reportId);
+      assert.match(url, /^https?:\/\//);
+      names.push(decodeURIComponent(url.split('/').pop()).replace(/_v\d+_\d{8}-\d{4}\.pdf$/, ''));
+      const res = await fetch(url);
       assert.equal(Buffer.from(await res.arrayBuffer()).subarray(0, 5).toString('latin1'), '%PDF-');
       return r;
     };
@@ -246,7 +250,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
       n += 1;
       assert.equal(r.ok, true, `${failMode}: ` + JSON.stringify(r.error));
       assert.equal(r.data.report.version, n);
-      const buf = Buffer.from(await (await fetch(r.data.report.url)).arrayBuffer());
+      const buf = Buffer.from(await (await fetch(await h.reportUrl(r.data.report.reportId))).arrayBuffer());
       assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
       const s = await docShim({});
       assert.equal(s.counts.created, s.counts.trashed, `${failMode}: 作った一時文書は必ずゴミ箱`);
