@@ -158,7 +158,9 @@
           // 版1.12.0: 1次検査者が管理者・責任者なら見出しを読み替え、氏名の横に役割を出す(SPEC §9.2c)
           C.sigBox(C.lbl('lbl.sig_foreman', d), sg.foreman && (sg.foreman.name + (C.isMgrOwned(d) ? '(' + C.roleName(d.ownerRole) + ')' : '')), sg.foreman && sg.foreman.at),
           C.sigBox(C.lbl('lbl.sig_qa', d), sg.qa && sg.qa.name, sg.qa && sg.qa.at),
-          C.sigBox(t('lbl.sig_prime'), sg.prime && (sg.prime.signerName), sg.prime && sg.prime.at, sg.prime ? h('div', null, t('method.' + sg.prime.method)) : null)));
+          // 版1.19.0(§6.11-7): 元請のサインはPDFに直接書く。古い記録で記録済みなら従来どおり出す
+          sg.prime ? C.sigBox(t('lbl.sig_prime'), sg.prime.signerName, sg.prime.at, h('div', null, t('method.' + sg.prime.method)))
+            : h('div', { class: 'sig' }, h('b', null, t('lbl.sig_prime')), h('div', { class: 'state', 'data-prime': 'pdf' }, t('lbl.sig_prime_on_pdf')))));
         if ((d.primePhotos || []).length) el.appendChild(C.photoStrip(d.primePhotos));
         // 期限
         var tm = d.timing || {};
@@ -173,14 +175,6 @@
         if (has(d, 'saveDraft')) btns.appendChild(h('button', { type: 'button', class: 'btn', on: { click: function () { KW.app.go('#/record/' + id + '/edit'); } } }, d.status === 'fix' ? t('act.fix_resubmit') : t('act.continue')));
         if (has(d, 'claimReview')) btns.appendChild(h('button', { type: 'button', class: 'btn', on: { click: function () { KW.app.go('#/record/' + id + '/review'); } } }, t('act.claim')));
         else if (has(d, 'saveQaDraft')) btns.appendChild(h('button', { type: 'button', class: 'btn', on: { click: function () { KW.app.go('#/record/' + id + '/review'); } } }, t('act.to_review')));
-        if (has(d, 'recordPrimeSign')) {
-          btns.appendChild(h('button', { type: 'button', class: 'btn', disabled: !online, on: { click: function () {
-            KW.modal.primeSign(d).then(function (res) {
-              if (res && res.ok) { C.toast(KW.ts('msg.prime_signed', d.stage)); KW.data.applyRecord(res.data.record, id).then(function () { return reload({ maxAgeMs: 15000 }); }); }
-              else if (res && !res.ok) reload(); // 拒否(STATE_CONFLICT 等): 取り直して表示を更新(§8.11.8-4)
-            });
-          } } }, KW.ts('act.prime_sign', d.stage)));
-        }
         if (has(d, 'generateReport')) btns.appendChild(h('button', { type: 'button', class: 'btn ghost', disabled: !online, on: { click: function () { KW.modal.report(d); } } }, t('act.report')));
         if (has(d, 'stopPour')) {
           btns.appendChild(h('button', { type: 'button', class: 'btn badghost', on: { click: function () {
@@ -188,7 +182,7 @@
             KW.modal.stopPour(d).then(function (r) { if (r && r.ok) { if (!r.queued) C.toast(t('msg.stopped')); reload({ maxAgeMs: 15000 }); } });
           } } }, t('act.stop')));
         }
-        if (!online && (has(d, 'recordPrimeSign') || has(d, 'generateReport'))) btns.appendChild(C.msg('warn', t('msg.offline_required')));
+        if (!online && has(d, 'generateReport')) btns.appendChild(C.msg('warn', t('msg.offline_required')));
         el.appendChild(btns);
         // 項目
         el.appendChild(h('h3', null, t('scr.S08.items')));

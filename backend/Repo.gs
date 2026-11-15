@@ -76,6 +76,8 @@ var Repo = (function () {
     var o = {};
     for (var i = 0; i < def.columns.length; i++) o[def.columns[i].name] = fromCell(def.columns[i].type, vals[i]);
     Object.defineProperty(o, '_r', { value: rowNo, enumerable: false, writable: true });
+    // 版1.19.0(SPEC §6.11-4): 元請待ち(qa_ok)は廃止。既存の行は打設可(approved)とみなす(シートは一括で書き換えない)
+    if (def.name === 'Records' && o.status === 'qa_ok') o.status = 'approved';
     return o;
   }
   function toRow(def, obj) {

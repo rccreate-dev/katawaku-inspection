@@ -33,7 +33,7 @@ const isDetail = (rec) => DETAIL_KEYS.every((k) => k in rec);
 const SUMMARY_ONLY = (rec) => !('items' in rec) && !('events' in rec);
 const eventCount = (id) => h.control('state', { sheet: 'Events' }).data.rows.filter((e) => e.recordId === id).length;
 
-test('C-RESP-01 返す形: submitRecord / submitVerdict(ok・minor・major) / recordPrimeSign / stopPour は RecordDetail で getRecord と一致', () => {
+test('C-RESP-01 返す形: submitRecord / submitVerdict(ok・minor・major) / stopPour は RecordDetail で getRecord と一致', () => {
   // submitRecord(職長): qa は null(submitted の間)
   const a = submitted('A1');
   assert.equal(isDetail(a.res.data.record), true);
@@ -41,7 +41,7 @@ test('C-RESP-01 返す形: submitRecord / submitVerdict(ok・minor・major) / re
   assert.ok(a.res.data.record.items.every((x) => x.qa === null));
   assert.deepEqual(a.res.data.warnings, []);
 
-  // submitVerdict ok(PIN)→ recordPrimeSign(PIN)
+  // submitVerdict ok(PIN)。版1.19.0: これで approved
   sato('claimReview', { recordId: a.id, round: 1 });
   fillAll(h, sato, a.id, 'qa');
   const v = sato('submitVerdict', { recordId: a.id, round: 1, verdict: 'ok' }, { pin: '3333' });
@@ -49,11 +49,7 @@ test('C-RESP-01 返す形: submitRecord / submitVerdict(ok・minor・major) / re
   assert.equal(isDetail(v.data.record), true);
   assert.deepEqual(v.data.record, get(sato, a.id));
   assert.ok(v.data.record.items.every((x) => x.qa && x.qa.result === 'ok'), 'QAの見え方');
-  const p = sato('recordPrimeSign', { recordId: a.id, signerName: '山田', method: 'paper' }, { pin: '3333' });
-  assert.equal(p.ok, true, JSON.stringify(p));
-  assert.equal(isDetail(p.data.record), true);
-  assert.deepEqual(p.data.record, get(sato, a.id));
-  assert.equal(p.data.record.status, 'approved');
+  assert.equal(v.data.record.status, 'approved', '版1.19.0: 合格で打設可(元請サインの記録は廃止)');
 
   // submitVerdict minor / major(別の記録)
   const ngPatch = (itemId, severity) => ({ patch: (i) => (i.itemId === itemId ? { result: 'ng', severity, note: '不備' } : {}), photoFor: (i) => i.itemId === itemId });

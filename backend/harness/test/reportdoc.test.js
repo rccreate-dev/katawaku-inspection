@@ -486,7 +486,7 @@ test('C-REP-06①② appsscript.json に documents スコープ(既存4つも残
   assert.equal(configRows().filter((r) => r.key === 'reportEngine').length, 1, '再実行しても増えない');
 });
 
-test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステータス「出来形確認済」と生成日時が同じ行(版1.14.2)・元請サイン欄に担当者名と方法', () => {
+test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステータス「出来形確認済」と生成日時が同じ行(版1.14.2)・元請サイン欄に担当者名と方法(版1.19.0: 古い記録の表示)', () => {
   setEngine('doc');
   const recordId = rid('r');
   assert.equal(tanaka('createRecord', { recordId, siteId: 's_a', floor: '2F', lot: 'PD' + Math.floor(Math.random() * 1e9), stage: 'post_demold' }).ok, true);
@@ -500,7 +500,10 @@ test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステー�
   assert.equal(sato('claimReview', { recordId, round: 1 }).ok, true);
   fill(sato, 'qa');
   assert.equal(sato('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: '3333' }).ok, true);
-  assert.equal(sato('recordPrimeSign', { recordId, signerName: '山田太郎', method: 'paper' }, { pin: '3333' }).ok, true);
+  // 版1.19.0: 元請サインの記録は廃止。古い記録(記録済み)の表示を確かめるため、シートに直接入れる
+  h.ctx.Repo.resetCache();
+  h.ctx.Repo.update('Records', h.ctx.Repo.get('Records', recordId), { primeSignedBy: 'u_sato', primeSignedAt: nowPlus(h, 0), primeSignerName: '山田太郎', primeSignMethod: 'paper' });
+  h.ctx.Repo.resetCache();
   const rep = gen(recordId);
   const m = h.state.docShim.last;
   const info = m.cellTexts(0).map((r) => r.join('|'));
@@ -514,7 +517,7 @@ test('C-REP-03 出来形・approved: 打設予定日時の行なし・ステー�
   assert.match(pdfName(rep), /_出来形_v1_/);
 });
 
-test('C-REP-03 未署名(qa_ok)の元請欄は空欄の線と「署名・押印」', () => {
+test('C-REP-03 元請サインの記録が無い記録(版1.19.0 の通常)の元請欄は空欄の線と「署名・押印」', () => {
   setEngine('doc');
   const id = makeQaOk({ photos: 1 });
   gen(id);

@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.18.0 / 作成日: 2026-10-07(最終改訂 2026-11-14) / 作成: 設計担当
+- 版: 1.19.0 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -798,7 +798,7 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | takeoverReview | × | ○ | ○ | 承認できる人のみ(§6.9)。責任者はいつでも。担当QAは claim 者の無操作が `claimTakeoverMin` 以上、または claim 者が不在登録中 |
 | saveQaDraft | × | ○ | ○ | claim者本人のみ。status=submitted |
 | submitVerdict | × | ○ | ○ | claim者本人のみ。status=submitted。`ok` は **PIN必須** |
-| recordPrimeSign | × | ○ | ○ | 承認できる人(§6.9。1次検査者が職長なら担当QAまたは責任者、管理者・責任者なら責任者のみ)。status=qa_ok。**PIN必須** |
+| recordPrimeSign | × | ○ | ○ | **版1.19.0: 廃止。常に `STATE_CONFLICT`(§6.11)**。以下は旧: 承認できる人(§6.9。1次検査者が職長なら担当QAまたは責任者、管理者・責任者なら責任者のみ)。status=qa_ok。**PIN必須** |
 | stopPour | ○ | ○ | ○ | **その現場に有効な担当(職長は班を問わず)** または責任者。status∈{submitted,qa_ok,approved}。異常時は誰でも止められる。**他班(`masked`)の記録からも実行できる**(理由必須。内容は引き続きマスクのまま。応答・`actions` も masked 形)。**`stage=pre_pour` の記録のみ**(版1.9。`post_demold` の記録では `STATE_CONFLICT`、`actions` にも入らない。§6.8) |
 | addNote | ○ | ○ | ○ | 職長=編集可能な自班記録(status∈{draft,fix})に `kind=foreman`。QA/責任者=担当現場の記録に `kind=manager`(status不問)。**版1.12.0: QA・責任者が自分の1次検査の記録に書くときは、status∈{draft,fix} なら `kind=foreman`(1次検査側のコメント)。QA が自分の1次検査の記録に書けるのは draft/fix のときだけ(それ以外は `RECORD_LOCKED`)。責任者は自分の記録でも submitted/qa_ok/approved なら `kind=manager`(承認者として)**(§6.9) |
 | uploadPhotoChunk | ○ | ○ | ○ | `side=self`: 編集可能な1次検査側(職長=自班/自分、QA・責任者=自分の1次検査の記録。status∈{draft,fix})。`side=qa`: claim者(status=submitted)。`side=prime`: 承認できる人(§6.9)(status=qa_ok) |
@@ -1179,14 +1179,14 @@ authorize(actor, action, ctx) -> { ok: true } | { ok: false, code, reason }
 
 **submitVerdict** ★ PIN(`verdict=ok`のみ) `{ "recordId", "round", "verdict":"ok|minor|major", "comment"?:"str" }`(総合コメントの決め方: **`comment` が未指定(キー無し/`null`)なら `saveQaDraft` で保存済みの `Records.qaComment` を使う**。指定されていればその値を使う。採用した値(空白のみは空とみなす)が空で `verdict` が `minor`/`major` なら `COMMENT_REQUIRED`。≤2000文字) → `{ "record":<RecordDetail>, "warnings":["QA_BEFORE_OPEN"?, "QA_LATE"?] }`
 - claim者本人・status=submitted・`round`一致。§5.3.1 の判定検査を全て満たす(版1.11.1: 項目検査に `QA_OVER_TOL_COMMENT_REQUIRED` を含む)。成功:
-  - `ok` → status=`qa_ok`、`qaVerdict=ok`、`major=FALSE`。
+  - `ok` → status=`approved`(**版1.19.0。§6.11。旧 `qa_ok`**)、`qaVerdict=ok`、`major=FALSE`。
   - `minor` → status=`fix`、`qaVerdict=minor`、`major=FALSE`。
   - `major` → status=`fix`、`qaVerdict=major`、`major=TRUE`(**重大不適合=打設不可**。出来形の記録では「承認に進めない(差し戻し)」の意味で、状態の動きは同じ。§6.8)。責任者へ即時通知(§6.6)。
   - 共通: `qaVerdictBy/At`=自分/今、`qaComment`=採用した総合コメント(上記。`comment` 指定があればその値、なければ保存済みの値)、`claimedBy/At` は `ok` では残し(判定者の記録)、`minor`/`major` では空にする。QAの項目コメント(空でないもの)と総合コメント(採用した値)を Notes に `kind=manager, source=verdict` で追記。Events `verdict_*`(detail に項目結果)。
 - `warnings`: `QA_BEFORE_OPEN`(§6.5の検査開始前)/ `QA_LATE`(§6.5のQA期限超過)。いずれも拒否しない。`stage=pre_pour` のみで、出来形では出ない。
 - エラー: `NOT_CLAIMER`/`NOT_CLAIMED`/`STATE_CONFLICT`/`VALIDATION_FAILED`/`PIN_REQUIRED`/`PIN_INVALID`/`USER_LOCKED`。
 
-**recordPrimeSign** ★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordDetail> }`
+**recordPrimeSign**(**版1.19.0 で廃止。常に `STATE_CONFLICT`。§6.11**)★ PIN `{ "recordId", "signerName", "method":"paper|pdf|onsite", "evidencePhotoId"?:"p_…" }` → `{ "record":<RecordDetail> }`
 - status=`qa_ok` のみ。承認できる人のみ(§6.9。違えば `APPROVER_NOT_ALLOWED`)。**3者サイン検査**: 1次検査者の提出(`submittedAt`あり)・`qaVerdict=ok`・`signerName` 非空(≤40文字。`PRIME_SIGNER_REQUIRED`)が揃っていること。成功: status=`approved`(**打設可**。出来形の記録では **出来形確認済**。状態の値はどちらも `approved`。§6.8)、`primeSignedBy/At/SignerName/Method` を記録。`evidencePhotoId` を渡す場合は同記録の `side=prime` の写真であること。Events `prime_signed`。
 - エラー: `STATE_CONFLICT` / `VALIDATION_FAILED` / `PIN_*` / `FORBIDDEN_SITE` / `APPROVER_NOT_ALLOWED`(版1.12.0)。
 
@@ -1381,7 +1381,7 @@ PDF: `generateReport` `listReports`
 ## 6. ステータス遷移と時間ルール
 
 ### 6.1 状態
-`none`(記録なし=仮想)→ `draft`(入力中)→ `submitted`(確認待ち)→ `qa_ok`(QA合格・元請待ち)→ `approved`(打設可。**出来形の記録では「出来形確認済」と表示する**。状態の値はどちらも `approved`。§6.8)。差し戻しは `fix`(是正中)。**これ以外のstatusを作らない**。「確認中」は status ではなく `claimedBy` で表す。「打設停止」は `stopped=TRUE` + `fix` で表す。
+**版1.19.0(§6.11)**: `none` → `draft`(入力中)→ `submitted`(確認待ち)→ `approved`(承認者の合格=打設可)。`qa_ok` は新しく作らない(既存の行は `approved` とみなす)。以下は版1.18.0 までの記述: `none`(記録なし=仮想)→ `draft`(入力中)→ `submitted`(確認待ち)→ `qa_ok`(QA合格・元請待ち)→ `approved`(打設可。**出来形の記録では「出来形確認済」と表示する**。状態の値はどちらも `approved`。§6.8)。差し戻しは `fix`(是正中)。**これ以外のstatusを作らない**。「確認中」は status ではなく `claimedBy` で表す。「打設停止」は `stopped=TRUE` + `fix` で表す。
 
 ### 6.2 遷移表(これ以外の遷移はサーバーが拒否)
 
@@ -1391,13 +1391,14 @@ PDF: `generateReport` `listReports`
 | T2 | draft / fix | 同じ | saveDraft | 1次検査者(職長は自班/自分。QA・責任者は本人のみ) | 形式検査のみ | 不要 | `updatedAt`・`version`更新 |
 | T3 | draft | submitted | submitRecord | 1次検査者(T2と同じ) | §5.3.1 提出検査を全て満たす、`round`一致 | **要** | `firstSubmittedAt`/`submittedAt/By`、Notes追記(職長コメント)、Events `submitted` |
 | T4 | submitted | submitted | claimReview | 承認できる人(§6.9。1次検査者が職長なら担当QA / 責任者、管理者・責任者なら責任者のみ) | 未claim、`round`一致。**先着のみ** | 不要 | `claimedBy/At`、Events `claimed` |
-| T5 | submitted | qa_ok | submitVerdict(ok) | claim者 | 判定検査 OK、`round`一致 | **要** | `qaVerdict=ok`、Notes追記(管理者コメント)、Events `verdict_ok` |
+| T5 | submitted | **approved**(版1.19.0。§6.11。旧 qa_ok) | submitVerdict(ok) | claim者 | 判定検査 OK、`round`一致 | **要** | `qaVerdict=ok`、Notes追記(管理者コメント)、Events `verdict_ok` |
 | T6 | submitted | fix | submitVerdict(minor/major) | claim者 | 判定検査 OK、`round`一致 | 不要 | `major`(majorのみTRUE)、`claim*`を空に、Notes追記、Events `verdict_*`、majorは責任者へ即時通知 |
 | T8 | fix | submitted | submitRecord | 1次検査者(T2と同じ) | T3と同じ検査 | **要** | `round+1`、QA列・判定列・`claim*`・`stopped*`・`prime*` を空に、`escNotified=0`、Events `resubmitted` |
-| T9 | qa_ok | approved | recordPrimeSign | 承認できる人(T4と同じ) | 3者サイン検査(1次検査者の提出・承認者の合格・元請担当者名) | **要** | `prime*`記録、Events `prime_signed` |
+| T9 | **(版1.19.0 で廃止。§6.11。`recordPrimeSign` は常に `STATE_CONFLICT`)** qa_ok | approved | recordPrimeSign | 承認できる人(T4と同じ) | 3者サイン検査(1次検査者の提出・承認者の合格・元請担当者名) | **要** | `prime*`記録、Events `prime_signed` |
 | T10 | submitted / qa_ok / approved | fix | stopPour | その現場の担当者(職長は班不問) / 責任者 | 理由必須。**`stage=pre_pour` の記録のみ**(出来形は不可。§6.8) | 不要 | `stopped=TRUE`、署名無効化(`prime*`・判定列・`claim*`を空に)、Events `stopped`、責任者・担当QAへ通知 |
 
 - `approved` は終端。`approved→fix` は T10(停止)のみ。`submitted→draft`(取り下げ)・`qa_ok→submitted` などは存在しない(提出後の職長編集不可を守るため。P-05と同系)。
+- **版1.19.0(§6.11)**: 元請のサインはアプリに記録しない(PDFに元請が直接書く)。以下の「3者サイン」の③と T9 の検査は廃止。
 - **3者サイン** = ①1次検査者(職長・管理者・責任者)の提出(T3/T8のPIN)、②承認者(QA・責任者)の合格(T5のPIN)、③元請サイン記録(T9のPIN、元請担当者名+方法)。T9は①②③の充足をサーバーが検査する。重大(`major`)・`minor`判定は `fix` に落ちるため打設可にならない。
 - 重大不適合=打設不可: `qaVerdict=major` の記録は `fix`。是正→再提出→再度の合格→元請サインを経ないと `approved` にならない。`stopped=TRUE` も同様(T8で解除)。
 - T10 で `fix` に戻した記録の再提出時は、停止中だった事実を Notes/Events(`stopped`)が保持する。
@@ -1411,7 +1412,7 @@ PDF: `generateReport` `listReports`
 | draft | 可 | 不可 | |
 | submitted | **不可** | claim者のみ(`saveQaDraft`・QA写真) | |
 | fix | 可(是正) | 不可 | QAの指示(`qa*`・`qaComment`)を職長が閲覧 |
-| qa_ok | **不可** | 元請サイン証跡写真(`side=prime`)・`addNote(manager)` | |
+| qa_ok | **不可** | 元請サイン証跡写真(`side=prime`)・`addNote(manager)` | **版1.19.0: 作られない。既存の行は approved として扱う(§6.11)** |
 | approved | **不可** | `addNote(manager)` のみ | |
 
 ### 6.4 エスカレーション(30分 / 60分)
@@ -1561,6 +1562,34 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 - **新しい人**: 職長か管理者を `invited` で作り、続けて招待コード(`first`)を発行する。役割は登録のときに責任者が決め、本人は選べない。登録後の役割の変更・氏名の修正はアプリでは行わない(保留。シートまたは Claude に依頼)。
 - **変えないもの**: 状態・遷移(§6.2)、PIN の要る操作、兼任なし(役割整合 §2.3)、QR 参加申請と主担当の承認(`decideJoin`)、`adminValidateRoster` の検査内容。
 
+
+### 6.11 元請サインの記録の廃止(版1.19.0。ユーザー決定 2026-11-15。REQUIREMENTS §23)
+**本節は、それより前の版の記述(`qa_ok`(元請待ち)・T9 `recordPrimeSign`・`uploadPhotoChunk(side=prime)`・M5・「3者サイン」の元請欄・S09 の「元請待ち」)に優先する。** 本文の古い記述は残っていても、本節と食い違うところは本節が正本。
+
+基本の流れ: 1次検査(職長・管理者・責任者)→ 承認者の確認(管理者・責任者)→ 元請提出用PDFを作成(`generateReport`)→ 元請にPDFを提出(アプリの外)。元請のサインはPDFに直接書き込んでもらう。
+
+1. **合格で打設可(T5)**: `submitVerdict(ok)`(PIN)は `submitted → approved`。`qaVerdict=ok`・Events `verdict_ok`(`from=submitted`・`to=approved`)・Notes 追記は従来どおり。出来形の記録では `approved` の表示名は「出来形確認済」(§6.8 のまま)。軽微・重大(T6)・差し戻し・再提出(T8)・打設停止(T10。`approved` の打設前の記録で使える)は変えない。
+2. **`recordPrimeSign` の廃止(T9)**: action は残す(action数43・名前・Idem の再生は変えない)が、**常に `STATE_CONFLICT`**(`error.data={status}`)。認証・入力の形式検査(§5.2)・役割(`FORBIDDEN_ROLE`)・現場(`FORBIDDEN_SITE`)の検査は従来どおり先に行い、その後の状態の検査で必ず拒否する(承認者の条件・3者サイン検査には進まない)。`actions` に入れない。PIN を検査しないので PIN の誤りは数えない。
+3. **`uploadPhotoChunk(side=prime)` の廃止**: 認証・入力の検査・役割と現場の検査(職長は従来どおり `FORBIDDEN_ROLE`)のあと、常に `STATE_CONFLICT`(`{status}`)。`side` の enum には残す。既存の `side=prime` の写真は `primePhotos` と PDF に従来どおり出す(消さない)。
+4. **既存の `qa_ok` の記録(「元請待ち」)は `approved` とみなす**: サーバーは `Records` の行を読むとき、`status=qa_ok` を `approved` として扱う(権限・状態の判定・`RecordSummary`/`RecordDetail` の `status`・`listRecords` の絞り込み・`adminGetSite` の件数・閉鎖の検査・PDFのステータス・再検査 `reinspectOf` の条件のすべて)。**シートを一括で書き換えない**。その行を更新するとき(打設停止・コメント追記など)に、行全体を書き直す場合は `approved` が書かれることがある(書かれなくてもよい)。`RECORD_STATUSES` と `listRecords` の `statuses` の enum には `qa_ok` を残す(送られても `qa_ok` の行は無いので0件)。`recordCounts.qa_ok` は常に 0、`CLOSE_CONFIRM_REQUIRED` は起きなくなる(`acceptQaOk` は受け付けて無視)。
+5. **元請サインを記録済みの古い記録**: `primeSigned*` 列・`signatures.prime`・Events `prime_signed`・`side=prime` の写真は残し、画面とPDFに従来どおり出す。
+6. **PDF(§10.2 の3)**: 元請の欄は、元請サインの記録が無ければ「氏名 ______ 日付 ______ / 署名・押印」の空欄(従来の未記録時と同じ)。見出し「サイン欄(3者)」と1次検査者・承認者の欄は変えない。`generateReport` の状態条件は `approved`(と、`approved` とみなす `qa_ok`)。
+7. **画面**:
+   - S08: 「元請サインを記録」ボタンと M5 を出さない(`actions` に `recordPrimeSign` が入らないため)。サイン欄の元請の枠は、`signatures.prime` があれば従来どおり(氏名・方法・日時)、無ければ「元請はPDFに記入」(`lbl.sig_prime_on_pdf`)。
+   - S09: 「元請待ち」の一覧(`scr.S09.prime`)を出さない。
+   - S03・S11・S22: `qa_ok` を一覧の選択肢・件数に出さない(来ても `approved` と同じに扱う)。
+   - S10 の合格の PIN の画面の見出しは、合格で打設可(出来形は出来形確認済)になることが分かる語にする(`scr.S10.pin_title`。段階の上書きキーあり。§9.4 の版1.19.0 の表)。
+8. **mock・harness**: 同じ規則。harness(GAS のコードそのもの)は `Repo` が `Records` の行を読むときに `qa_ok` を `approved` に読み替える。mock は種データの `r_seedc10000000000`(旧 `qa_ok`・元請サイン未)を `approved` として作る(§11.2 の種データ表を読み替える)。
+9. **§9.4 の辞書(版1.19.0)**:
+
+| キー | ja | id |
+|---|---|---|
+| `lbl.sig_prime_on_pdf` | 元請はPDFに記入 | Kontraktor mengisi di PDF |
+| `scr.S10.pin_title`(変更) | 合格のPIN確認(打設可になります) | Konfirmasi PIN kelulusan (menjadi boleh cor) |
+| `scr.S10.pin_title@post_demold` | 合格のPIN確認(出来形確認済になります) | Konfirmasi PIN kelulusan (hasil pekerjaan terkonfirmasi) |
+
+   元請サイン用のキー(`act.prime_sign`・`msg.prime_signed`・`scr.M5.*`・`scr.S09.prime*`・`st.qa_ok`・`method.*`・`ev.prime_signed`・`rule.PRIME_SIGNER_REQUIRED`・`scr.S23.close_qaok`・`err.CLOSE_CONFIRM_REQUIRED`)は辞書に残す(古い記録の履歴・方法の表示に使うものがあるため。使わないものも消さない)。
+10. **テスト(§12 の読み替え)**: `recordPrimeSign` で `approved` にしていたテスト(C-STATE-01/03/09、C-PERM-03/04、C-IDEM-01、C-RESP-01、C-OWN-04、C-STAGE-04、C-PHOTO-04 の prime、E-03・E-15・E-28・E-31 の元請サイン)は、**合格で `approved` になる**ことを確かめる形に直す。`qa_ok` の記録を前提にしていたテスト(C-REP-01・C-STAGE-05・C-DRAW など)は `approved` の記録を使う。新しく **C-NOPRIME-01**(①`submitVerdict(ok)` で `approved`・Events `verdict_ok` の `to=approved` ②`recordPrimeSign` は PIN の有無・正誤によらず `STATE_CONFLICT` で PIN の誤りを数えない ③`uploadPhotoChunk(side=prime)` は `STATE_CONFLICT` ④`actions` に `recordPrimeSign` が無い ⑤`approved` の打設前の記録で `stopPour`・`generateReport` ができる)、harness だけの **C-NOPRIME-02**(シートの行が `qa_ok` の記録を `getRecord`・`listRecords(statuses=[approved])`・`stopPour`・`generateReport` が `approved` として扱う)、**E-37**(QA が合格すると S08 が「打設可」になり、「元請サインを記録」ボタンが無く、サイン欄の元請の枠に「元請はPDFに記入」。S09 に「元請待ち」の見出しが無い)を足す。
 
 ## 7. 写真
 
@@ -1958,8 +1987,8 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | S05 | `#/site/:siteId/new` | 職長(版1.12.0: QA・責任者も。§9.2c) | `createRecord` | 階(select)、工区(`zones`があれば select)、打設ロット(必須テキスト)、段階(**版1.9: 「打設前」「出来形」から選ぶ**。選択肢は `config.enabledStages` に含まれ、かつ `getBootstrap.items` にその段階の項目が1件以上ある段階。既定は打設前。選択肢が1つだけなら選択欄を出さず固定表示。出来形を選ぶと説明 `scr.S05.stage_hint_post_demold` を出す。出来形では、同じ階・工区の打設前の記録の打設箇所(ロット)を候補に出してよい(推奨。入力の手間を減らすだけで、APIと一意制約は変えない))、打設予定日時(`datetime-local`。**打設前のときだけ**表示し、提出時必須。出来形では欄も `scr.S05.plan_hint` も出さない)、再検査のとき元記録の表示(段階は元記録の段階に固定) | 「作成して入力へ」→`createRecord`(Q。`stage` は選んだ段階。出来形では `pourPlannedAt` を送らない。オフラインで作る仮の記録の項目は `getBootstrap.items` を **選んだ段階で絞って** 作る)→S06。同じ階・工区・ロットでも段階が違えば別の記録なので `ALREADY_EXISTS` にならない。`ALREADY_EXISTS` なら既存記録へ誘導(`mine`ならS06、他班なら案内のみ) |
 | S06 | `#/record/:id/edit` | 職長(版1.12.0: 1次検査者のQA・責任者も。§9.2c) | `getRecord`,`saveDraft`,`uploadPhotoChunk`,`deletePhoto`,`addNote` | **固定ヘッダ=現場名・階・工区・ロット・段階**(打設予定日時の入力欄は打設前だけ。版1.9)、進捗バー(入力済み/総数)、ステータス、`fix` のとき赤バナー(QA総合コメント・停止理由)、項目を `seq` 昇順にグループ見出し付きで列挙(`groupKey` が変わるたびに見出し。§2.6.1a)。各項目: 番号・項目文・「写真必須」バッジ・OK/NG/該当なし・実測入力(`measure≠none`: 値のチップ+「測定点を追加」、許容と「許容超え」表示)・コメント欄(職長)・写真(撮影ボタン・サムネ・削除×。**送信中(outbox が `sending`)の写真は削除×を無効**。§8.3)・`fix` では管理者コメント(別枠・読み取り専用)・違反の赤枠とメッセージ。**項目リストの下に「図面」欄(版1.6。§7.7。「撮影する」「写真から選ぶ」の2つのボタン(版1.14.0。旧「図面を追加」)・サムネ・削除×。`side=self`。任意)** | 入力は即ローカル保存(§8.8)。`actions` に `saveDraft` が無ければ全て無効+読み取り専用バナー。撮影は M2。「確認へ進む」で事前検証(§5.3.1と同rule)→違反があれば赤枠・先頭へスクロール、無ければS07 |
 | S07 | `#/record/:id/confirm` | 職長(版1.12.0: 1次検査者のQA・責任者も。§9.2c) | `submitRecord` | 「この現場・階で間違いありませんか」+ **現場名・階・工区・ロット・段階(打設前のときは打設予定日時も)** を大きく、OK/NG/該当なし件数、NG項目と備考の一覧、未送信件数 | 「提出する」→PIN入力 M1 →`submitRecord`。無効条件: 圏外/outboxに未送信/事前検証違反。成功→S08(`SELF_LATE` は警告表示)。手書きサインは廃止しPIN再入力を電子サインとする(P-04) |
-| S08 | `#/record/:id` | 全員(権限内) | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大。**`approved` の表示名は段階で決まる**: 打設前=打設可、出来形=出来形確認済。§6.8)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色。出来形では全て `null` なので欄ごと出さない)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5(語は段階で変わる)、「打設を止める」(`stopPour`)→M4(`actions` に `stopPour` がある=打設前の記録のみ。出来形には出ない)、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
-| S09 | `#/`(QA/責任者) | QA・責任者 | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人。②③④の各行に段階名)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド(**版1.9: 1つの階のセルに段階ごとのチップを並べる**。段階名つきで `打設前 確認待ち` / `出来形 未着手` のように出す。段階内の代表ステータスは S04 と同じ規則)。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
+| S08 | `#/record/:id` | 全員(権限内)。**版1.19.0: 「元請サインを記録」(M5)は出さない。元請のサイン枠は §6.11-7** | `getRecord`,`stopPour`,`addNote`,`generateReport`,`listReports` | 現場・階・工区・ロット・段階、ステータスチップ(大。**`approved` の表示名は段階で決まる**: 打設前=打設可、出来形=出来形確認済。§6.8)、停止/重大/エスカレーションのバナー、**3者サイン欄**(職長/QA/元請。済=氏名+日時、未=「未」)、期限(`timing`、超過は警告色。出来形では全て `null` なので欄ごと出さない)、項目の読み取り一覧(職長結果・QA結果・実測・職長コメントと管理者コメントを**別枠**・写真)、コメント追記ログ(Notes)、履歴(Events。`ev.<kind>`でラベル化) | ボタンは `actions` で出し分け: 「続きを入力/是正して再提出」(`saveDraft`)→S06、「確認する」(`claimReview`)→S10、「確認画面へ」(自分がclaim者=`saveQaDraft`)→S10、「元請サインを記録」(`recordPrimeSign`)→M5(語は段階で変わる)、「打設を止める」(`stopPour`)→M4(`actions` に `stopPour` がある=打設前の記録のみ。出来形には出ない)、「元請提出用PDF」(`generateReport`)→M6、コメント追記(`addNote`) |
+| S09 | `#/`(QA/責任者) | QA・責任者。**版1.19.0: 「元請待ち」の一覧は出さない(§6.11-7)** | `listRecords`,`listJoinRequests`,`decideJoin`,`listAbsences` | 見出し=役割と氏名。①参加申請(自分が承認できるもの=`canDecide`)②確認待ち(提出順。経過時間・エスカレーション表示・確認中の人。②③④の各行に段階名)③重大不適合・打設停止中④元請待ち(`qa_ok`)⑤現場×階の状況グリッド(**版1.9: 1つの階のセルに段階ごとのチップを並べる**。段階名つきで `打設前 確認待ち` / `出来形 未着手` のように出す。段階内の代表ステータスは S04 と同じ規則)。責任者はロック中ユーザー件数(→S16)も | 申請の「承認」→M9(班名・役)→`decideJoin`、「却下」。確認待ち→S10(`claimReview`が`actions`にあれば「確認する」)。`escLevel`=1:「30分超過」、2:「60分超過」(警告色) |
 | S10 | `#/record/:id/review` | QA・責任者 | `getRecord`,`claimReview`,`releaseClaim`,`takeoverReview`,`saveQaDraft`,`uploadPhotoChunk`,`submitVerdict`,`addNote` | 現場・階・工区・ロット・段階、職長提出者・経過時間。項目ごとに 職長の結果・コメント・写真(読み取り)+QA入力(OK/NG/該当なし、NGなら重さ=軽微/重大、実測、コメント(管理者)、写真(**任意**。撮影・サムネ・削除×。**送信中の写真は削除×を無効**。§8.3))。**項目リストの下に「図面」欄(版1.6。§7.7。職長の図面は読み取り、管理者は「撮影する」「写真から選ぶ」(版1.14.0。旧「図面を追加」)・サムネ・削除×。`side=qa`。任意)**。総合コメント。「提案: 合格/軽微/重大」(**画面側の補助表示のみ**。QA入力のNG有無・重さから計算。自動確定しない) | 未claimなら「確認中にする(先着)」(`claimReview`)。他人がclaim中なら「{名前}が確認中」+(`takeoverReview`が`actions`にあれば)「引き継ぐ」。QA入力は `saveQaDraft` が `actions` にあるときのみ有効。判定ボタン「合格」「軽微な不適合」「重大な不適合」は事前検証(§5.3.1の判定検査)を通るものだけ有効、違反理由を表示(**版1.11.1: 管理者が許容超の値に OK を付けた項目はコメントが必須**。§9.2b)。「合格」→M1(PIN)→`submitVerdict(ok)`。`minor`/`major` はPINなしで確認ダイアログ→送信(`major` の確認文は、出来形では「打設」の語を含まない `scr.S10.confirm_major@post_demold`)。「確認を中止」(`releaseClaim`)。QAの下書きはoutbox経由で保存 |
 | S11 | `#/history` | 全員 | `listRecords` | 現場・状態フィルタ。更新の新しい順に 現場・階・ロット・段階・ステータス・最終更新・作成者・NG件数 | 行→S08。`masked`(他班)は行自体は開けない。`actions` に `stopPour` があれば S04 と同様に「打設を止める」ボタンだけ出す(M4。内容はマスクのまま) |
 | S12 | `#/roster` | QA・責任者 | `listAssignments`,`listAbsences`,`adminValidateRoster`(責任者) | 現場ごとの 主担当・代行者・職長(班)・期間、不在中マーク。責任者は名簿チェック結果(error/warn) | 表示のみ。「担当表の編集はスプレッドシートで行います」の案内(P-16)。責任者→S17。**版1.13.0: 責任者には案内の代わりに「現場の管理」(→S22)を出す。QAには「担当表の変更は責任者が行います」**(§9.2d) |
@@ -1980,7 +2009,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | M2 | アプリ内カメラ(全画面。シャッター・撮り直し・使う・枚数表示・スタンプのプレビュー。§7.1)。**版1.14.0: 図面モード**(図面欄の「撮影する」から開く。スタンプ・枚数表示なし、縮小なし、「使う」で M10 へ。§7.7-1) |
 | M3 | 写真拡大(`getPhoto`、スタンプ文字列、閉じる)。**版1.15.0**: 自分の図面で削除できる間は「書き直す」/「書き足す」(§7.7-5) |
 | M4 | 打設停止(**打設前の記録だけ**。出来形からは開かない。理由必須テキスト、大きい赤ボタン。圏外では「送信待ちになります。至急電話で連絡」)。`masked`(他班)の記録から開いたときは、現場・階・ロット・班名だけを表示し、記録の内容は出さない |
-| M5 | 元請サイン記録(担当者名・方法 paper/pdf/onsite・証跡写真(任意)→PIN入力M1→`recordPrimeSign`)。説明文の語は段階で変わる(出来形は「出来形確認済」。`scr.M5.desc@post_demold`) |
+| M5 | **(版1.19.0 で廃止。開かない。§6.11)** 元請サイン記録(担当者名・方法 paper/pdf/onsite・証跡写真(任意)→PIN入力M1→`recordPrimeSign`)。説明文の語は段階で変わる(出来形は「出来形確認済」。`scr.M5.desc@post_demold`) |
 | M6 | 元請提出用PDF(`generateReport`の進捗→版・URL・「共有」(`navigator.share`、無ければリンクコピー)・「開く」・過去版一覧) |
 | M7 | 汎用確認ダイアログ |
 | M8 | 招待コード表示(コード・有効期限・「再表示できません」) |
@@ -2266,7 +2295,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 0. **件名 `subject`**(§10.2a)。PDFの1ページ目の見出し(タイトルの直下)に大きく表示し、HTMLの `<title>` にも同じ文字列を入れる。
 1. タイトル「型枠工事 {段階名}検査記録」。**段階名**(日本語のみ): `pre_pour`=「打設前」、`post_demold`=「出来形」(例「型枠工事 出来形検査記録」)。
 2. 基本情報: 件名、現場名、元請会社名(`primeContractor`)、**職長の会社名(記録の `ownerCompany`。空なら作成者の現在の `company`、それも空なら項目ごと出さない。版1.7/1.8)**、階・工区・打設ロット、段階、打設予定日時(**打設前のみ**。出来形は行ごと出さない)、ステータス(生成時点。**表示名は段階で決まる**: `qa_ok`=「元請待ち」、`approved` は打設前=「打設可」・出来形=「出来形確認済」。§6.8)、生成日時。**版1.14.2(ユーザー決定 2026-11-13)で 記録ID・提出ラウンド数・版(`v{n}`)を基本情報から外した**(記録IDは全ページのフッタ=8 に、版はファイル名=§10.2a にある)。表の並び(HTML方式・doc 方式で同じ。4列 ラベル|値|ラベル|値): 現場名|元請会社 / 1次検査者の会社名|1次検査者(会社名が空なら行ごと出さない)/ 階・工区・打設箇所|段階 / **打設前**: 打設予定日時|ステータス、生成日時(右の2つは空。HTML方式は値を colspan=3)/ **出来形**: ステータス|生成日時。
-3. **3者サイン欄**: 職長(**会社名**・氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(**会社名**・氏名・判定日時・判定=合格)/ 元請(`approved` は 担当者名・方法・記録者・日時、`qa_ok` は「氏名 ______ 日付 ______ 署名・押印」の空欄)。停止履歴があれば注記。
+3. **3者サイン欄**: 職長(**会社名**・氏名・提出日時・「PIN認証による電子サイン」)/ 品質管理者(**会社名**・氏名・判定日時・判定=合格)/ 元請(元請サインの記録がある古い記録は 担当者名・方法・記録者・日時、**無ければ「氏名 ______ 日付 ______ 署名・押印」の空欄**。版1.19.0 からは元請がPDFに直接書き込む。§6.11)。停止履歴があれば注記。
 4. 結果サマリ: 職長・管理者それぞれの OK / NG / 該当なし 件数。
 5. 項目表: `No.` | 項目(`textJa`、重点は★)| 職長結果 | 管理者結果 | 実測(設計値との差。許容超の目印と要約つき。**§10.2d**)| 職長コメント | 管理者コメント。NG行は薄い赤背景。**職長コメントと管理者コメントは別の列**。**全列とも折り返して全文を出す**(切れない)。列幅・行の高さは §10.2b-A(版1.11.0 で改訂)。
 5a. **確認箇所(図面)**(版1.6。§10.2c。**版1.11.0: 凡例の表を項目ごとのグループにし、実測値・許容超の印・要約を出す**): 項目表の直後、NG・是正の経過の前。登録された図面を1枚=1ページで載せる(概ね2ページ目)。無ければこの節ごと出さない。
@@ -2632,7 +2661,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 | r_seeda30000000000 | s_a / 3F | draft | 田中 | i1〜i3のみ回答(ok、i2・i3は写真あり) |
 | r_seedb10000000000 | s_b / 1F | fix | 田中 | `round=1`。QA(佐藤)が `minor`:i10=ng/minor(管理者コメント「緊結が甘い」・写真あり)、総合コメント「端太材の緊結をやり直してください」 |
 | r_seedb20000000000 | s_b / 2F | draft | スギアント | i1のみok(田中からは `masked` に見える) |
-| r_seedc10000000000 | s_c / 1F(東) | qa_ok | スギアント | QA合格(鈴木)。元請サイン未 |
+| r_seedc10000000000 | s_c / 1F(東) | approved | スギアント | QA合格(鈴木)。版1.19.0 から approved(旧 qa_ok・元請サイン未。§6.11-8) |
 | r_seedc20000000000 | s_c / 2F(西) | submitted | スギアント | `submittedAt`=now−70分(**escLevel=2**)。全ok。未claim |
 
 - 写真はテスト用の小さなJPEG(`tests/fixtures/sample.jpg`。5KB未満、有効なJPEG)を全て共有してよい。
@@ -3235,3 +3264,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-14 | 1.16.0 | ユーザー決定(2026-11-14。REQUIREMENTS §22-D 版1.14.7)。**段階2a: 縦持ちでシャッターを止める・4:3**。§7.1 に縦持ちの判定(`portraitBlocked`。寝かせたら止めない・逆向きの横も可・35°/45° のゆとり)、止めている間の画面(`.camturn`)、`getUserMedia` の 4:3。§9.4 に `photo.turn_landscape`。§12 に U-PHOTO-05・E-35。P-54。**API・シート・サーバーの変更なし** |
 | 2026-11-14 | 1.17.0 | ユーザー決定(2026-11-13〜14。REQUIREMENTS §22-C 版1.14.7)。**段階2b: 写真への文字の書き込み**。§2.9 に `kind=photo_text`・列 `texts`(`basePhotoId` を元の写真に使う)、§5.1 PhotoMeta の `text`、§5.4.4 の `photo_text` の受け付け(最新の1枚だけ有効・ラウンドを問わない・他人の写真は不可)と `deletePhoto`・`getPhotoThumbs`・`getPhoto`、§7.6 の「文」の印、§7.8(新設)、§9.4 の文言、§10.2b-B の画像の選び方、§12 に C-TEXT-01・U-TEXT-01・E-36。P-55。**action 数は変わらない。列の追加で `setupSheets` が必要** |
 | 2026-11-14 | 1.18.0 | ユーザー決定(2026-11-14「案Aと案Bを進める」)。**読み取り側の待ち短縮(旧 仮置き P-45)を確定**。§8.11.9 を仮置きから外し、細部を確定: ①起動時の `me`/`getBootstrap` を並列に ②保存済みの `me`・`bootstrap` があれば応答を待たずに描く(ホーム表示中に役割が変わったときだけ描き直す。認証系エラーは従来どおり S01/S02) ③S06/S07/S08/S10 はキャッシュの詳細で先に描き、裏の `getRecord` で版が大きければ差し替える(S06・S10 は未送信・変更・保存待ちが無いときだけ。S07 は開き直す)。その間 `msg.checking_latest`(`.checking`)。`KW.data.loadDetail` に `cacheFirst`。§9.4 の注記、§12 の E-29(時間の目安を 1500ms に)、§13 の責務、§14 P-45・§14.2 の14①、付録A-1・5 を更新。サーバー・action・シートの変更なし。あわせて REQUIREMENTS §15 に keepWarm の本番設置(2026-11-14)を記録 |
+| 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |

@@ -10,15 +10,14 @@ const SEED = { a1: 'r_seeda10000000000', b1: 'r_seedb10000000000' };
 const kinds = (rec) => rec.events.map((e) => e.kind);
 
 async function makeApproved(t, qa, opts) {
-  const { recordId } = await h.makeQaOk(t, qa, opts);
-  await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
+  const { recordId } = await h.makeQaOk(t, qa, opts); // 版1.19.0: 合格で approved
   return { recordId };
 }
 
 describe('C-STATE 状態遷移', () => {
   beforeEach(() => h.reset());
 
-  it('C-STATE-01: 正常系 draft→submitted→qa_ok→approved(status・round・signatures・actions・Events)', async () => {
+  it('C-STATE-01: 正常系 draft→submitted→approved(版1.19.0: 合格で打設可。status・round・signatures・actions・Events)', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const { recordId, res } = await h.createRecordFor(t, { siteId: 's_a', floor: '1F', lot: 'N1' });
@@ -42,17 +41,12 @@ describe('C-STATE 状態遷移', () => {
     assert.ok(!c.record.actions.includes('claimReview'));
     await h.fillQa(qa, recordId);
     const v = await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
-    assert.equal(v.record.status, 'qa_ok'); assert.equal(v.record.qaVerdict, 'ok'); assert.equal(v.record.major, false);
-    assert.ok(v.record.actions.includes('recordPrimeSign'));
-    rec = await h.getRecord(qa, recordId);
-    assert.equal(rec.signatures.qa.verdict, 'ok'); assert.equal(rec.signatures.prime, null);
-    const p = await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
-    assert.equal(p.record.status, 'approved');
+    assert.equal(v.record.status, 'approved'); assert.equal(v.record.qaVerdict, 'ok'); assert.equal(v.record.major, false);
+    assert.ok(!v.record.actions.includes('recordPrimeSign'));
     rec = await h.getRecord(qa, recordId);
     assert.equal(rec.round, 1);
-    assert.deepEqual(Object.keys(rec.signatures.prime).sort(), ['at', 'method', 'recordedBy', 'recordedByName', 'signerName']);
-    assert.equal(rec.signatures.prime.signerName, '山田');
-    assert.deepEqual(kinds(rec), ['record_created', 'submitted', 'claimed', 'verdict_ok', 'prime_signed']);
+    assert.equal(rec.signatures.qa.verdict, 'ok'); assert.equal(rec.signatures.prime, null);
+    assert.deepEqual(kinds(rec), ['record_created', 'submitted', 'claimed', 'verdict_ok']);
     assert.ok(!rec.actions.includes('recordPrimeSign'));
     assert.ok(rec.actions.includes('generateReport'));
   });
@@ -102,10 +96,7 @@ describe('C-STATE 状態遷移', () => {
     await qa.ok('claimReview', { recordId, round: 2 });
     await h.fillQa(qa, recordId);
     const ok = await qa.ok('submitVerdict', { recordId, round: 2, verdict: 'ok' }, { pin: qa.pin });
-    assert.equal(ok.record.status, 'qa_ok');
-    assert.notEqual((await h.getRecord(qa, recordId)).status, 'approved');
-    const p = await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'onsite' }, { pin: qa.pin });
-    assert.equal(p.record.status, 'approved');
+    assert.equal(ok.record.status, 'approved', '版1.19.0: 再合格で approved');
   });
 
   it('C-STATE-04: 不正遷移は STATE_CONFLICT/RECORD_LOCKED(error.data.status)', async () => {
@@ -254,8 +245,7 @@ describe('C-STATE 状態遷移', () => {
     assert.equal(re.record.stopped, false);
     await qa.ok('claimReview', { recordId, round: 2 });
     await h.fillQa(qa, recordId);
-    assert.equal((await qa.ok('submitVerdict', { recordId, round: 2, verdict: 'ok' }, { pin: qa.pin })).record.status, 'qa_ok');
-    assert.equal((await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'pdf' }, { pin: qa.pin })).record.status, 'approved');
+    assert.equal((await qa.ok('submitVerdict', { recordId, round: 2, verdict: 'ok' }, { pin: qa.pin })).record.status, 'approved');
     rec = await h.getRecord(qa, recordId);
     assert.equal(rec.round, 2);
   });
@@ -301,29 +291,28 @@ describe('C-STATE 状態遷移', () => {
     assert.equal(r.res.error.code, 'SITE_CLOSED');
   });
 
-  it('C-STATE-09: 3者サイン(signerName空→PRIME_SIGNER_REQUIRED、qa_ok以外→STATE_CONFLICT、approved後は3者が揃う)', async () => {
+  it('C-NOPRIME-01(版1.19.0。§6.11): 合格で approved。recordPrimeSign・side=prime は常に STATE_CONFLICT で PIN の誤りを数えない。approved で stopPour・generateReport ができる', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const { recordId: s } = await h.makeSubmitted(t);
     assert.equal((await qa.call('recordPrimeSign', { recordId: s, signerName: '山田', method: 'paper' }, { pin: qa.pin })).error.code, 'STATE_CONFLICT');
     const { recordId } = await h.makeQaOk(t, qa);
-    for (const name of ['', '   ']) {
-      const r = await qa.call('recordPrimeSign', { recordId, signerName: name, method: 'paper' }, { pin: qa.pin });
-      assert.equal(r.error.code, 'VALIDATION_FAILED');
-      assert.deepEqual(r.error.data.violations.map((v) => v.rule), ['PRIME_SIGNER_REQUIRED']);
-    }
-    assert.equal((await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'fax' }, { pin: qa.pin })).error.code, 'VALIDATION_FAILED');
-    assert.equal((await h.getRecord(qa, recordId)).status, 'qa_ok');
-    // 証跡写真(side=prime)つき
-    const up = await h.uploadPhoto(qa, { recordId, side: 'prime' });
-    assert.equal(up.ok, true, JSON.stringify(up.error));
-    const p = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'pdf', evidencePhotoId: up.data.photo.photoId }, { pin: qa.pin });
-    assert.equal(p.ok, true, JSON.stringify(p.error));
-    const rec = await h.getRecord(t, recordId);
+    let rec = await h.getRecord(t, recordId);
     assert.equal(rec.status, 'approved');
-    assert.ok(rec.signatures.foreman && rec.signatures.qa && rec.signatures.prime);
-    assert.equal(rec.signatures.prime.method, 'pdf');
-    assert.equal(rec.primePhotos.length, 1);
-    assert.equal((await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'pdf' }, { pin: qa.pin })).error.code, 'STATE_CONFLICT', '二重サイン不可');
+    assert.ok(!rec.actions.includes('recordPrimeSign'));
+    const vEv = rec.events.find((e) => e.kind === 'verdict_ok');
+    if (vEv && 'toStatus' in vEv) assert.equal(vEv.toStatus, 'approved');
+    // PIN の有無・正誤によらず STATE_CONFLICT。誤り回数は増えない
+    for (const pin of [qa.pin, '0000', undefined]) {
+      const r = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, pin ? { pin } : {});
+      assert.equal(r.error.code, 'STATE_CONFLICT', 'pin=' + pin);
+    }
+    if (await h.hasMock()) assert.equal((await h.stateRows('Users')).find((u) => u.userId === 'u_sato').failedCount, 0);
+    assert.equal((await h.uploadPhoto(qa, { recordId, side: 'prime' })).error.code, 'STATE_CONFLICT');
+    rec = await h.getRecord(t, recordId);
+    assert.equal(rec.signatures.prime, null);
+    assert.equal(rec.primePhotos.length, 0);
+    assert.equal((await qa.call('generateReport', { recordId })).ok, true, 'approved で PDF を作れる');
+    assert.equal((await t.call('stopPour', { recordId, reason: '異常' })).ok, true, 'approved の打設前は打設停止できる');
   });
 });

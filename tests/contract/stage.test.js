@@ -15,7 +15,7 @@ const DEF_KEYS = ['seq', 'stage', 'audience', 'groupKey', 'groupJa', 'groupId', 
 const pickDef = (o) => Object.fromEntries(DEF_KEYS.map((k) => [k, o[k] === undefined ? null : o[k]]));
 const NO_TIMING = { selfDeadlineAt: null, qaOpenAt: null, qaDeadlineAt: null, selfLate: false, qaLate: false };
 
-/** 記録を作り、upTo まで進める。upTo: draft | submitted | qa_ok | approved(round=1 の通常経路) */
+/** 記録を作り、upTo まで進める。upTo: draft | submitted | approved(round=1 の通常経路。版1.19.0 から合格で approved。'qa_ok' も approved まで進める) */
 async function mk(t, qa, { stage, siteId = 's_b', floor = '1F', lot, upTo = 'draft' }) {
   const { recordId, res } = await h.createRecordFor(t, { siteId, floor, lot, stage });
   assert.equal(res.ok, true, JSON.stringify(res.error));
@@ -26,7 +26,6 @@ async function mk(t, qa, { stage, siteId = 's_b', floor = '1F', lot, upTo = 'dra
     return { recordId };
   }
   await h.advanceToQaOk(t, qa, recordId);
-  if (upTo === 'approved') await h.primeSign(qa, recordId);
   return { recordId };
 }
 const rowOf = async (session, siteId, recordId) => (await session.ok('listRecords', { siteId })).records.find((r) => r.recordId === recordId);
@@ -51,7 +50,6 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const snap = async (id) => { const r = await h.getRecord(t, id); return { status: r.status, round: r.round, version: r.version, items: JSON.stringify(r.items) }; };
     const post0 = await snap(post.recordId);
     await h.advanceToQaOk(t, qa, pre.recordId);
-    await h.primeSign(qa, pre.recordId);
     assert.equal((await snap(pre.recordId)).status, 'approved');
     assert.deepEqual(await snap(post.recordId), post0, '打設前の saveDraft/submit/判定/approved が出来形の記録に影響しない');
     // 逆: 出来形を提出→差し戻し(minor)。打設前の approved は不変
@@ -140,7 +138,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     assert.equal((await h.getRecord(t, existing)).status, 'submitted');
     await qa.ok('claimReview', { recordId: existing, round: 1 });
     await h.fillQa(qa, existing);
-    assert.equal((await qa.ok('submitVerdict', { recordId: existing, round: 1, verdict: 'ok' }, { pin: qa.pin })).record.status, 'qa_ok');
+    assert.equal((await qa.ok('submitVerdict', { recordId: existing, round: 1, verdict: 'ok' }, { pin: qa.pin })).record.status, 'approved');
     // 戻すと作成できる
     await h.mock('patch', { sheet: 'Config', key: 'enabledStages', set: { value: 'pre_pour,post_demold' } });
     assert.equal((await create('S2D')).res.ok, true);
@@ -159,7 +157,6 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const lead = await h.login('u_lead');
     const recs = {
       submitted: (await mk(t, qa, { stage: 'post_demold', lot: 'S3A', upTo: 'submitted' })).recordId,
-      qa_ok: (await mk(t, qa, { stage: 'post_demold', lot: 'S3B', upTo: 'qa_ok' })).recordId,
       approved: (await mk(t, qa, { stage: 'post_demold', lot: 'S3C', upTo: 'approved' })).recordId,
       draft: (await mk(t, qa, { stage: 'post_demold', lot: 'S3D', upTo: 'draft' })).recordId,
     };
@@ -180,7 +177,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     assert.deepEqual((await rowOf(sg, 's_b', preSub)).actions, ['stopPour']);
     // 出来形への stopPour は STATE_CONFLICT({status,round}) で、状態・Events・Notes・メールが変わらない
     const mails0 = (await h.hasMock()) ? (await h.mailsList()).length : null;
-    for (const status of ['submitted', 'qa_ok', 'approved', 'draft']) {
+    for (const status of ['submitted', 'approved', 'draft']) {
       const recordId = recs[status];
       const before = await h.getRecord(lead, recordId);
       for (const [name, s] of [['職長', t], ['他班の職長', sg], ['担当QA', qa], ['責任者', lead]]) {
@@ -241,13 +238,11 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     const vr = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
     assert.equal(vr.ok, true, JSON.stringify(vr.error));
     assert.deepEqual(vr.data.warnings || [], [], '出来形の判定に QA_BEFORE_OPEN/QA_LATE は出ない');
-    assert.equal(vr.data.record.status, 'qa_ok');
-    const ps = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
-    assert.equal(ps.ok, true, JSON.stringify(ps.error));
-    assert.equal(ps.data.record.status, 'approved');
+    assert.equal(vr.data.record.status, 'approved', '版1.19.0: 合格で approved');
+    assert.equal((await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin })).error.code, 'STATE_CONFLICT', '元請サインの記録は廃止');
     rec = await h.getRecord(qa, recordId);
-    assert.ok(rec.signatures.foreman && rec.signatures.qa && rec.signatures.prime, '署名は3者');
-    assert.deepEqual(kinds(rec), ['record_created', 'submitted', 'claimed', 'verdict_ok', 'prime_signed'], 'Events の kind の並びは C-STATE-01 と同じ');
+    assert.ok(rec.signatures.foreman && rec.signatures.qa && !rec.signatures.prime, '署名は職長と承認者の2者(元請はPDFに記入)');
+    assert.deepEqual(kinds(rec), ['record_created', 'submitted', 'claimed', 'verdict_ok'], 'Events の kind の並びは C-STATE-01 と同じ');
     assert.deepEqual(rec.timing, NO_TIMING);
     assert.equal(rec.stopped, false); assert.ok(!rec.actions.includes('stopPour'));
     assert.ok(rec.actions.includes('generateReport'));
@@ -283,7 +278,7 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     await h.fillQa(qa, r2, { i50: { result: 'ng', severity: 'major', note: 'ジャンカ大' } }, { comment: '重大なジャンカ' });
     const jv = await qa.ok('submitVerdict', { recordId: r2, round: 1, verdict: 'major' });
     assert.equal(jv.record.status, 'fix'); assert.equal(jv.record.major, true); assert.equal(jv.record.qaVerdict, 'major');
-    assert.equal((await qa.call('recordPrimeSign', { recordId: r2, signerName: '山田', method: 'paper' }, { pin: qa.pin })).error.code, 'STATE_CONFLICT', 'fix の記録は承認に進めない');
+    assert.equal((await qa.call('recordPrimeSign', { recordId: r2, signerName: '山田', method: 'paper' }, { pin: qa.pin })).error.code, 'STATE_CONFLICT', 'recordPrimeSign は常に STATE_CONFLICT(版1.19.0)');
     // 冪等: 同じ clientId の submitRecord 再送は replayed=true・Events は1回分
     const { recordId: r3 } = await h.createRecordFor(t, { siteId: 's_a', floor: '3F', lot: 'S4E', stage: 'post_demold' });
     await h.fillSelf(t, r3);
@@ -324,11 +319,11 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
     assert.equal(await count('escalate_60'), 1);
   });
 
-  it('C-STAGE-05: qa_ok の出来形の generateReport のファイル名(復号後)は {subject}_出来形_v1_{YYYYMMDD-HHmm}.pdf、打設前は {subject}_打設前_v1_...', async () => {
+  it('C-STAGE-05: 合格(approved)の出来形の generateReport のファイル名(復号後)は {subject}_出来形_v1_{YYYYMMDD-HHmm}.pdf、打設前は {subject}_打設前_v1_...', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
-    const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'qa_ok' });
-    const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'qa_ok' });
+    const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'approved' });
+    const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5A', upTo: 'approved' });
     const name = (r) => decodeURIComponent(r.report.url.split('/').pop());
     const r1 = await qa.ok('generateReport', { recordId: post.recordId });
     assert.equal(r1.report.version, 1);
@@ -351,11 +346,10 @@ describe('C-STAGE 段階(打設前/出来形)', () => {
   h.mockOnly(it, 'C-STAGE-05(mock-only): PDFスタブの本文に stage={stage} が付く。approved の出来形でも生成できる', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
-    const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5C', upTo: 'qa_ok' });
+    const post = await mk(t, qa, { stage: 'post_demold', siteId: 's_a', floor: '2F', lot: 'S5C', upTo: 'approved' });
     const pre = await mk(t, qa, { stage: 'pre_pour', siteId: 's_a', floor: '2F', lot: 'S5C', upTo: 'approved' });
     const body = async (r) => Buffer.from(await (await fetch(r.report.url)).arrayBuffer()).toString('latin1');
-    assert.ok((await body(await qa.ok('generateReport', { recordId: post.recordId }))).includes(`MOCK REPORT ${post.recordId} v1 qa_ok stage=post_demold`));
-    await h.primeSign(qa, post.recordId);
+    assert.ok((await body(await qa.ok('generateReport', { recordId: post.recordId }))).includes(`MOCK REPORT ${post.recordId} v1 approved stage=post_demold`));
     assert.ok((await body(await qa.ok('generateReport', { recordId: post.recordId }))).includes(`MOCK REPORT ${post.recordId} v2 approved stage=post_demold`));
     assert.ok((await body(await qa.ok('generateReport', { recordId: pre.recordId }))).includes(`MOCK REPORT ${pre.recordId} v1 approved stage=pre_pour`));
   });

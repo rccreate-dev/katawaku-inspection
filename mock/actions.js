@@ -357,7 +357,7 @@ module.exports = function install(C) {
     const warnings = [];
     if (timing.qaOpenAt && nowMs() < U.parseDt(timing.qaOpenAt)) warnings.push('QA_BEFORE_OPEN');
     if (timing.qaDeadlineAt && nowMs() > U.parseDt(timing.qaDeadlineAt)) warnings.push('QA_LATE');
-    rec.status = p.verdict === 'ok' ? 'qa_ok' : 'fix';
+    rec.status = p.verdict === 'ok' ? 'approved' : 'fix'; // 版1.19.0(§6.11-1): 合格で打設可
     rec.qaVerdict = p.verdict; rec.major = p.verdict === 'major'; rec.qaVerdictBy = actor.userId; rec.qaVerdictAt = n; rec.qaComment = blank(comment) ? null : comment;
     if (p.verdict !== 'ok') { rec.claimedBy = null; rec.claimedAt = null; rec.qaDraftAt = null; }
     for (const e of qa) {

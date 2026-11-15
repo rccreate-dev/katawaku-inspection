@@ -86,6 +86,7 @@
     /* 段階別の上書きキー(`<基キー>@<stage>`。SPEC §9.4 版1.9)。出来形(post_demold)の記録だけ語を差し替える。
      * ts(基キー, stage) が使う。網羅検査の数え上げからは除かれるが、基キーと ja/id の両方が必要 */
     ['st.approved@post_demold', '出来形確認済', 'Hasil pekerjaan terkonfirmasi'],
+    ['scr.S10.pin_title@post_demold', '合格のPIN確認(出来形確認済になります)', 'Konfirmasi PIN kelulusan (hasil pekerjaan terkonfirmasi)'],   // 版1.19.0
     ['ev.prime_signed@post_demold', '元請サインを記録。出来形確認済', 'Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi'],
     ['act.prime_sign@post_demold', '元請サインを記録(出来形確認済にする)', 'Catat tanda tangan kontraktor (hasil pekerjaan terkonfirmasi)'],
     ['msg.prime_signed@post_demold', '元請サインを記録しました。出来形確認済です', 'Tanda tangan kontraktor dicatat. Hasil pekerjaan terkonfirmasi'],
@@ -182,6 +183,7 @@
     ['lbl.severity', '重さ', 'Tingkat'],
     ['lbl.sig_foreman', '職長サイン', 'Tanda tangan mandor'],
     ['lbl.sig_prime', '元請サイン', 'Tanda tangan kontraktor'],
+    ['lbl.sig_prime_on_pdf', '元請はPDFに記入', 'Kontraktor mengisi di PDF'],   // 版1.19.0(§6.11-7)
     ['lbl.sig_qa', '品質管理者', 'Pengawas mutu'],
     /* 版1.12.0: 1次検査者が管理者・責任者の記録の語の読み替え(§9.2c) */
     ['lbl.first_res', '1次検査', 'Pemeriksaan pertama'],
@@ -466,7 +468,7 @@
     ['scr.S10.confirm_minor', '軽微な不適合として差し戻します。よろしいですか', 'Dikembalikan sebagai ketidaksesuaian ringan. Lanjutkan?'],
     ['scr.S10.mine', 'あなたが確認中です', 'Anda sedang memeriksa'],
     ['scr.S10.note_ph', '管理者のコメント(職長の入力はそのまま残ります)', 'Komentar pengawas (isian mandor tetap tersimpan)'],
-    ['scr.S10.pin_title', '合格のPIN確認', 'Konfirmasi PIN untuk meluluskan'],
+    ['scr.S10.pin_title', '合格のPIN確認(打設可になります)', 'Konfirmasi PIN kelulusan (menjadi boleh cor)'],   // 版1.19.0(§6.11-9)
     ['scr.S10.release', '確認を中止', 'Batalkan pemeriksaan'],
     ['scr.S10.release_body', '確認中を解除します。入力した内容は残ります。', 'Status pemeriksaan dilepas. Isian tetap tersimpan.'],
     ['scr.S10.todo_title', '判定の前に必要なこと', 'Yang diperlukan sebelum penilaian'],

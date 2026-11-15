@@ -283,7 +283,7 @@ function authorize(actor, action, ctx) {
       const c = claimCheck(actor, rec); if (c) return c;
       break;
     }
-    case 'recordPrimeSign': { if (st !== 'qa_ok') return conflict(); const na = notApprover(); if (na) return na; break; }
+    case 'recordPrimeSign': return conflict(); // 版1.19.0(§6.11-2): 元請サインの記録は廃止
     case 'stopPour':
       // 版1.9(§4・§6.8): 打設を止められるのは stage=pre_pour の記録のみ。出来形は STATE_CONFLICT
       if (rec.stage !== 'pre_pour' || !['submitted', 'qa_ok', 'approved'].includes(st)) return conflict();
@@ -298,7 +298,7 @@ function authorize(actor, action, ctx) {
       else if (p.side === 'qa') {
         if (st !== 'submitted') return locked();
         const c = claimCheck(actor, rec); if (c) return c;
-      } else if (p.side === 'prime') { if (st !== 'qa_ok') return conflict(); const na = notApprover(); if (na) return na; }
+      } else if (p.side === 'prime') { return conflict(); } // 版1.19.0(§6.11-3): 元請サイン証跡は廃止
       break;
     }
     case 'generateReport': { if (st !== 'qa_ok' && st !== 'approved') return deny('REPORT_NOT_ALLOWED', 'report', { status: st }); const na = notApprover(); if (na) return na; break; }
@@ -309,7 +309,7 @@ function authorize(actor, action, ctx) {
       if (ph.kind !== 'photo_text' && ph.round !== rec.round) return locked();
       const okState = ph.side === 'self' ? (st === 'draft' || st === 'fix')
         : ph.side === 'qa' ? (st === 'submitted' && rec.claimedBy === actor.userId)
-          : st === 'qa_ok';
+          : false; // 版1.19.0: 元請サイン証跡(prime)は削除もできない
       if (!okState) return locked();
       break;
     }
@@ -1046,7 +1046,8 @@ function resetState(opts = {}) {
   seedRecord({ key: 'a3', id: 'r_seeda30000000000', siteId: 's_a', floor: '3F', status: 'draft', owner: 'u_tanaka', team: '田中班', createdAt: n - 2 * 3600000, selfFill: (it) => (['i1', 'i2', 'i3'].includes(it.itemId) ? { result: 'ok', photo: it.itemId !== 'i1' } : null) });
   seedRecord({ key: 'b1', id: 'r_seedb10000000000', siteId: 's_b', floor: '1F', status: 'fix', owner: 'u_tanaka', team: '田中班', qa: 'u_sato', createdAt: n - 2 * DAY, submittedAt: n - DAY, claimedAt: n - DAY + 10 * MIN, verdict: 'minor', verdictAt: n - DAY + 30 * MIN, qaComment: '端太材の緊結をやり直してください', selfFill: okAll, qaFill: (it) => (it.itemId === 'i10' ? { result: 'ng', severity: 'minor', note: '緊結が甘い', photo: true } : okAll(it)) });
   seedRecord({ key: 'b2', id: 'r_seedb20000000000', siteId: 's_b', floor: '2F', status: 'draft', owner: 'u_sugiant', team: 'スギアント班', createdAt: n - 2 * 3600000, selfFill: (it) => (it.itemId === 'i1' ? { result: 'ok' } : null) });
-  seedRecord({ key: 'c1', id: 'r_seedc10000000000', siteId: 's_c', floor: '1F', zone: '東', status: 'qa_ok', owner: 'u_sugiant', team: 'スギアント班', qa: 'u_suzuki', createdAt: n - 2 * DAY, submittedAt: n - DAY, claimedAt: n - DAY + 10 * MIN, verdict: 'ok', verdictAt: n - DAY + 30 * MIN, selfFill: okAll, qaFill: okAll });
+  // 版1.19.0(§6.11-8): 旧 qa_ok(元請サイン未)の記録。合格で打設可になる規則に合わせて approved で作る
+  seedRecord({ key: 'c1', id: 'r_seedc10000000000', siteId: 's_c', floor: '1F', zone: '東', status: 'approved', owner: 'u_sugiant', team: 'スギアント班', qa: 'u_suzuki', createdAt: n - 2 * DAY, submittedAt: n - DAY, claimedAt: n - DAY + 10 * MIN, verdict: 'ok', verdictAt: n - DAY + 30 * MIN, selfFill: okAll, qaFill: okAll });
   seedRecord({ key: 'c2', id: 'r_seedc20000000000', siteId: 's_c', floor: '2F', zone: '西', status: 'submitted', owner: 'u_sugiant', team: 'スギアント班', createdAt: n - 3 * 3600000, submittedAt: n - 70 * MIN, selfFill: okAll });
   S.t.Events.sort((a, b) => U.parseDt(a.at) - U.parseDt(b.at));
   S.driveLog.length = 0; // シードの仮想Drive作成は履歴に残さない(reset で空に戻る)

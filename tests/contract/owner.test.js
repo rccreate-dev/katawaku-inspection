@@ -104,14 +104,15 @@ describe('C-OWN 1次検査者と承認者(版1.12.0)', () => {
     assert.equal((await suzuki.call('takeoverReview', { recordId, round: 1 })).error.code, 'APPROVER_NOT_ALLOWED');
     await lead.ok('releaseClaim', { recordId });
     await approveOk(lead, recordId);
-    // qa_ok: 元請サイン・PDF・元請サイン証跡は責任者だけ。誤ったPINでも誤り回数は増えない
+    // 合格の後(版1.19.0: approved): PDF は責任者だけ。元請サイン・証跡写真は廃止で誰でも STATE_CONFLICT。誤ったPINでも誤り回数は増えない
     const before = await failCount('u_suzuki');
     for (const s of [sato, suzuki]) {
-      assert.equal((await s.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: '0000' })).error.code, 'APPROVER_NOT_ALLOWED');
+      assert.equal((await s.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: '0000' })).error.code, 'STATE_CONFLICT');
       assert.equal((await s.call('generateReport', { recordId })).error.code, 'APPROVER_NOT_ALLOWED');
       const up = await h.uploadPhoto(s, { recordId, side: 'prime' });
-      assert.equal(up.error.code, 'APPROVER_NOT_ALLOWED');
+      assert.equal(up.error.code, 'STATE_CONFLICT');
     }
+    assert.equal((await lead.call('generateReport', { recordId })).ok, true, '責任者は PDF を作れる');
     if (before !== undefined) assert.equal(await failCount('u_suzuki'), before, 'PIN誤りカウントは増えない');
     const ps = await h.primeSign(lead, recordId);
     assert.equal(ps.data.record.status, 'approved');

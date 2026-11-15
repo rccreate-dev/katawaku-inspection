@@ -114,7 +114,7 @@ for (const lang of ['ja', 'id']) {
 
       await vbtn(s, 'ok').click();
       await E.enterPin(s, '3333');
-      await page.locator('.chip.st-qa_ok').first().waitFor();
+      await page.locator('.chip.st-approved').first().waitFor();
       assert.equal(w.count('submitVerdict'), 1);
       // S08: 管理者コメントが表示され、職長のコメントは変わらない
       await page.getByText(QA_NOTE).first().waitFor();
@@ -126,7 +126,7 @@ for (const lang of ['ja', 'id']) {
       assert.equal(after.foremanNote, FOREMAN_NOTE);
       assert.deepEqual(after.selfValues, [3]);
       assert.equal(after.qaNote, QA_NOTE);
-      assert.equal((await E.stateRows('Records')).find((r) => r.recordId === recordId).status, 'qa_ok');
+      assert.equal((await E.stateRows('Records')).find((r) => r.recordId === recordId).status, 'approved');
       s.assertClean(); await s.close();
     });
 

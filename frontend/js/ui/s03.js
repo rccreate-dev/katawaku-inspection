@@ -4,7 +4,7 @@
   var KW = root.KW;
   var h = KW.h, t = KW.t, C = KW.ui;
 
-  var ST_PRIORITY = ['fix', 'draft', 'submitted', 'qa_ok', 'approved'];
+  var ST_PRIORITY = ['fix', 'draft', 'submitted', 'approved']; // 版1.19.0: qa_ok は無い(§6.11)
 
   function floorStatus(recs) {
     if (!recs.length) return 'none';

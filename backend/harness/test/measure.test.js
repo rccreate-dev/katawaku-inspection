@@ -181,7 +181,7 @@ function buildPrePour(o) {
   defs.filter((d) => d.side === 'qa').forEach((d) => assert.equal(sato('uploadPhotoChunk', drawingParams(id, d)).ok, true));
   const v = sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' });
   assert.equal(v.ok, true, JSON.stringify(v));
-  assert.equal(h.ctx.loadRecord_(id).status, 'qa_ok');
+  assert.equal(h.ctx.loadRecord_(id).status, 'approved');
   return { id, N };
 }
 

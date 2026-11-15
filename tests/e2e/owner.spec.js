@@ -1,8 +1,8 @@
 // E-31 1次検査者と承認者(版1.12.0。SPEC §9.2c・§6.9。mock。ja と id、375px)
 //   ①佐藤(管理者)が S04「1次検査を始める」→S05→S06→S07→PIN で提出。S09「自分の1次検査」に出て「確認待ち」に出ない。S10 に案内
-//   ②鈴木(同じ現場の qa_sub)のボードにも出ない ③責任者のボードにバッジつきで出て、合格(PIN)→元請サイン→打設可。S08 の見出しが読み替わる
+//   ②鈴木(同じ現場の qa_sub)のボードにも出ない ③責任者のボードにバッジつきで出て、合格(PIN)で打設可(版1.19.0)。S08 の見出しが読み替わる
 //   ④田中(職長)は S04 から S08(読み取り)を開け、写真・1次検査のコメントが見える ⑤職長の記録は従来の語 ⑥キー露出なし・横スクロールなし
-//   ※ 責任者の「確認中にする」と項目入力は API で行う(S10 の入力操作は E-03/E-30 で確認済み)。合格(PIN)・元請サイン(M5)は画面で行う
+//   ※ 責任者の「確認中にする」と項目入力は API で行う(S10 の入力操作は E-03/E-30 で確認済み)。合格(PIN)は画面で行う
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -94,7 +94,7 @@ describe('E-31 1次検査者と承認者 (ja, 375px)', () => {
     assert.equal(await lotRows(q, lot).count(), 0, '鈴木のボードに出ない');
     q.assertClean(); await q.close();
 
-    // ③ 責任者: ボードの「確認待ち」にバッジつきで出る → 確認中・入力(API)→ 合格(PIN)→ 元請サイン → 打設可
+    // ③ 責任者: ボードの「確認待ち」にバッジつきで出る → 確認中・入力(API)→ 合格(PIN)→ 打設可
     const l = await E.newSession(env);
     await E.login(l, '責任者');
     const row = lotRows(l, lot);
@@ -110,16 +110,12 @@ describe('E-31 1次検査者と承認者 (ja, 375px)', () => {
     await l.page.waitForFunction((txt) => [...document.querySelectorAll('button')].some((b) => b.textContent === txt && !b.disabled), l.t('verdict.ok'));
     await okBtn.click();
     await E.enterPin(l, '9999');
-    await l.page.locator('.chip.st-qa_ok').first().waitFor();
-    await l.page.getByRole('button', { name: l.t('act.prime_sign') }).click();
-    await l.page.getByLabel(l.t('scr.M5.signer')).fill('山田');
-    await l.page.getByRole('button', { name: l.t('scr.M5.go') }).click();
-    await E.enterPin(l, '9999');
     await l.page.locator('.chip.st-approved').first().waitFor();
+    assert.equal(await l.page.getByRole('button', { name: l.t('act.prime_sign') }).count(), 0, '元請サインのボタンが無い');
     const sigHeads = await l.page.locator('.sig b').allInnerTexts();
     assert.deepEqual(sigHeads, [l.t('lbl.sig_first'), l.t('lbl.sig_approver'), l.t('lbl.sig_prime')], '3者サイン欄の見出し');
     assert.ok((await l.page.locator('.sig').first().innerText()).includes('(' + l.t('role.qa') + ')'), '1次検査者の氏名の横に役割');
-    assert.equal(await l.page.locator('.sig.done').count(), 3);
+    assert.equal(await l.page.locator('.sig.done').count(), 2, '元請の枠は「元請はPDFに記入」');
     await clean(l, 'S08(責任者)');
     const recA = (await E.stateRows('Records')).find((r) => r.recordId === recordId);
     assert.equal(recA.status, 'approved'); assert.equal(recA.ownerRole, 'qa');
@@ -147,7 +143,7 @@ describe('E-31 1次検査者と承認者 (ja, 375px)', () => {
     // ⑤ 職長の記録の S08 は従来の語のまま
     const { recordId: fr } = await E.apiQaOk(env, { lot: 'E31F' + rnd() });
     await E.goHash(f, '#/record/' + fr);
-    await f.page.locator('.chip.st-qa_ok').first().waitFor();
+    await f.page.locator('.chip.st-approved').first().waitFor();
     const fh = await f.page.locator('.sig b').allInnerTexts();
     assert.deepEqual(fh.slice(0, 2), [f.t('lbl.sig_foreman'), f.t('lbl.sig_qa')]);
     const fh4b = [...new Set(await f.page.locator('.item .side h4').allInnerTexts())].sort();

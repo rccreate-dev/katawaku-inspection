@@ -121,7 +121,7 @@ async function makeMeasureRecord({ lot, variant = 'full', drawings = [] } = {}) 
   const v = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
   assert.equal(v.ok, true, 'submitVerdict: ' + JSON.stringify(v.error));
   const rec = await h.getRecord(qa, recordId);
-  assert.equal(rec.status, 'qa_ok');
+  assert.equal(rec.status, 'approved'); // 版1.19.0: 合格で approved
   return { recordId, t, qa, no, itemIds, rec };
 }
 

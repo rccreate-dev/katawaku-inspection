@@ -195,7 +195,7 @@ describe('C-ROSTER 名簿検証', () => {
 describe('C-REP 元請向けPDF', () => {
   beforeEach(() => h.reset());
 
-  it('C-REP-01: qa_ok で generateReport→version 1・再実行で2、submittedは REPORT_NOT_ALLOWED、approvedでも生成可、listReportsは版降順', async () => {
+  it('C-REP-01: 合格(版1.19.0: approved)で generateReport→version 1・再実行で2・3、submittedは REPORT_NOT_ALLOWED、listReportsは版降順', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const { recordId: s } = await h.makeSubmitted(t);
@@ -204,12 +204,11 @@ describe('C-REP 元請向けPDF', () => {
     assert.equal(na.error.data.status, 'submitted');
     const { recordId } = await h.makeQaOk(t, qa);
     const r1 = await qa.ok('generateReport', { recordId });
-    assert.equal(r1.report.version, 1); assert.equal(r1.report.recordStatus, 'qa_ok'); assert.equal(r1.report.recordId, recordId);
+    assert.equal(r1.report.version, 1); assert.equal(r1.report.recordStatus, 'approved'); assert.equal(r1.report.recordId, recordId);
     assert.match(r1.report.url, /^https?:\/\//); assert.match(r1.report.sha256, /^[0-9a-f]{64}$/);
     assert.equal(r1.report.generatedBy, 'u_sato'); assert.equal(r1.report.generatedByName, '佐藤');
     const r2 = await qa.ok('generateReport', { recordId });
     assert.equal(r2.report.version, 2);
-    await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
     const r3 = await qa.ok('generateReport', { recordId });
     assert.equal(r3.report.version, 3); assert.equal(r3.report.recordStatus, 'approved');
     const list = await qa.ok('listReports', { recordId });
@@ -227,7 +226,7 @@ describe('C-REP 元請向けPDF', () => {
     assert.match(res.headers.get('content-type'), /application\/pdf/);
     const buf = Buffer.from(await res.arrayBuffer());
     assert.equal(buf.subarray(0, 5).toString('latin1'), '%PDF-');
-    assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v1 qa_ok stage=pre_pour`), '版1.9: 末尾に stage={stage}');
+    assert.ok(buf.toString('latin1').includes(`MOCK REPORT ${recordId} v1 approved stage=pre_pour`), '版1.9: 末尾に stage={stage}');
     assert.equal(h.sha256(buf), r.report.sha256, 'sha256 は実バイト列のハッシュ');
     // 件名(SPEC §10.2a): ファイル名は「現場名 階 [工区] 打設箇所」+ _v版_日時。recordId は含まない
     const fname = decodeURIComponent(r.report.url.split('/').pop());

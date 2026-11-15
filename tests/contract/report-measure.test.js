@@ -1,6 +1,6 @@
 // C-REP-07 / C-REP-08 / C-DRAW-07 / C-REP-01②(版1.11.0。SPEC §12.3): 元請PDFの実測の表現
 //   §10.2d(実測の表示規則)・§10.2b-A/B(項目表・写真ブロック)・§10.2c-3(図面の凡例)・§10.5.3〜10.5.5(doc 方式)
-//   - 全対象(mock / harness / 実GAS): テストデータの準備(記録が qa_ok になり generateReport が成功する)
+//   - 全対象(mock / harness / 実GAS): テストデータの準備(記録が approved(合格)になり generateReport が成功する)
 //   - harness 専用(mock・実GASではスキップ。mock は PDF を作らない=SPEC §11.3): HTML方式 = `/__mock/lastReportHtml`、doc 方式 = `/__mock/docShim` の lastDoc
 // 実行: harness に対しては API_URL=http://127.0.0.1:8788/api node --test --test-concurrency=1 tests/contract/report-measure.test.js
 'use strict';
@@ -50,7 +50,7 @@ const POST = (engine) => ({ lot: 'RPD-' + engine, variant: 'post', engine });
 describe('C-REP-07/08・C-DRAW-07 テストデータ(全対象)', () => {
   before(() => h.reset());
 
-  it('実測つきの記録(打設前・出来形・図面つき・i8のみ)が qa_ok になり generateReport が成功する(職長の許容超は ng。管理者は許容超でも qaNote つきの ok で判定できる=版1.11.1)', async () => {
+  it('実測つきの記録(打設前・出来形・図面つき・i8のみ)が approved(合格)になり generateReport が成功する(職長の許容超は ng。管理者は許容超でも qaNote つきの ok で判定できる=版1.11.1)', async () => {
     await m.setEngine('html');
     const specs = [
       { lot: 'RT1', variant: 'full', drawings: [{ side: 'self', markers: markersA(NO_PRE) }] },
@@ -60,7 +60,7 @@ describe('C-REP-07/08・C-DRAW-07 テストデータ(全対象)', () => {
     ];
     for (const s of specs) {
       const rec = await m.makeMeasureRecord(s);
-      assert.equal(rec.rec.status, 'qa_ok', s.lot);
+      assert.equal(rec.rec.status, 'approved', s.lot);
       const i6 = rec.rec.items.find((i) => i.itemId === (s.variant === 'post' ? 'i56' : 'i6'));
       if (s.variant === 'full') {
         assert.deepEqual(i6.self.values, [1, -3, 2, -2.5]); assert.equal(i6.self.result, 'ng');

@@ -121,11 +121,7 @@
             el.appendChild(h('h3', null, KW.ts('scr.S09.major', stage)));
             part.forEach(function (r) { el.appendChild(recRow(r)); });
           });
-          // ④ 元請待ち
-          var prime = all.filter(function (r) { return !r.masked && r.status === 'qa_ok'; });
-          el.appendChild(h('h3', null, t('scr.S09.prime')));
-          if (!prime.length) el.appendChild(C.empty('scr.S09.prime_none'));
-          prime.forEach(function (r) { el.appendChild(recRow(r, has(r, 'recordPrimeSign') ? KW.ts('act.prime_sign', r.stage) : null)); });
+          // ④ 元請待ち: 版1.19.0 で廃止(SPEC §6.11-7。合格で打設可になる)
           // ⑤ 現場×階の状況
           el.appendChild(h('h3', null, t('scr.S09.grid')));
           var sites = (KW.state.bootstrap && KW.state.bootstrap.sites) || [];

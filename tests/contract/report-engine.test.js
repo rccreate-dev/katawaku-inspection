@@ -44,19 +44,19 @@ function harnessOnly(name, fn) {
 }
 const lastHtml = async () => (await h.mock('lastReportHtml', {})).html || '';
 
-/** 図面1枚・写真つきの qa_ok 記録を作る(QA が図面を付ける)。 */
-async function makeReportable(lot, { drawings = 0, extraPrime = 0 } = {}) {
+/** 図面・写真つきの合格(approved)記録を作る(QA が図面を付ける)。版1.19.0: 元請サイン証跡(prime)は廃止のため、追加の写真は QA 写真で足す */
+async function makeReportable(lot, { drawings = 0, extraQa = 0 } = {}) {
   const t = await h.login('u_tanaka');
   const qa = await h.login('u_suzuki');
   const { recordId } = await h.makeSubmitted(t, { lot });
   await qa.ok('claimReview', { recordId, round: 1 });
   for (let i = 0; i < drawings; i++) await h.uploadDrawing(qa, { recordId, side: 'qa' });
+  for (let i = 0; i < extraQa; i++) {
+    const u = await h.uploadPhoto(qa, { recordId, itemId: 'i1', side: 'qa' });
+    assert.equal(u.ok, true, 'QA 写真: ' + JSON.stringify(u.error));
+  }
   await h.fillQa(qa, recordId, {}, { comment: '管理者コメント全文テスト' });
   await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
-  for (let i = 0; i < extraPrime; i++) {
-    const u = await h.uploadPhoto(qa, { recordId, side: 'prime' });
-    assert.equal(u.ok, true, 'prime 写真: ' + JSON.stringify(u.error));
-  }
   return { recordId, qa, t };
 }
 const REPORT_KEYS = ['reportId', 'recordId', 'version', 'url', 'sha256', 'generatedBy', 'generatedByName', 'generatedAt', 'recordStatus'];
@@ -122,7 +122,7 @@ describe('C-REP reportEngine(HTTPから見える部分)', () => {
     assert.deepEqual(list.reports.map((r) => r.version), values.map((_, i) => values.length - i), 'listReports は版降順');
     // 方式を変えても Events/Reports の形は同じ。bootstrap.config にも出ない
     assert.ok(!(ENGINE_KEY in (await qa.ok('getBootstrap', {})).config));
-    // 非 qa_ok は方式に関わらず REPORT_NOT_ALLOWED(C-REP-04⑥の契約側)
+    // 非 approved は方式に関わらず REPORT_NOT_ALLOWED(C-REP-04⑥の契約側)
     await setEngine('doc');
     const { recordId: sub } = await h.makeSubmitted(t, { lot: 'RE2' });
     const na = await qa.call('generateReport', { recordId: sub });
@@ -166,7 +166,7 @@ describe('C-REP harness-only(/__mock/docShim がある対象のみ。mock では
 
   harnessOnly('C-REP-03: doc 方式の文書(用紙A4・余白12mm・Noto Sans JP・画像数・改ページ数・表・フッタ・後始末)', async () => {
     await setEngine('doc');
-    const { recordId, qa } = await makeReportable('RE4', { drawings: 1, extraPrime: 1 });
+    const { recordId, qa } = await makeReportable('RE4', { drawings: 1, extraQa: 1 });
     const photos = (await h.stateRows('Photos')).filter((p) => p.recordId === recordId && !p.deleted);
     const nPhoto = photos.filter((p) => p.kind !== 'drawing').length;
     const nDrawing = photos.filter((p) => p.kind === 'drawing').length;

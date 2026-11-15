@@ -11,7 +11,7 @@ const E = require('../helpers/e2e');
 const A1 = 'r_seeda10000000000'; // approved(田中)
 const A2 = 'r_seeda20000000000'; // submitted(田中)。s_a
 const A3 = 'r_seeda30000000000'; // draft(田中)
-const C1 = 'r_seedc10000000000'; // qa_ok(スギアント班・s_c)。鈴木が主担当
+const C1 = 'r_seedc10000000000'; // approved(版1.19.0。旧 qa_ok。スギアント班・s_c)。鈴木が主担当
 
 const okBtn = (s) => E.pinSheet(s).locator('.btns .btn:not(.ghost)');
 const cancelBtn = (s) => E.pinSheet(s).locator('.btns .btn.ghost');
@@ -49,7 +49,7 @@ describe('E-25 PIN・先着の操作は先出しされない(--latency 2000)', (
   after(async () => { if (env) await env.teardown(); });
   beforeEach(async () => { await env.reset(); });
 
-  it('①提出・合格・元請サイン: 応答まで遷移せず『送信中…』、応答後は応答の record で S08 を描く(getRecord 0回)', async () => {
+  it('①提出・合格(版1.19.0 で元請サインは廃止): 応答まで遷移せず『送信中…』、応答後は応答の record で S08 を描く(getRecord 0回)', async () => {
     await completeDraft(env, A3);
     await E.apiClaimAndFillQa(env, A2, 'u_sato');
     // 提出(田中)
@@ -74,17 +74,9 @@ describe('E-25 PIN・先着の操作は先出しされない(--latency 2000)', (
     await q.page.waitForFunction((n) => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === n); return b && !b.disabled; }, q.t('verdict.ok'), { timeout: 15000 });
     await verdictBtn(q, 'ok').click();
     at = await pressOkAndCheckWaiting(q, '3333', new RegExp(`^#/record/${A2}/review$`));
-    await q.page.locator('.chip.st-qa_ok').first().waitFor({ timeout: 15000 });
+    await q.page.locator('.chip.st-approved').first().waitFor({ timeout: 15000 });
     assert.match(await q.page.evaluate(() => location.hash), stayedOnS08(A2));
     assert.equal(wq.count('getRecord', at), 0, '合格の成功後に getRecord を呼ばない');
-
-    // 元請サイン(佐藤。M5 → M1)
-    await q.page.getByRole('button', { name: q.t('act.prime_sign') }).click();
-    await q.page.getByLabel(q.t('scr.M5.signer')).fill('山田');
-    await q.page.getByRole('button', { name: q.t('scr.M5.go') }).click();
-    at = await pressOkAndCheckWaiting(q, '3333', stayedOnS08(A2));
-    await q.page.locator('.chip.st-approved').first().waitFor({ timeout: 15000 });
-    assert.equal(wq.count('getRecord', at), 0, '元請サインの成功後に getRecord を呼ばない');
     q.assertClean(); await q.close();
   });
 
@@ -105,7 +97,7 @@ describe('E-25 PIN・先着の操作は先出しされない(--latency 2000)', (
     await q.page.waitForTimeout(3000);
     assert.equal(await E.bodyHas(q, E.rx('msg.slow_wait')), false, '3秒後はまだ出ない');
     await E.waitText(q, E.rx('msg.slow_wait'), 9000); // 8秒超で出る
-    await q.page.locator('.chip.st-qa_ok').first().waitFor({ timeout: 20000 });
+    await q.page.locator('.chip.st-approved').first().waitFor({ timeout: 20000 });
     q.assertClean(); await q.close();
   });
 
@@ -181,7 +173,7 @@ describe('E-25 PIN・先着の操作は先出しされない(--latency 2000)', (
       assert.match(await s.page.evaluate(() => location.hash), new RegExp(`^#/record/${rid}(/(review|confirm))?$`), '提出・合格の確定画面へは進まない(詳細へ戻るのは可)');
       for (let i = 0; i < 30 && w.count('getRecord', at) < 1; i++) await s.page.waitForTimeout(500);
       assert.ok(w.count('getRecord', at) >= 1, '拒否のあと記録を取り直す');
-      assert.notEqual((await env.stateRows('Records')).find((r) => r.recordId === rid).status, verdict ? 'qa_ok' : 'submitted', '状態は変わっていない');
+      assert.notEqual((await env.stateRows('Records')).find((r) => r.recordId === rid).status, verdict ? 'approved' : 'submitted', '状態は変わっていない');
       s.assertClean(); await s.close();
     });
   }
@@ -211,9 +203,8 @@ describe('E-28 getRecord を省く(--latency 300)', () => {
     }
   };
 
-  it('提出(S07)・元請サイン(M5)・打設停止(M4)の成功直後は getRecord を呼ばない', async () => {
+  it('提出(S07)・打設停止(M4)の成功直後は getRecord を呼ばない(版1.19.0: 元請サイン(M5)は廃止)', async () => {
     await completeDraft(env, A3);
-    const qr = await E.apiQaOk(env, { lot: 'E28A' });
     const f = await E.newSession(env); const wf = E.watchApi(f, env.apiUrl);
     await E.loginFast(f, '田中');
     await pressSubmit(f, A3);
@@ -227,17 +218,6 @@ describe('E-28 getRecord を省く(--latency 300)', () => {
     await f.page.locator('.sheet .btn.bad').click();
     await expectNoGetRecord(f, wf, at, { rid: A1, user: 'u_tanaka', status: 'fix' });
     f.assertClean(); await f.close();
-
-    const q = await E.newSession(env); const wq = E.watchApi(q, env.apiUrl);
-    await E.loginFast(q, '佐藤');
-    await q.page.goto(q.base + '/#/record/' + qr.recordId);
-    await q.page.getByRole('button', { name: q.t('act.prime_sign') }).click();
-    await q.page.getByLabel(q.t('scr.M5.signer')).fill('山田');
-    await q.page.getByRole('button', { name: q.t('scr.M5.go') }).click();
-    await q.page.waitForTimeout(300);
-    at = await E.pinSubmitNoWait(q, '3333');
-    await expectNoGetRecord(q, wq, at, { rid: qr.recordId, user: 'u_sato', status: 'approved' });
-    q.assertClean(); await q.close();
   });
 
   it('合格・軽微・重大・確認中にする(S10)の成功直後は getRecord を呼ばない', async () => {
@@ -255,7 +235,7 @@ describe('E-28 getRecord を省く(--latency 300)', () => {
     await waitVerdictReady(q, 'ok');
     await verdictBtn(q, 'ok').click();
     let at = await E.pinSubmitNoWait(q, '3333');
-    await expectNoGetRecord(q, w, at, { rid: A2, user: 'u_sato', status: 'qa_ok' });
+    await expectNoGetRecord(q, w, at, { rid: A2, user: 'u_sato', status: 'approved' });
     // 軽微・重大(PINなし。確認ダイアログのあと)
     for (const [rid, v] of [[minor.recordId, 'minor'], [major.recordId, 'major']]) {
       await q.page.goto(q.base + '/#/record/' + rid + '/review');

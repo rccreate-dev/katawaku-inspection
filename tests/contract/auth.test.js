@@ -182,7 +182,7 @@ describe('C-PIN PIN再入力・ロック・解除', () => {
     assert.equal((await submit('1111')).ok, true);
   });
 
-  it('C-PIN-02: PIN必須でないactionのpinは無視。verdict(ok)・primeSignはPIN必須、verdict(minor)は不要', async () => {
+  it('C-PIN-02: PIN必須でないactionのpinは無視。verdict(ok)はPIN必須、verdict(minor)は不要(版1.19.0: 元請サインの記録は廃止)', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const lead = await h.login('u_lead');
@@ -195,8 +195,6 @@ describe('C-PIN PIN再入力・ロック・解除', () => {
     await h.fillQa(qa, a);
     assert.equal((await qa.call('submitVerdict', { recordId: a, round: 1, verdict: 'ok' })).error.code, 'PIN_REQUIRED');
     assert.equal((await qa.call('submitVerdict', { recordId: a, round: 1, verdict: 'ok' }, { pin: qa.pin })).ok, true);
-    assert.equal((await qa.call('recordPrimeSign', { recordId: a, signerName: '山田', method: 'paper' })).error.code, 'PIN_REQUIRED');
-    assert.equal((await qa.call('recordPrimeSign', { recordId: a, signerName: '山田', method: 'paper' }, { pin: qa.pin })).ok, true);
 
     const { recordId: b } = await h.makeSubmitted(t);
     await qa.ok('claimReview', { recordId: b, round: 1 });

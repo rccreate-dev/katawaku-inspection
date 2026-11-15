@@ -293,7 +293,7 @@ async function apiClaimAndFillQa(env, recordId, qaUserId = 'u_sato', { ng = {}, 
   const items = c.record.items.filter((i) => i.def.audience !== 'foreman').map((i) => ({ itemId: i.itemId, result: ng[i.itemId] ? 'ng' : 'ok', ...(ng[i.itemId] ? { severity: ng[i.itemId].severity, note: ng[i.itemId].note } : {}) }));
   await apiOk(env, 'saveQaDraft', { recordId, items, ...(comment !== undefined ? { comment } : {}) }, qaUserId);
 }
-/** 提出済み→QA合格(qa_ok)まで API で進める */
+/** 提出済み→QA合格まで API で進める(版1.19.0 から合格で approved) */
 async function apiQaOk(env, o = {}) {
   const r = await apiSubmitted(env, o);
   const qa = o.qa || 'u_sato';

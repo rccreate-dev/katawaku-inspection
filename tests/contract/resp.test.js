@@ -25,7 +25,7 @@ async function sameAsGetRecord(session, recordId, rec, label) {
 describe('C-RESP 書き込み応答の record(§5.1a)', () => {
   beforeEach(() => h.reset());
 
-  it('C-RESP-01: submitRecord/submitVerdict(ok・minor・major)/recordPrimeSign/stopPour の record は RecordDetail で getRecord と一致する', async () => {
+  it('C-RESP-01: submitRecord/submitVerdict(ok・minor・major)/stopPour の record(版1.19.0: recordPrimeSign は廃止) は RecordDetail で getRecord と一致する', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
 
@@ -46,14 +46,8 @@ describe('C-RESP 書き込み応答の record(§5.1a)', () => {
     assert.ok(isDetail(ok.data.record), 'submitVerdict(ok).record');
     assert.ok(Array.isArray(ok.data.warnings));
     assert.ok(ok.data.record.items.some((i) => i.qa && i.qa.result === 'ok'), 'QA の見え方では qa が入っている');
+    assert.equal(ok.data.record.status, 'approved', '版1.19.0: 合格で approved');
     await sameAsGetRecord(qa, recordId, ok.data.record, 'submitVerdict(ok)');
-
-    // 元請サイン
-    const ps = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
-    assert.equal(ps.ok, true, JSON.stringify(ps.error));
-    assert.ok(isDetail(ps.data.record), 'recordPrimeSign.record');
-    assert.equal(ps.data.record.status, 'approved');
-    await sameAsGetRecord(qa, recordId, ps.data.record, 'recordPrimeSign');
 
     // minor / major(別の記録)
     for (const [verdict, over, comment] of [
@@ -161,7 +155,6 @@ describe('C-RESP 書き込み応答の record(§5.1a)', () => {
     await qa.ok('claimReview', { recordId, round: 1 });
     await h.fillQa(qa, recordId);
     responses.push(await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin }));
-    responses.push(await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin }));
     let seen = 0;
     for (const r of responses) {
       assert.equal(r.ok, true, JSON.stringify(r.error));
@@ -172,7 +165,7 @@ describe('C-RESP 書き込み応答の record(§5.1a)', () => {
         if (typeof v === 'string') assert.ok(v.length < 2000 && !/^[A-Za-z0-9+/=]{500,}$/.test(v), `base64 本体らしい文字列: ${path}`);
       });
     }
-    assert.ok(seen >= 4, 'record を検査した件数');
+    assert.ok(seen >= 3, 'record を検査した件数');
     // エラー応答
     const errs = [
       await t.call('addNote', { recordId, text: '' }), // VALIDATION_FAILED
@@ -259,10 +252,9 @@ describe('C-RESP 書き込み応答の record(§5.1a)', () => {
     await qa.ok('claimReview', { recordId, round: 1 });
     await h.fillQa(qa, recordId);
     assert.equal((await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin })).ok, true);
-    assert.equal((await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin })).ok, true);
     const { recordId: sp } = await h.makeSubmitted(t);
     assert.equal((await t.call('stopPour', { recordId: sp, reason: '確認' })).ok, true);
-    const rows = (await h.stateRows('Idem')).filter((r) => ['submitRecord', 'addNote', 'submitVerdict', 'recordPrimeSign', 'stopPour'].includes(r.action));
+    const rows = (await h.stateRows('Idem')).filter((r) => ['submitRecord', 'addNote', 'submitVerdict', 'stopPour'].includes(r.action));
     assert.ok(rows.length >= 5, 'Idem 行を検査');
     for (const row of rows) {
       const txt = String(row.responseJson || '');

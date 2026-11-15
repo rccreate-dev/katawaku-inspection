@@ -17,7 +17,7 @@ const sameExceptRecord = (replay, first, label) => {
 describe('C-IDEM 冪等キー', () => {
   beforeEach(() => h.reset());
 
-  it('C-IDEM-01: submitRecord/submitVerdict/recordPrimeSign の再送は replayed=true・同一data・Events1回分', async () => {
+  it('C-IDEM-01: submitRecord/submitVerdict の再送は replayed=true・同一data・Events1回分', async () => {
     const t = await h.login('u_tanaka');
     const qa = await h.login('u_sato');
     const { recordId } = await h.makeFilledDraft(t);
@@ -36,12 +36,8 @@ describe('C-IDEM 冪等キー', () => {
     const v1 = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin, clientId: cid2 });
     const v2 = await qa.call('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin, clientId: cid2 });
     assert.equal(v1.ok, true); assert.equal(v2.meta.replayed, true); sameExceptRecord(v2, v1, 'submitVerdict');
-    const cid3 = h.newClientId();
-    const p1 = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin, clientId: cid3 });
-    const p2 = await qa.call('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin, clientId: cid3 });
-    assert.equal(p1.ok, true); assert.equal(p2.meta.replayed, true); sameExceptRecord(p2, p1, 'recordPrimeSign');
     rec = await h.getRecord(qa, recordId);
-    assert.equal(countKind(rec, 'verdict_ok'), 1); assert.equal(countKind(rec, 'prime_signed'), 1);
+    assert.equal(countKind(rec, 'verdict_ok'), 1); assert.equal(countKind(rec, 'prime_signed'), 0);
     assert.equal(rec.round, 1); assert.equal(rec.status, 'approved');
   });
 

@@ -68,7 +68,7 @@ describe('C-VERD 管理者の許容超 ok とコメント必須(版1.11.1)', () 
         const r = await verdict(qa, recordId, cs.verdict || 'ok', cs.comment ? { comment: cs.comment } : {});
         if (cs.expect.length === 0) {
           assert.equal(r.ok, true, JSON.stringify(r.error));
-          assert.equal(r.data.record.status, (cs.verdict || 'ok') === 'ok' ? 'qa_ok' : 'fix');
+          assert.equal(r.data.record.status, (cs.verdict || 'ok') === 'ok' ? 'approved' : 'fix');
           return;
         }
         assert.equal(r.ok, false);
@@ -101,7 +101,7 @@ describe('C-VERD 管理者の許容超 ok とコメント必須(版1.11.1)', () 
     }
   });
 
-  it('C-VERD-01②: qaNote を saveQaDraft → 同じ submitVerdict(ok) が成功(qa_ok)。qaNote 保存・Notes(manager/verdict)追記・職長の値/コメント/結果は不変', async () => {
+  it('C-VERD-01②: qaNote を saveQaDraft → 同じ submitVerdict(ok) が成功(approved)。qaNote 保存・Notes(manager/verdict)追記・職長の値/コメント/結果は不変', async () => {
     const { t, qa, recordId, items } = await submittedAndClaimed({ selfOver: { i4: { values: [3], note: '職長メモ' }, i9: { note: '控え確認' } } });
     const before = await h.getRecord(t, recordId);
     await saveQa(qa, recordId, items, { i4: { values: [6], note: '' } });
@@ -110,7 +110,7 @@ describe('C-VERD 管理者の許容超 ok とコメント必須(版1.11.1)', () 
     await saveQa(qa, recordId, items, { i4: { values: [6], note: '図面で確認済み' } });
     const r = await verdict(qa, recordId, 'ok'); // 別 clientId(拒否された呼び出しとは別)
     assert.equal(r.ok, true, JSON.stringify(r.error));
-    assert.equal(r.data.record.status, 'qa_ok');
+    assert.equal(r.data.record.status, 'approved');
     const after = await h.getRecord(qa, recordId);
     const q4 = itemOf(after, 'i4');
     assert.equal(q4.qa.note, '図面で確認済み');
@@ -211,7 +211,7 @@ describe('C-VERD 管理者の許容超 ok とコメント必須(版1.11.1)', () 
     await saveQa(qa, recordId, items, { i4: { values: [6], note: '再測定のうえ許容内と判断' } });
     const second = await verdict(qa, recordId, 'ok', {}, { clientId: h.newClientId() });
     assert.equal(second.ok, true, JSON.stringify(second.error));
-    assert.equal(second.data.record.status, 'qa_ok');
+    assert.equal(second.data.record.status, 'approved');
   });
 
   h.mockOnly(it, 'C-VERD-03⑤(mock-only): 違反 rule の一覧(meta.violationRules)に QA_OVER_TOL_COMMENT_REQUIRED が含まれる。辞書の網羅は U-I18N-01', async () => {

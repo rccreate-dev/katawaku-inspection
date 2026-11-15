@@ -247,10 +247,7 @@ test('ST-14 reinspectOf は同じ段階の記録に限る(違えば VALIDATION_F
   assert.equal(sato('claimReview', { recordId: s.recordId, round: 1 }).ok, true);
   fill(sato, s.recordId, 'qa');
   assert.equal(sato('submitVerdict', { recordId: s.recordId, round: 1, verdict: 'ok' }, { pin: '3333' }).ok, true);
-  // qa_ok の間は再検査不可(STATE_CONFLICT)
-  const early = tanaka('createRecord', { recordId: rid('r'), siteId: 's_a', floor: '2F', lot: 'RE1', stage: 'post_demold', reinspectOf: s.recordId });
-  assert.equal(early.error.code, 'STATE_CONFLICT');
-  assert.equal(sato('recordPrimeSign', { recordId: s.recordId, signerName: '山田', method: 'paper' }, { pin: '3333' }).data.record.status, 'approved');
+  // 版1.19.0: 合格で approved になるので、すぐ再検査を作れる
   const re = tanaka('createRecord', { recordId: rid('r'), siteId: 's_a', floor: '2F', lot: 'RE1', stage: 'post_demold', reinspectOf: s.recordId });
   assert.equal(re.ok, true, JSON.stringify(re));
   assert.equal(re.data.record.reinspectOf, s.recordId);
@@ -262,7 +259,7 @@ test('ST-14 reinspectOf は同じ段階の記録に限る(違えば VALIDATION_F
 
 /* ---------- 流れ・時間ルール・通知(§6.4〜§6.8) ---------- */
 
-test('ST-20 出来形の全流れ: 打設予定日時なしで提出→claim→合格→元請サイン→approved(警告なし・時間ルールなし)', () => {
+test('ST-20 出来形の全流れ: 打設予定日時なしで提出→claim→合格で approved(版1.19.0。警告なし・時間ルールなし)', () => {
   const s = submitted();
   assert.deepEqual(s.submit.data.warnings, [], 'POUR_PLAN_REQUIRED も SELF_LATE も出ない');
   const c = sato('claimReview', { recordId: s.recordId, round: 1 });
@@ -273,11 +270,9 @@ test('ST-20 出来形の全流れ: 打設予定日時なしで提出→claim→�
   const v = sato('submitVerdict', { recordId: s.recordId, round: 1, verdict: 'ok' }, { pin: '3333' });
   assert.equal(v.ok, true, JSON.stringify(v));
   assert.deepEqual(v.data.warnings, [], 'QA_BEFORE_OPEN / QA_LATE は出ない');
-  assert.equal(v.data.record.status, 'qa_ok');
-  const p = sato('recordPrimeSign', { recordId: s.recordId, signerName: '山田', method: 'paper' }, { pin: '3333' });
-  assert.equal(p.data.record.status, 'approved');
+  assert.equal(v.data.record.status, 'approved');
   const d = sato('getRecord', { recordId: s.recordId }).data.record;
-  assert.deepEqual(d.events.map((e) => e.kind), ['record_created', 'submitted', 'claimed', 'verdict_ok', 'prime_signed']);
+  assert.deepEqual(d.events.map((e) => e.kind), ['record_created', 'submitted', 'claimed', 'verdict_ok']);
   assert.equal(d.pourPlannedAt, null);
 });
 
@@ -366,10 +361,8 @@ test('ST-31 出来形の approved でも stopPour 不可。actions に stopPour 
   sato('claimReview', { recordId: s.recordId, round: 1 });
   fill(sato, s.recordId, 'qa');
   sato('submitVerdict', { recordId: s.recordId, round: 1, verdict: 'ok' }, { pin: '3333' });
-  check(); // qa_ok
-  sato('recordPrimeSign', { recordId: s.recordId, signerName: '山田', method: 'paper' }, { pin: '3333' });
-  check(); // approved
-  assert.deepEqual(seen, ['submitted', 'qa_ok', 'approved']);
+  check(); // approved(版1.19.0: 合格で approved)
+  assert.deepEqual(seen, ['submitted', 'approved']);
   assert.equal(tanaka('stopPour', { recordId: s.recordId, reason: '異常' }).error.code, 'STATE_CONFLICT');
   assert.equal(lead('stopPour', { recordId: s.recordId, reason: '異常' }).error.code, 'STATE_CONFLICT');
   assert.equal(tanaka('getRecord', { recordId: s.recordId }).data.record.status, 'approved');
@@ -430,18 +423,18 @@ test('ST-40 PDF: 出来形は見出し「型枠工事 出来形検査記録」�
   sato('claimReview', { recordId: s.recordId, round: 1 });
   fill(sato, s.recordId, 'qa');
   sato('submitVerdict', { recordId: s.recordId, round: 1, verdict: 'ok' }, { pin: '3333' });
-  // qa_ok
+  // 版1.19.0: 合格で approved(元請待ちは無い)
   let g = sato('generateReport', { recordId: s.recordId });
   assert.equal(g.ok, true, JSON.stringify(g));
   let html = h.control('lastReportHtml', {}).data.html;
   assert.ok(html.includes('型枠工事 出来形検査記録'));
   assert.ok(!html.includes('打設予定日時'));
   assert.ok(!html.includes('打設可'));
-  assert.ok(html.includes('元請待ち'));
+  assert.ok(!html.includes('元請待ち'));
+  assert.ok(html.includes('署名・押印'), '元請欄は空欄');
   assert.ok(html.includes('<title>A現場(仮) 2F P1</title>'));
   assert.ok(html.includes('stage=post_demold'));
-  // approved
-  sato('recordPrimeSign', { recordId: s.recordId, signerName: '山田', method: 'paper' }, { pin: '3333' });
+  // 作り直し
   g = sato('generateReport', { recordId: s.recordId });
   assert.equal(g.ok, true);
   assert.equal(g.data.report.version, 2);

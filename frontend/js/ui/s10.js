@@ -289,7 +289,7 @@
           rows = rs;
           if (rs.length) { busyVerdict = false; drawVerdict(); return null; }
           if (v === 'ok') {
-            return KW.modal.pinFlow({ title: t('scr.S10.pin_title'), action: 'submitVerdict', params: base, clientId: opId(key), onBusy: function (on) { setSending(on ? 'ok' : null); } }).then(function (res) {
+            return KW.modal.pinFlow({ title: KW.ts('scr.S10.pin_title', detail.stage), action: 'submitVerdict', params: base, clientId: opId(key), onBusy: function (on) { setSending(on ? 'ok' : null); } }).then(function (res) {
               busyVerdict = false;
               if (res === null) { drawVerdict(); return null; }
               if (res.ok) { delete opIds[key]; return afterVerdict(res, v); }

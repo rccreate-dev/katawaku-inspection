@@ -150,12 +150,11 @@ describe('C-SITE 責任者の現場管理(版1.13.0)', () => {
     assert.equal(r.error.code, 'SITE_HAS_OPEN_RECORDS');
     assert.deepEqual(r.error.data, { draft: 1, submitted: 0, fix: 0 });
     await h.advanceToQaOk(tanaka, sato, c.recordId);
-    r = await lead.call('adminCloseSite', { siteId: sid });
-    assert.equal(r.error.code, 'CLOSE_CONFIRM_REQUIRED');
-    assert.deepEqual(r.error.data, { qaOk: 1 });
+    // 版1.19.0(SPEC §6.11-4): 合格で approved。元請待ちが無いので CLOSE_CONFIRM_REQUIRED は起きない(acceptQaOk は受け付けて無視)
+    assert.equal((await h.getRecord(lead, c.recordId)).status, 'approved');
     const info = await lead.ok('adminGetJoinInfo', { siteId: sid });
     await sugiant.ok('requestJoin', { siteId: sid, joinKey: info.joinKey });
-    r = await lead.call('adminCloseSite', { siteId: sid, acceptQaOk: true });
+    r = await lead.call('adminCloseSite', { siteId: sid });
     assert.equal(r.ok, true, JSON.stringify(r.error));
     assert.equal(r.data.site.status, 'closed');
     assert.equal(r.data.endedAssignments, 3);
@@ -179,7 +178,6 @@ describe('C-SITE 責任者の現場管理(版1.13.0)', () => {
     assert.ok((await bootSites(lead)).includes(sid));
     const g = await lead.call('generateReport', { recordId: c.recordId });
     assert.equal(g.ok, true, JSON.stringify(g.error));
-    await h.primeSign(lead, c.recordId);
     r = await lead.call('adminCloseSite', { siteId: sid, acceptQaOk: true });
     assert.equal(r.error.code, 'STATE_CONFLICT');
     assert.deepEqual(r.error.data, { status: 'closed' });

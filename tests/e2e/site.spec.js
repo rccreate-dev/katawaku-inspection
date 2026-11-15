@@ -4,11 +4,11 @@
 //   ②階 3F を足して 1F の上へ移し保存 → S05 の階の選択肢がその順
 //   ③記録のある階の「外す」は押せず「使用中」と出る
 //   ④「担当を追加」で田中を職長(田中班)に → 担当の一覧に出る
-//   ⑤入力中の記録がある現場で「閉鎖する」→ 件数つきで止まる。元請待ちだけの現場では件数つきの確認 → 閉鎖
+//   ⑤入力中の記録がある現場で「閉鎖する」→ 件数つきで止まる。合格済み(打設可)だけの現場はそのまま閉鎖(版1.19.0: 元請待ちは無い)
 //     → S22 の「閉鎖済み」へ。「再開する」で戻り、担当が戻る
 //   ⑥S16 で「新しい人を登録」→ M11(管理者を選ぶと代行資格のチェックが出る)→ M8 に6桁のコード
 //   ⑦佐藤・田中では #/admin/sites を開いてもホームに戻る ⑧横スクロールが出ない(各画面でキー露出もなし)
-//   ※ 元請待ち(qa_ok)の記録は API で作る(合格操作は E-03/E-31 で確認済み)
+//   ※ 合格済み(approved)の記録は API で作る(合格操作は E-03/E-31 で確認済み)
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -135,16 +135,14 @@ describe('E-32 責任者の現場管理 (ja, 375px)', () => {
     await clean(s, 'S23 閉鎖できない');
     assert.equal((await E.stateRows('Sites')).find((x) => x.siteId === 's_a').status, 'active');
 
-    // ⑤-2 元請待ち(qa_ok)だけの新しい現場 → 件数つきの確認 → 閉鎖
+    // ⑤-2 合格済み(approved)だけの新しい現場 → 元請待ちの確認なしで閉鎖(版1.19.0)
     await E.apiQaOk(env, { siteId, floor: '1F', owner: 'u_tanaka', qa: 'u_sato' });
     await page.goto(s.base + `/#/admin/site/${encodeURIComponent(siteId)}`);
     await h2Is(s, 'scr.S23.title_edit');
-    await page.locator('[data-count="qa_ok"]', { hasText: '1' }).waitFor();
+    await page.locator('[data-count="approved"]', { hasText: '1' }).waitFor();
+    assert.equal(await page.locator('[data-count="qa_ok"]').count(), 0, '元請待ちの件数は出さない');
     await page.getByRole('button', { name: s.t('scr.S23.close') }).click();
     await okSheet(s).click();
-    const sheet2 = page.locator('.sheet', { hasText: s.t('scr.S23.close_qaok', { n: 1 }) });
-    await sheet2.waitFor();
-    await sheet2.locator('.btns .btn:not(.ghost)').click();
     await page.locator('.toast', { hasText: s.t('scr.S23.closed_done') }).first().waitFor();
     await page.getByRole('button', { name: s.t('scr.S23.reopen') }).waitFor();
     assert.equal(await page.locator('[data-assign]').count(), 0, '閉鎖で担当が終わる');

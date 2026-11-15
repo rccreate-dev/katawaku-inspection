@@ -33,7 +33,8 @@
             return labels.join(' / ');
           }
           var selT = h('select', { class: 'inp', 'aria-label': t('lbl.status') }, h('option', { value: 'all' }, t('lbl.all')));
-          ['draft', 'submitted', 'fix', 'qa_ok', 'approved'].forEach(function (s) { selT.appendChild(h('option', { value: s }, statusLabel(s))); });
+          ['draft', 'submitted', 'fix', 'approved'].forEach( // 版1.19.0: qa_ok は無い(§6.11)
+            function (s) { selT.appendChild(h('option', { value: s }, statusLabel(s))); });
           selT.value = fSt;
           selS.addEventListener('change', function () { fSite = selS.value; draw(); });
           selT.addEventListener('change', function () { fSt = selT.value; draw(); });

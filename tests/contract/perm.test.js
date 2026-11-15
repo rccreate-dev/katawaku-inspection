@@ -100,9 +100,7 @@ describe('C-PERM 権限', () => {
     await qa.ok('claimReview', { recordId, round: 1 });
     await h.fillQa(qa, recordId);
     await qa.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: qa.pin });
-    await probe('qa_ok');
-    await qa.ok('recordPrimeSign', { recordId, signerName: '山田', method: 'paper' }, { pin: qa.pin });
-    await probe('approved');
+    await probe('approved'); // 版1.19.0: 合格で approved
 
     // fix では全て成功
     const { recordId: r2 } = await h.makeSubmitted(t);

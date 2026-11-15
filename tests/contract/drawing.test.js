@@ -54,12 +54,11 @@ describe('C-DRAW 図面', () => {
     assert.equal((await h.uploadDrawing(t, { recordId, markers: [] })).ok, true, '0件');
     assert.equal((await h.uploadDrawing(t, { recordId, markers: Array.from({ length: 60 }, () => M({ label: '12345678' })) })).ok, true, '60件・8文字');
 
-    // side=prime は役割検査(§4.2)が先に効くため、職長ではなく qa_ok の記録に対する QA で検証する
+    // side=prime は役割検査(§4.2)が先に効く。版1.19.0: 担当QAでも side=prime は廃止で STATE_CONFLICT(§6.11-3)
     const qa = await h.login('u_suzuki');
     const { recordId: okId } = await h.makeQaOk(t, qa, { lot: 'DR1Q' });
     const pr = await h.uploadDrawing(qa, { recordId: okId, side: 'prime' });
-    assert.equal(pr.error.code, 'VALIDATION_FAILED', JSON.stringify(pr.error));
-    assert.ok(viols(pr).includes('FIELD_INVALID|side'), viols(pr));
+    assert.equal(pr.error.code, 'STATE_CONFLICT', JSON.stringify(pr.error));
     assert.equal((await h.uploadDrawing(t, { recordId, side: 'prime' })).error.code, 'FORBIDDEN_ROLE', '職長は side=prime 自体が不可');
 
     // kind="photo" で markers に配列 → FIELD_INVALID(markers)。null は可
@@ -172,7 +171,7 @@ describe('C-DRAW 図面', () => {
     assert.deepEqual(rec.drawings.map((d) => d.side).sort(), ['qa', 'self']);
     const fx = await h.uploadDrawing(t, { recordId });
     assert.equal(fx.ok, true, 'fix では職長の図面追加は成功: ' + JSON.stringify(fx.error));
-    // 再提出 → claim → 合格(qa_ok)。qa_ok 以降は QA の図面追加も不可、qa図面は見える
+    // 再提出 → claim → 合格(版1.19.0: approved)。合格の後は QA の図面追加も不可、qa図面は見える
     await t.ok('submitRecord', { recordId, round: 1 }, { pin: t.pin });
     const sub = await h.getRecord(t, recordId);
     assert.equal(sub.status, 'submitted');
@@ -180,11 +179,11 @@ describe('C-DRAW 図面', () => {
     await suzuki.ok('claimReview', { recordId, round: sub.round });
     await h.fillQa(suzuki, recordId);
     await suzuki.ok('submitVerdict', { recordId, round: sub.round, verdict: 'ok' }, { pin: suzuki.pin });
-    assert.equal((await h.uploadDrawing(suzuki, { recordId, side: 'qa' })).error.code, 'RECORD_LOCKED', 'qa_ok 以降はQAも不可');
+    assert.equal((await h.uploadDrawing(suzuki, { recordId, side: 'qa' })).error.code, 'RECORD_LOCKED', '合格の後はQAも不可');
     assert.equal((await h.uploadDrawing(t, { recordId })).error.code, 'RECORD_LOCKED');
     rec = await h.getRecord(t, recordId);
-    assert.equal(rec.status, 'qa_ok');
-    assert.ok(rec.drawings.some((d) => d.side === 'qa'), 'qa_ok では職長にも qa 図面が含まれる');
+    assert.equal(rec.status, 'approved');
+    assert.ok(rec.drawings.some((d) => d.side === 'qa'), '合格の後は職長にも qa 図面が含まれる');
     // 図面は takenAt 昇順
     const times = rec.drawings.map((d) => d.takenAt);
     assert.deepEqual(times, [...times].sort());
@@ -264,12 +263,11 @@ describe('C-DRAW 図面', () => {
     await bad('markers', { markers: [] }, 'FIELD_INVALID|markers');
     await bad('basePhotoId', { basePhotoId: h.newPhotoId() }, 'FIELD_INVALID|basePhotoId');
     await bad('replaces', { replaces: h.newPhotoId() }, 'FIELD_INVALID|replaces');
-    // side=prime(qa_ok の記録に対する担当QA)
+    // side=prime(合格した記録に対する担当QA)。版1.19.0: side=prime は廃止で STATE_CONFLICT
     const qa = await h.login('u_suzuki');
     const { recordId: okId } = await h.makeQaOk(t, qa, { lot: 'DRB1Q' });
     const pr = await uploadBase(qa, { recordId: okId, side: 'prime' });
-    assert.equal(pr.error.code, 'VALIDATION_FAILED', JSON.stringify(pr.error));
-    assert.ok(viols(pr).includes('FIELD_INVALID|side'), viols(pr));
+    assert.equal(pr.error.code, 'STATE_CONFLICT', JSON.stringify(pr.error));
     // getPhotoThumbs でも出ない
     assert.deepEqual((await t.ok('getPhotoThumbs', { photoIds: [b._photoId] })).missing, [b._photoId]);
   });

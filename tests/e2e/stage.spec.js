@@ -1,4 +1,4 @@
-// E-15(版1.9): 出来形検査(stage=post_demold)の作成→提出→QA合格→元請サイン→「出来形確認済」。ja/id、375px
+// E-15(版1.9): 出来形検査(stage=post_demold)の作成→提出→QA合格で「出来形確認済」(版1.19.0)→元請PDF。ja/id、375px
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -15,7 +15,7 @@ const verdictBtn = (s, v) => s.page.getByRole('button', { name: s.t('verdict.' +
 
 for (const lang of ['ja', 'id']) {
   describe(`E-15 出来形検査(${lang})`, () => {
-    it('職長が出来形を作成(打設予定欄なし・8項目)→提出→QA合格→元請サインで「出来形確認済」。打設停止ボタンなし', async () => {
+    it('職長が出来形を作成(打設予定欄なし・8項目)→提出→QA合格で「出来形確認済」→元請PDF。打設停止ボタンなし', async () => {
       // 画面の言語は名簿(Users.lang)の値で決まる(SPEC §11.5)
       for (const name of ['田中', '佐藤']) await E.mock('patch', { sheet: 'Users', key: (await E.stateRows('Users')).find((u) => u.name === name).userId, set: { lang } });
       const f = await E.newSession(env, { lang });
@@ -62,20 +62,16 @@ for (const lang of ['ja', 'id']) {
       await E.settle(q);
       await verdictBtn(q, 'ok').click();
       await E.enterPin(q, '3333');
-      await qp.locator('.chip.st-qa_ok').first().waitFor();
-      // 元請PDF → 元請サイン → 出来形確認済
+      const chip = qp.locator('.chip.st-approved').first();
+      await chip.waitFor();
+      // 元請PDF
       await qp.getByRole('button', { name: q.t('act.report') }).click();
       await qp.locator('.sheet .btns .btn:not(.ghost)').click();
       await E.settle(q);
       const reports = (await E.stateRows('Reports')).filter((r) => r.recordId === rid);
       assert.equal(reports.length, 1);
       assert.match(decodeURIComponent(reports[0].url || ''), /出来形/, 'PDFファイル名に出来形が入る');
-      await qp.getByRole('button', { name: q.ts('act.prime_sign', 'post_demold') }).click();
-      await qp.getByLabel(q.t('scr.M5.signer')).fill('山田');
-      await qp.getByRole('button', { name: q.t('scr.M5.go') }).click();
-      await E.enterPin(q, '3333');
-      const chip = qp.locator('.chip.st-approved').first();
-      await chip.waitFor();
+      assert.equal(await qp.getByRole('button', { name: q.ts('act.prime_sign', 'post_demold') }).count(), 0, '元請サインのボタンが無い');
       assert.equal((await chip.innerText()).trim(), q.ts('st.approved', 'post_demold'), '出来形の approved は「出来形確認済」');
       assert.notEqual(q.ts('st.approved', 'post_demold'), q.t('st.approved'));
       rec = (await E.stateRows('Records')).find((r) => r.recordId === rid);

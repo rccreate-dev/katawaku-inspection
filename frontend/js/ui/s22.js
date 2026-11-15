@@ -5,7 +5,7 @@
   var KW = root.KW;
   var h = KW.h, t = KW.t, C = KW.ui;
   var ROLE_ORDER = ['qa_main', 'qa_sub', 'foreman', 'subforeman'];
-  var COUNT_KEYS = ['draft', 'submitted', 'fix', 'qa_ok', 'approved'];
+  var COUNT_KEYS = ['draft', 'submitted', 'fix', 'approved']; // 版1.19.0: qa_ok は常に0(§6.11)
   /* 違反の path → 欄名のキー */
   var PATH_LABEL = {
     name: 'scr.S23.name', floors: 'scr.S23.floors', zones: 'scr.S23.zones', primeContractor: 'scr.S23.prime', address: 'scr.S23.address',

@@ -15,7 +15,7 @@ function newRecord(as, siteId, floor, extra) {
 
 test.beforeEach(() => h.resetAll());
 
-test('C-STATE-01 正常系: 作成→入力→写真→提出→確認中→QA入力→合格→元請サイン→打設可', () => {
+test('C-STATE-01 正常系: 作成→入力→写真→提出→確認中→QA入力→合格で打設可(版1.19.0。元請サインの記録なし)', () => {
   const id = newRecord(tanaka, 's_a', '1F', { lot: 'F1' });
   fillAll(h, tanaka, id, 'self');
   let s = tanaka('submitRecord', { recordId: id, round: 1 }, { pin: '1111' });
@@ -28,16 +28,16 @@ test('C-STATE-01 正常系: 作成→入力→写真→提出→確認中→QA�
   fillAll(h, sato, id, 'qa');
   const v = sato('submitVerdict', { recordId: id, round: 1, verdict: 'ok' }, { pin: '3333' });
   assert.equal(v.ok, true, JSON.stringify(v));
-  assert.equal(v.data.record.status, 'qa_ok');
-  const p = sato('recordPrimeSign', { recordId: id, signerName: '山田', method: 'paper' }, { pin: '3333' });
-  assert.equal(p.ok, true, JSON.stringify(p));
-  assert.equal(p.data.record.status, 'approved');
+  assert.equal(v.data.record.status, 'approved', '合格で打設可(§6.11-1)');
   const d = sato('getRecord', { recordId: id });
   assert.equal(d.data.record.signatures.foreman.userId, 'u_tanaka');
   assert.equal(d.data.record.signatures.qa.verdict, 'ok');
-  assert.equal(d.data.record.signatures.prime.signerName, '山田');
+  assert.equal(d.data.record.signatures.prime, null);
+  assert.equal(d.data.record.actions.includes('recordPrimeSign'), false);
   const kinds = d.data.record.events.map((e) => e.kind);
-  assert.deepEqual(kinds, ['record_created', 'submitted', 'claimed', 'verdict_ok', 'prime_signed']);
+  assert.deepEqual(kinds, ['record_created', 'submitted', 'claimed', 'verdict_ok']);
+  const ev = d.data.record.events.find((e) => e.kind === 'verdict_ok');
+  if (ev && 'to' in ev) assert.equal(ev.to, 'approved');
 });
 
 test('C-STATE-02 軽微: fixに落ち、再提出でround2・QA列が空', () => {
@@ -168,14 +168,32 @@ test('C-STATE-08 スロット・再検査・段階・閉鎖', () => {
   assert.equal(tanaka('createRecord', { recordId: rid('r'), siteId: 's_b', floor: '9F', lot: 'Z', stage: 'pre_pour' }).error.code, 'VALIDATION_FAILED');
 });
 
-test('C-STATE-09 3者サイン検査', () => {
-  const c1 = 'r_seedc10000000000';
-  assert.equal(suzuki('recordPrimeSign', { recordId: c1, signerName: '', method: 'paper' }, { pin: '4444' }).error.data.violations[0].rule, 'PRIME_SIGNER_REQUIRED');
-  const ok = suzuki('recordPrimeSign', { recordId: c1, signerName: '佐々木', method: 'onsite' }, { pin: '4444' });
-  assert.equal(ok.ok, true, JSON.stringify(ok));
-  assert.equal(ok.data.record.status, 'approved');
-  const sig = suzuki('getRecord', { recordId: c1 }).data.record.signatures;
-  assert.ok(sig.foreman && sig.qa && sig.prime);
+test('C-NOPRIME-01/02(版1.19.0。§6.11) 元請サインの記録は廃止。シートの qa_ok は approved とみなす', () => {
+  const c1 = 'r_seedc10000000000'; // シードではシートの行が qa_ok(元請サイン未)
+  const rawStatus = () => { // シートのセルの値そのもの(Repo の読み替えを通さない)
+    const sh = h.ctx.Repo.sheet('Records'); const cols = h.ctx.SCHEMA.Records.columns.map((c) => c.name);
+    const vals = sh.getRange(2, 1, sh.getLastRow() - 1, cols.length).getValues();
+    return vals.find((v) => v[cols.indexOf('recordId')] === c1)[cols.indexOf('status')];
+  };
+  assert.equal(rawStatus(), 'qa_ok', 'シードのシートの行は qa_ok');
+  // ① getRecord / listRecords は approved
+  const d = suzuki('getRecord', { recordId: c1 }).data.record;
+  assert.equal(d.status, 'approved');
+  assert.equal(d.actions.includes('recordPrimeSign'), false);
+  const ls = suzuki('listRecords', { siteId: 's_c', statuses: ['approved'] }).data.records.map((r) => r.recordId);
+  assert.ok(ls.includes(c1), 'approved の絞り込みに入る');
+  assert.equal(suzuki('listRecords', { siteId: 's_c', statuses: ['qa_ok'] }).data.records.length, 0, 'qa_ok の絞り込みは0件');
+  // ② recordPrimeSign は PIN の正誤によらず STATE_CONFLICT。PIN の誤りを数えない
+  assert.equal(suzuki('recordPrimeSign', { recordId: c1, signerName: '', method: 'paper' }, { pin: '4444' }).error.code, 'STATE_CONFLICT');
+  assert.equal(suzuki('recordPrimeSign', { recordId: c1, signerName: '佐々木', method: 'onsite' }, { pin: '0000' }).error.code, 'STATE_CONFLICT');
+  assert.equal(h.control('state', { sheet: 'Users' }).data.rows.find((u) => u.userId === 'u_suzuki').failedCount, 0);
+  // ③ side=prime の写真は STATE_CONFLICT
+  assert.equal(suzuki('uploadPhotoChunk', photoParams(c1, undefined, 'prime')).error.code, 'STATE_CONFLICT');
+  // ④ PDF は作れる(approved とみなす)
+  const r = suzuki('generateReport', { recordId: c1 });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.data.report.recordStatus, 'approved');
+  assert.equal(rawStatus(), 'qa_ok', 'シートは一括で書き換えない(読むだけ・PDF作成では書かない)');
 });
 
 test('C-PERM-05 提出後の職長は編集・写真・コメント・削除不可、fixなら可', () => {

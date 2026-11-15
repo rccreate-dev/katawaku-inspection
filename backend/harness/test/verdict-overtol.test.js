@@ -63,7 +63,7 @@ test('C-VERD-01 ② qaNote があれば成功。Notes に manager/verdict で追
   draftAll(id, { i4: { values: [6], note: '図面で確認済み' } });
   const r = verdict(id, 'ok');
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(rec(id).status, 'qa_ok');
+  assert.equal(rec(id).status, 'approved');
   const it = item(id, 'i4');
   assert.equal(it.qaNote, '図面で確認済み');
   assert.equal(it.foremanNote, '職長の所見');

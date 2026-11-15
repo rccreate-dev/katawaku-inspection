@@ -151,7 +151,7 @@ var SELF_SCOPED_ACTIONS = ['saveDraft', 'submitRecord'];
 function approverDeny_(actor, rec) {
   return canApprove(actor, rec) ? null : deny_('APPROVER_NOT_ALLOWED', 'この記録を承認できる人ではありません', { ownerRole: ownerRoleOf(rec) });
 }
-var PHOTO_EDIT_STATES = { self: ['draft', 'fix'], qa: ['submitted'], prime: ['qa_ok'] };
+var PHOTO_EDIT_STATES = { self: ['draft', 'fix'], qa: ['submitted'], prime: [] }; // 版1.19.0: prime は追加・削除とも不可(§6.11-3)
 
 /**
  * authorize(actor, action, ctx) -> {ok:true} | {ok:false, code, reason, data}
@@ -246,9 +246,8 @@ function authorize(actor, action, ctx) {
       if (rec.claimedBy !== actor.userId) return deny_('NOT_CLAIMER', 'claim者ではありません', claimData);
       break;
     case 'recordPrimeSign':
-      if (st !== 'qa_ok') return deny_('STATE_CONFLICT', '元請サインを記録できる状態ではありません', sdata);
-      var ad3 = approverDeny_(actor, rec); if (ad3) return ad3;
-      break;
+      // 版1.19.0(§6.11-2): 元請サインの記録は廃止。常に STATE_CONFLICT(PIN は検査しない)
+      return deny_('STATE_CONFLICT', '元請サインの記録は廃止されました', sdata);
     case 'stopPour':
       // 版1.9(§4.2 の6・§6.8): 打設を止められるのは打設前(pre_pour)の記録だけ。出来形(post_demold)は STATE_CONFLICT
       if (rec.stage !== 'pre_pour') return deny_('STATE_CONFLICT', '打設前の記録でないため打設停止できません', sdata);
@@ -269,8 +268,8 @@ function authorize(actor, action, ctx) {
         if (!rec.claimedBy) return deny_('NOT_CLAIMED', '確認中にしてください');
         if (rec.claimedBy !== actor.userId) return deny_('NOT_CLAIMER', 'claim者ではありません', claimData);
       } else if (params.side === 'prime') {
-        if (st !== 'qa_ok') return deny_('STATE_CONFLICT', '元請サイン証跡を追加できる状態ではありません', sdata);
-        var ad4 = approverDeny_(actor, rec); if (ad4) return ad4;
+        // 版1.19.0(§6.11-3): 元請サイン証跡の写真は廃止
+        return deny_('STATE_CONFLICT', '元請サイン証跡の写真は廃止されました', sdata);
       }
       break;
     case 'deletePhoto':

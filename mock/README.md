@@ -59,7 +59,7 @@ MOCK_PORT=8787 MOCK_LATENCY_MS=200 MOCK_REDIRECT=1 node mock/server.js
 | u_suzuki 鈴木(QA) | 4444 |
 | u_lead 責任者 | 9999 |
 
-現場 `s_a`/`s_b`/`s_c`(`s_c` は工区 東,西)、記録は `r_seeda10000000000`(approved)/`a2`(submitted・escLevel1)/`a3`(draft)/`b1`(fix)/`b2`(draft・スギアント班)/`c1`(qa_ok)/`c2`(submitted・escLevel2)。詳細は SPEC §11.5。参加用合言葉は `joinkeyaaaaaaaa1`(s_a)など。
+現場 `s_a`/`s_b`/`s_c`(`s_c` は工区 東,西)、記録は `r_seeda10000000000`(approved)/`a2`(submitted・escLevel1)/`a3`(draft)/`b1`(fix)/`b2`(draft・スギアント班)/`c1`(approved。版1.19.0 で旧 qa_ok から変更)/`c2`(submitted・escLevel2)。詳細は SPEC §11.5。参加用合言葉は `joinkeyaaaaaaaa1`(s_a)など。
 
 ## 実装メモ(SPECで曖昧だった点の仮置き)
 

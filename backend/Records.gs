@@ -680,7 +680,8 @@ function act_submitVerdict(ctx) {
     qaVerdict: p.verdict, qaVerdictBy: actor.userId, qaVerdictAt: now, qaComment: comment, major: p.verdict === 'major'
   };
   var to;
-  if (p.verdict === 'ok') { to = 'qa_ok'; } else { to = 'fix'; patch.claimedBy = ''; patch.claimedAt = ''; patch.qaDraftAt = ''; }
+  // 版1.19.0(§6.11-1): 合格で打設可(approved)。元請待ち(qa_ok)は作らない
+  if (p.verdict === 'ok') { to = 'approved'; } else { to = 'fix'; patch.claimedBy = ''; patch.claimedAt = ''; patch.qaDraftAt = ''; }
   patch.status = to;
   touchRecord_(rec, patch);
 

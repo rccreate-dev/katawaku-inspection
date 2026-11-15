@@ -245,13 +245,13 @@ describe('C-PHOTO 写真', () => {
     assert.equal(th.photos.length, 5);
   });
 
-  it('C-PHOTO-04: 権限(sideごと。職長はqa/prime不可、QAは未claimでqa不可、primeはqa_okのみ、提出後の職長は不可)', async () => {
+  it('C-PHOTO-04: 権限(sideごと。職長はqa不可、QAは未claimでqa不可、primeは廃止(版1.19.0)、提出後の職長は不可)', async () => {
     const t = await h.login('u_tanaka');
     const sato = await h.login('u_sato');
     const suzuki = await h.login('u_suzuki');
     const { recordId } = await h.makeFilledDraft(t);
     assert.equal((await h.uploadPhoto(t, { recordId, itemId: 'i1', side: 'qa' })).error.code, 'FORBIDDEN_ROLE');
-    assert.equal((await h.uploadPhoto(t, { recordId, side: 'prime' })).error.code, 'FORBIDDEN_ROLE');
+    assert.equal((await h.uploadPhoto(t, { recordId, side: 'prime' })).error.code, 'FORBIDDEN_ROLE', '職長は役割の検査で先に止まる(役割→状態の順)');
     // 版1.12.0(§4.2 の5②): QA も side=self を撮れるが、他人(職長)の記録は本人スコープで FORBIDDEN_TEAM
     assert.equal((await h.uploadPhoto(sato, { recordId, itemId: 'i1', side: 'self' })).error.code, 'FORBIDDEN_TEAM');
     await t.ok('submitRecord', { recordId, round: 1 }, { pin: t.pin });
@@ -261,13 +261,11 @@ describe('C-PHOTO 写真', () => {
     await suzuki.ok('claimReview', { recordId, round: 1 });
     assert.equal((await h.uploadPhoto(sato, { recordId, itemId: 'i1', side: 'qa' })).error.code, 'NOT_CLAIMER');
     assert.equal((await h.uploadPhoto(suzuki, { recordId, itemId: 'i1', side: 'qa' })).ok, true);
-    assert.equal((await h.uploadPhoto(suzuki, { recordId, side: 'prime' })).error.code, 'STATE_CONFLICT', 'primeはqa_okのみ');
+    assert.equal((await h.uploadPhoto(suzuki, { recordId, side: 'prime' })).error.code, 'STATE_CONFLICT', 'primeは廃止');
     await h.fillQa(suzuki, recordId);
     await suzuki.ok('submitVerdict', { recordId, round: 1, verdict: 'ok' }, { pin: suzuki.pin });
-    const prime = await h.uploadPhoto(suzuki, { recordId, side: 'prime' });
-    assert.equal(prime.ok, true, JSON.stringify(prime.error));
-    assert.equal(prime.data.photo.itemId, null);
-    assert.equal((await h.uploadPhoto(suzuki, { recordId, itemId: 'i1', side: 'qa' })).error.code, 'RECORD_LOCKED', 'qa_okでは項目のQA写真は追加できない');
+    assert.equal((await h.uploadPhoto(suzuki, { recordId, side: 'prime' })).error.code, 'STATE_CONFLICT', '合格後もprimeは不可');
+    assert.equal((await h.uploadPhoto(suzuki, { recordId, itemId: 'i1', side: 'qa' })).error.code, 'RECORD_LOCKED', 'approvedでは項目のQA写真は追加できない');
     // 担当外QA
     assert.equal((await h.uploadPhoto(sato, { recordId: 'r_seedc20000000000', itemId: 'i1', side: 'qa' })).error.code, 'FORBIDDEN_SITE');
     // 他班は不可(他班=スギアント班のドラフト)

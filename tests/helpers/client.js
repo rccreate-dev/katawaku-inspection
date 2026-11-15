@@ -273,7 +273,7 @@ async function fillSelf(session, recordId, over = {}) {
   }
   return rec;
 }
-/** 作成済みの記録(draft)を 提出 → 確認中 → 合格(qa_ok) まで進める(段階を問わない。round=1 前提) */
+/** 作成済みの記録(draft)を 提出 → 確認中 → 合格(版1.19.0 から approved) まで進める(段階を問わない。round=1 前提) */
 async function advanceToQaOk(tanaka, qa, recordId) {
   await fillSelf(tanaka, recordId);
   const sub = await tanaka.call('submitRecord', { recordId, round: 1 }, { pin: tanaka.pin });
@@ -285,13 +285,17 @@ async function advanceToQaOk(tanaka, qa, recordId) {
   if (!v.ok) throw new Error('verdict失敗: ' + JSON.stringify(v.error));
   return { submit: sub, verdict: v };
 }
-/** qa_ok → approved(元請サイン記録) */
-async function primeSign(qa, recordId, signerName = '山田') {
-  const r = await qa.call('recordPrimeSign', { recordId, signerName, method: 'paper' }, { pin: qa.pin });
-  if (!r.ok) throw new Error('recordPrimeSign 失敗: ' + JSON.stringify(r.error));
+/**
+ * 版1.19.0(SPEC §6.11): 元請サインの記録は廃止。合格の時点で approved になっている。
+ * 旧テストの呼び出しを残すため、approved であることを確かめて getRecord の応答を返す(recordPrimeSign は送らない)。
+ */
+async function primeSign(qa, recordId) {
+  const r = await qa.call('getRecord', { recordId });
+  if (!r.ok) throw new Error('getRecord 失敗: ' + JSON.stringify(r.error));
+  if (r.data.record.status !== 'approved') throw new Error('合格のあと approved になっていない: ' + r.data.record.status);
   return r;
 }
-/** 提出済み → QA合格(qa_ok)まで進める */
+/** 提出済み → QA合格(版1.19.0 から approved)まで進める */
 async function makeQaOk(tanaka, qa, opts = {}) {
   const { recordId } = await makeSubmitted(tanaka, opts);
   const c = await qa.call('claimReview', { recordId, round: 1 });

@@ -161,12 +161,11 @@ describe('C-TEXT 写真への文字', () => {
     assert.equal(st.ok, true, JSON.stringify(st.error));
     assert.equal(photoOf(await h.getRecord(sato, recordId), sp.data.photo.photoId, 'qa').text.photoId, st._photoId);
 
-    // ⑦ side:'prime'(qa_ok の記録で担当QA)
+    // ⑦ side:'prime'(合格した記録で担当QA)。版1.19.0: side=prime は廃止で STATE_CONFLICT(§6.11-3)
     const qa = await h.login('u_suzuki');
     const { recordId: okId } = await h.makeQaOk(t, qa, { lot: 'TX7Q' });
     const pr = await uploadText(qa, { recordId: okId, side: 'prime', basePhotoId: h.newPhotoId() });
-    assert.equal(pr.error && pr.error.code, 'VALIDATION_FAILED', JSON.stringify(pr.error));
-    assert.ok(viols(pr).includes('FIELD_INVALID|side'), viols(pr));
+    assert.equal(pr.error && pr.error.code, 'STATE_CONFLICT', JSON.stringify(pr.error));
   });
 
   it('C-TEXT-01⑩(提出後は書けない。差し戻しの次の回でも前の回の自分の写真に書ける・消せる)', async () => {

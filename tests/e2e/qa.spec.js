@@ -1,4 +1,4 @@
-// E-03/E-04/E-06 相当: QAの確認中→判定→差し戻し→職長の是正・再提出、元請サイン、同時claim、職長コメント非上書き
+// E-03/E-04/E-06 相当: QAの確認中→判定→差し戻し→職長の是正・再提出、合格で打設可(版1.19.0)、同時claim、職長コメント非上書き
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -119,8 +119,8 @@ describe('E-03/E-04 QA: 確認中→判定→差し戻し→是正→再提出',
   });
 });
 
-describe('E-03 QA: 合格→PIN→元請PDF→元請サイン→打設可', () => {
-  it('鈴木(s_c主担当)が全okで合格(誤PIN→正PIN)、PDF生成、元請サイン(PIN)で approved、3者サインが揃う', async () => {
+describe('E-03 QA: 合格→PIN→打設可→元請PDF(版1.19.0)', () => {
+  it('鈴木(s_c主担当)が全okで合格(誤PIN→正PIN)で approved、PDF生成。元請サインのボタンは無く、元請の枠は「元請はPDFに記入」', async () => {
     const s = await E.newSession(env);
     await E.login(s, '鈴木');
     const { page } = s;
@@ -132,21 +132,38 @@ describe('E-03 QA: 合格→PIN→元請PDF→元請サイン→打設可', () =
     await E.enterPin(s, '0000');
     await page.locator('.sheet .msg').last().waitFor();
     await E.enterPin(s, '4444');
-    await page.locator('.chip.st-qa_ok').first().waitFor();
+    await page.locator('.chip.st-approved').first().waitFor();
     // 元請PDF(M6)
     await page.getByRole('button', { name: s.t('act.report') }).click();
     await page.locator('.sheet', { hasText: 'v1' }).waitFor();
     await page.locator('.sheet .btns .btn:not(.ghost)').click();
     assert.equal((await E.stateRows('Reports')).filter((r) => r.recordId === C2).length, 1);
-    // 元請サイン(M5)
-    await page.getByRole('button', { name: s.t('act.prime_sign') }).click();
-    await page.getByLabel(s.t('scr.M5.signer')).fill('山田');
-    await page.getByRole('button', { name: s.t('scr.M5.go') }).click();
-    await E.enterPin(s, '4444');
-    await page.locator('.chip.st-approved').first().waitFor();
-    assert.equal(await page.locator('.sig.done').count(), 3, '3者サインが全て済');
+    // 元請サインはアプリで記録しない(PDFに直接書いてもらう)
+    assert.equal(await page.getByRole('button', { name: s.t('act.prime_sign') }).count(), 0, '元請サインのボタンが無い');
+    assert.equal(await page.locator('.sig.done').count(), 2, '職長と承認者のサインが済');
+    assert.equal((await page.locator('[data-prime="pdf"]').innerText()).trim(), s.t('lbl.sig_prime_on_pdf'));
     const rec = (await E.stateRows('Records')).find((r) => r.recordId === C2);
-    assert.equal(rec.status, 'approved'); assert.equal(rec.primeSignerName, '山田');
+    assert.equal(rec.status, 'approved'); assert.ok(!rec.primeSignerName, '元請サインは記録されない');
+    s.assertClean(); await s.close();
+  });
+});
+
+describe('E-37 元請サインの記録の廃止(版1.19.0。SPEC §6.11)', () => {
+  it('旧「元請待ち」の C1 は打設可。元請サインのボタンが無く、元請の枠は「元請はPDFに記入」。S09 に「元請待ち」の見出しが無い', async () => {
+    const C1 = 'r_seedc10000000000'; // 旧 qa_ok(元請サイン未)。版1.19.0 から approved
+    const s = await E.newSession(env);
+    await E.login(s, '鈴木');
+    const { page } = s;
+    await page.locator('.chip', { hasText: s.t('esc.2') }).first().waitFor();
+    assert.equal(await page.getByRole('heading', { name: s.t('scr.S09.prime') }).count(), 0, 'S09 に「元請待ち」の見出しが無い');
+    assert.equal(await page.locator('.chip.st-qa_ok').count(), 0, '元請待ちのチップが無い');
+    await page.goto(s.base + '/#/record/' + C1);
+    const chip = page.locator('.chip.st-approved').first();
+    await chip.waitFor();
+    assert.equal((await chip.innerText()).trim(), s.t('st.approved'), '打設可');
+    assert.equal(await page.getByRole('button', { name: s.t('act.prime_sign') }).count(), 0, '「元請サインを記録」ボタンが無い');
+    assert.equal((await page.locator('[data-prime="pdf"]').innerText()).trim(), s.t('lbl.sig_prime_on_pdf'), '元請の枠は「元請はPDFに記入」');
+    assert.ok(await page.getByRole('button', { name: s.t('act.report') }).count() > 0, '元請PDFのボタンはある');
     s.assertClean(); await s.close();
   });
 });

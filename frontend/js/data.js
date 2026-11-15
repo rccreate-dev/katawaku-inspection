@@ -90,7 +90,10 @@
       });
     }).then(function () { KW.bus.emit('records:changed', [s.recordId]); });
   }
-  function getRow(recordId) { return db().get('records', recordId); }
+  /* 版1.19.0(SPEC §6.11-4): 元請待ち(qa_ok)は廃止。端末に残っている古い行も打設可(approved)として読む */
+  function legacyStatus(o) { if (o && o.status === 'qa_ok') o.status = 'approved'; return o; }
+  function legacyRow(r) { if (r) { legacyStatus(r.summary); legacyStatus(r.detail); } return r; }
+  function getRow(recordId) { return db().get('records', recordId).then(legacyRow); }
   /* 応答に RecordDetail が無かった書き込み(deletePhoto・旧サーバー等)のあと、キャッシュの詳細を maxAgeMs で使い回さないようにする */
   function invalidateFresh(recordId) {
     if (!recordId) return Promise.resolve();
@@ -103,7 +106,7 @@
     });
   }
   function allSummaries() {
-    return db().all('records').then(function (rows) { return rows.map(function (r) { return r.summary; }).filter(Boolean); });
+    return db().all('records').then(function (rows) { return rows.map(function (r) { return legacyStatus(r.summary); }).filter(Boolean); });
   }
   function removeRecord(recordId) { return db().del('records', recordId); }
 
