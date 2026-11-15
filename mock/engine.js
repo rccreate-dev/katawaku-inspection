@@ -205,7 +205,7 @@ function computeTiming(rec) {
 // ---------------------------------------------------------------------------
 const deny = (code, reason, data) => ({ ok: false, code, reason, data });
 const stateData = (rec) => ({ status: rec.status, round: rec.round });
-const SITE_SCOPED = new Set(['getRecord', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'uploadPhotoChunk', 'deletePhoto', 'generateReport', 'listReports', 'decideJoin', 'revokeMembership']);
+const SITE_SCOPED = new Set(['getRecord', 'createRecord', 'saveDraft', 'submitRecord', 'claimReview', 'releaseClaim', 'takeoverReview', 'saveQaDraft', 'submitVerdict', 'recordPrimeSign', 'stopPour', 'addNote', 'uploadPhotoChunk', 'deletePhoto', 'generateReport', 'listReports', 'getReportFile', 'decideJoin', 'revokeMembership']);
 const TEAM_SCOPED = new Set(['getRecord', 'saveDraft', 'submitRecord', 'addNote', 'uploadPhotoChunk']);
 const SIDE_ROLES = { self: ROLES_ALL, qa: ROLES_QL, prime: ROLES_QL }; // 版1.12.0: self は1次検査側(QA・責任者も)
 // 版1.12.0: QA・責任者が1次検査側として書けるのは自分の記録だけ(本人スコープ。§4.2 の5②)
@@ -629,6 +629,7 @@ const ACTIONS = {
   getPhotoThumbs: A(ROLES_ALL, { photoIds: 'a' }), getPhoto: A(ROLES_ALL, { photoId: 's', part: 's?' }),
   generateReport: A(ROLES_QL, { recordId: 's' }, { write: true, star: true, load: 'record' }),
   listReports: A(ROLES_QL, { recordId: 's' }, { load: 'record' }),
+  getReportFile: A(ROLES_QL, { reportId: 's' }, { load: 'report' }), // 版1.20.0(§6.12)
   requestJoin: A(['foreman'], { siteId: 's', joinKey: 's' }, { write: true, star: true }),
   listJoinRequests: A(ROLES_ALL, { siteId: 's?', statuses: 'a?' }),
   decideJoin: A(ROLES_QL, { membershipId: 's', decision: 's', assignRole: 's?', team: 's?', note: 's?' }, { write: true, star: true, load: 'membership' }),
@@ -700,6 +701,13 @@ function buildCtx(actor, action, params, rc) {
     if (!ph || ph.deleted) fail('NOT_FOUND', '写真が見つかりません');
     ctx.photo = ph;
     ctx.record = recordRow(ph.recordId);
+  } else if (def.load === 'report') {
+    // 版1.20.0(§6.12): reportId の形(f_…)を見てから行を探す。記録の状態は問わない
+    if (!/^f_[a-z0-9]{1,32}$/.test(params.reportId)) fail('VALIDATION_FAILED', '入力が不正です', { violations: [{ rule: 'FIELD_INVALID', path: 'reportId' }] });
+    const rp = find('Reports', params.reportId);
+    if (!rp) fail('NOT_FOUND', 'PDFが見つかりません');
+    ctx.report = rp;
+    ctx.record = recordRow(rp.recordId);
   } else if (def.load === 'membership') {
     const m = find('Memberships', params.membershipId);
     if (!m) fail('NOT_FOUND', '参加申請が見つかりません');

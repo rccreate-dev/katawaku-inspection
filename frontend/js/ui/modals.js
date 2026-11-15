@@ -508,8 +508,82 @@
   };
 
   /* ---- M6 元請提出用PDF ---- */
+  // 版1.20.0(SPEC §6.12): PDF はアプリが getReportFile で直接受け取り、端末の中で開く・送る。
+  // ドライブの URL(Report.url)は開かない・送らない・コピーしない(ドライブの画面を一瞬も出さない)
+  function b64ToBytes(b64) {
+    var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+  function sha256Hex(bytes) {
+    return crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  var isAndroid = /Android/i.test(navigator.userAgent || '');
+
   M.report = function (rec) {
     var clientId = KW.newClientId();
+    var pdfs = {};   // reportId -> Promise<{file,url}>(M6 を閉じるまで持つ)
+    var urls = [];
+    /** PDF を受け取る(同じ版は1回だけ)。失敗したら覚えずに次の押下で取り直す */
+    function fetchPdf(reportId) {
+      if (pdfs[reportId]) return pdfs[reportId];
+      var pr = KW.api.call('getReportFile', { reportId: reportId }, { timeoutMs: 90000 }).then(function (res) {
+        if (!res.ok) throw { msg: res.network ? t('err.network') : KW.errText(res.error) };
+        var d = res.data, bytes = b64ToBytes(d.base64);
+        return sha256Hex(bytes).then(function (hx) {
+          if (bytes.length !== d.bytes || hx !== d.sha256) throw { msg: t('msg.pdf_broken') };
+          var file = new File([bytes], d.fileName, { type: 'application/pdf' });
+          var url = URL.createObjectURL(file);
+          urls.push(url);
+          return { file: file, url: url, ready: true };
+        });
+      });
+      pdfs[reportId] = pr;
+      pr.catch(function () { delete pdfs[reportId]; });
+      return pr;
+    }
+    function savePdf(p) {
+      var a = h('a', { href: p.url, download: p.file.name, rel: 'noopener', style: 'display:none' });
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    function openPdf(p) {
+      if (isAndroid) { savePdf(p); return true; }   // Android は保存して端末のPDFアプリで開く
+      return !!window.open(p.url, '_blank');
+    }
+    function sendPdf(p) {
+      var data = { files: [p.file], title: p.file.name };
+      if (navigator.canShare && navigator.share && navigator.canShare(data)) {
+        return navigator.share(data).then(function () { return true; }, function (e) { return !(e && e.name === 'NotAllowedError'); });
+      }
+      savePdf(p); C.toast(t('msg.pdf_saved'));
+      return true;
+    }
+    /** ボタンを押したとき: 受け取り済みならすぐ実行。まだなら受け取ってから実行し、ブラウザに止められたら「もう一度」 */
+    function withPdf(reportId, btn, fn) {
+      var label = btn.textContent;
+      var got = pdfs[reportId];
+      var settled = got && got.done;
+      if (settled) { Promise.resolve(fn(got.value)).then(function (ok) { if (!ok) C.toast(t('msg.pdf_ready_tap')); }); return; }
+      btn.disabled = true; btn.textContent = t('msg.pdf_loading');
+      fetchPdf(reportId).then(function (p) {
+        pdfs[reportId].done = true; pdfs[reportId].value = p;
+        btn.disabled = false; btn.textContent = label;
+        return Promise.resolve(fn(p)).then(function (ok) { if (!ok) C.toast(t('msg.pdf_ready_tap')); });
+      }, function (e) {
+        btn.disabled = false; btn.textContent = label;
+        C.toast((e && e.msg) || t('err.network'));
+      });
+    }
+    function prefetch(reportId) {
+      fetchPdf(reportId).then(function (p) { if (pdfs[reportId]) { pdfs[reportId].done = true; pdfs[reportId].value = p; } }, function () { /* 押したときに取り直す */ });
+    }
+    function pdfBtn(reportId, cls, label, fn, attrs) {
+      var b = h('button', Object.assign({ type: 'button', class: cls }, attrs || {}), label);
+      b.addEventListener('click', function () { withPdf(reportId, b, fn); });
+      return b;
+    }
     return sheet(function (m) {
       var body = h('div');
       var hist = h('div');
@@ -519,14 +593,9 @@
           h('div', { class: 'row' }, h('b', null, 'v' + r.version), C.statusChip(r.recordStatus, false, rec.stage)),
           h('div', { class: 'sub' }, C.fmt(r.generatedAt) + ' / ' + (r.generatedByName || '')),
           h('div', { class: 'gap' },
-            h('button', { type: 'button', class: 'btn small', on: { click: function () { share(r); } } }, t('act.share')),
-            h('a', { class: 'btn small ghost', href: r.url, target: '_blank', rel: 'noopener', role: 'button' }, t('act.open')))));
-      }
-      function share(r) {
-        if (navigator.share) { navigator.share({ title: t('app.name'), url: r.url }).catch(function () { /* キャンセル */ }); return; }
-        var done = function () { C.toast(t('msg.link_copied')); };
-        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(r.url).then(done, function () { C.toast(r.url); });
-        else C.toast(r.url);
+            pdfBtn(r.reportId, 'btn small', t('act.send_file'), sendPdf, { 'data-pdf': 'send' }),
+            pdfBtn(r.reportId, 'btn small ghost', t('act.open'), openPdf, { 'data-pdf': 'open' }))));
+        prefetch(r.reportId);   // 作成が終わったら受け取り始める(1回押すだけで開けるように)
       }
       function loadHist() {
         KW.api.call('listReports', { recordId: rec.recordId }).then(function (res) {
@@ -536,7 +605,7 @@
           res.data.reports.forEach(function (r) {
             hist.appendChild(h('div', { class: 'row card' },
               h('span', null, 'v' + r.version + ' / ' + C.fmt(r.generatedAt) + ' / ' + KW.ts('st.' + r.recordStatus, rec.stage)),
-              h('a', { class: 'link', href: r.url, target: '_blank', rel: 'noopener' }, t('act.open'))));
+              pdfBtn(r.reportId, 'link', t('act.open'), openPdf, { 'data-pdf': 'open', 'data-version': String(r.version) })));
           });
         });
       }
@@ -558,7 +627,11 @@
           h('button', { type: 'button', class: 'btn ghost', on: { click: gen } }, t('act.regenerate')),
           h('button', { type: 'button', class: 'btn', on: { click: function () { m.close(); } } }, t('act.close')))
       ];
-    }, { onClose: function () { KW.bus.emit('records:refresh', rec.recordId); } });
+    }, { onClose: function () {
+      // 受け取ったPDFは閉じたら手放す(開いたタブが読み終えるまで少し待つ)
+      setTimeout(function () { urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) { /* 無視 */ } }); }, 60000);
+      KW.bus.emit('records:refresh', rec.recordId);
+    } });
   };
 
   /* ---- M8 招待コード表示(1回のみ) ---- */

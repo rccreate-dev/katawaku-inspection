@@ -600,6 +600,30 @@ function act_listReports(ctx) {
   return { reports: rows.map(reportView_) };
 }
 
+/**
+ * 版1.20.0(SPEC §6.12): 元請提出用PDFの中身を返す。権限は listReports と同じで、記録の状態は問わない(過去の版も開ける)。
+ * 画面はドライブのURLを開かず、この中身から端末の中でPDFを開く・送る。
+ */
+function act_getReportFile(ctx) {
+  requireAuth_(ctx.actor, 'getReportFile', { params: ctx.params });   // 役割を先に見る(職長に PDF の有無を知らせない)
+  var row = Repo.get('Reports', ctx.params.reportId);
+  if (!row) throw new ApiError('NOT_FOUND', 'PDFが見つかりません');
+  var rec = loadRecord_(row.recordId);
+  requireAuth_(ctx.actor, 'getReportFile', { record: rec, params: ctx.params });
+  var bytes, name;
+  try {
+    var file = DriveApp.getFileById(row.driveFileId);
+    bytes = file.getBlob().getBytes();
+    name = file.getName();
+  } catch (e) {
+    throw new ApiError('DRIVE_ERROR', 'PDFを読み込めません');
+  }
+  return {
+    reportId: row.reportId, recordId: row.recordId, version: row.version, fileName: name, mime: 'application/pdf',
+    bytes: bytes.length, sha256: Util.sha256Hex(bytes), base64: Util.b64encode(bytes)
+  };
+}
+
 /** サイン欄の氏名の下に会社名を出す(空なら何も出さない) */
 function companyLine_(userId) {
   var c = userCompany_(userId);

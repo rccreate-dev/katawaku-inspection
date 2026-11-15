@@ -290,7 +290,7 @@ test('C-REP-03 doc方式の中身: 用紙・フォント・画像・改ページ
   assert.deepEqual(detailOf(reportEvents(id)[0]), { reportId: rep.reportId, version: 1, engine: 'doc' });
   assert.equal(pdfFile(rep).description, 'engine=doc');
   // フォールバックしていない / 共有設定・保存先は通常どおり
-  assert.deepEqual(pdfFile(rep).sharing, { access: 'ANYONE_WITH_LINK', perm: 'VIEW' });
+  assert.equal(pdfFile(rep).sharing, null, '版1.20.0: pdfShareMode の初期値は private(共有しない)');
   assert.ok(h.control('drive', {}).data.paths.some((p) => p.startsWith('reports/') && p.endsWith('.pdf')));
 });
 
@@ -368,7 +368,7 @@ test('C-REP-04 フォールバック: create/image/convert/slow でも PDF(HTML�
     assert.equal(h.control('state', { sheet: 'Reports' }).data.rows.length, before + 1);
     assert.match(pdfName(rep), /_打設前_v1_\d{8}-\d{4}\.pdf$/);
     assert.equal(pdfFile(rep).blob._buf.subarray(0, 5).toString('latin1'), '%PDF-');
-    assert.deepEqual(pdfFile(rep).sharing, { access: 'ANYONE_WITH_LINK', perm: 'VIEW' });
+    assert.equal(pdfFile(rep).sharing, null, '版1.20.0: pdfShareMode の初期値は private(共有しない)');
     // ② Events
     const d = detailOf(reportEvents(id)[0]);
     assert.equal(d.engine, 'html'); assert.equal(d.fallbackFrom, 'doc');
@@ -426,8 +426,8 @@ test('C-REP-04 doc 方式の間は reportEngine を読み直す: doc → html �
   assert.equal(detailOf(reportEvents(id)[1]).fallbackFrom, undefined);
 });
 
-test('C-REP-05 ACTIONS は §5.5 の数(51)のまま。checkReportEngine は action ではなく、HTTP で送ると BAD_REQUEST', () => {
-  assert.equal(Object.keys(h.ctx.ACTIONS).length, 51);
+test('C-REP-05 ACTIONS は §5.5 の数(52。版1.20.0)のまま。checkReportEngine は action ではなく、HTTP で送ると BAD_REQUEST', () => {
+  assert.equal(Object.keys(h.ctx.ACTIONS).length, 52);
   assert.equal(Object.prototype.hasOwnProperty.call(h.ctx.ACTIONS, 'checkReportEngine'), false);
   const r = h.call('checkReportEngine', {});
   assert.equal(r.ok, false);
@@ -473,7 +473,7 @@ test('C-REP-06①② appsscript.json に documents スコープ(既存4つも残
   setEngine(undefined);
   const before = configRows().filter((r) => r.key !== 'reportEngine');
   assert.equal(configRows().some((r) => r.key === 'reportEngine'), false);
-  h.control('patch', { sheet: 'Config', key: 'pdfShareMode', set: { value: 'private' } });
+  h.control('patch', { sheet: 'Config', key: 'pdfShareMode', set: { value: 'anyone_with_link' } });
   h.ctx.setupSheets();
   h.ctx.clearRefCache();
   const after = configRows();
@@ -481,7 +481,7 @@ test('C-REP-06①② appsscript.json に documents スコープ(既存4つも残
   assert.equal(added.length, 1);
   assert.equal(added[0].value, 'html'); assert.equal(added[0].type, 'str');
   assert.equal(after.length, before.length + 1, '追記は1行だけ');
-  assert.equal(after.find((r) => r.key === 'pdfShareMode').value, 'private', '既存の値は変わらない');
+  assert.equal(after.find((r) => r.key === 'pdfShareMode').value, 'anyone_with_link', '既存の値は変わらない(初期値 private で上書きしない)');
   h.ctx.setupSheets();
   assert.equal(configRows().filter((r) => r.key === 'reportEngine').length, 1, '再実行しても増えない');
 });

@@ -155,6 +155,8 @@ var ACTIONS = {
 
   generateReport: { w: true, idem: true, roles: QA_ROLES, params: { recordId: { t: 'id', p: 'r', req: 1 } } },
   listReports: { roles: QA_ROLES, params: { recordId: { t: 'id', p: 'r', req: 1 } } },
+  // 版1.20.0(§6.12): PDFの中身をアプリが直接受け取る(ドライブの画面を出さない)
+  getReportFile: { roles: QA_ROLES, params: { reportId: { t: 'id', p: 'f', req: 1 } } },
 
   requestJoin: {
     w: true, idem: true, roles: ['foreman'],

@@ -680,6 +680,14 @@ module.exports = function install(C) {
     C.touch(rec);
     return { report: C.reportView(row) };
   };
+  // 版1.20.0(§6.12): PDFの中身を返す(画面はドライブのURLを開かない)
+  H.getReportFile = (rc) => {
+    const r = rc.ctx.report;
+    const f = C.S().driveFiles.get(r.driveFileId);
+    if (!f || !f.buf || f.trashed) fail('DRIVE_ERROR', 'PDFを読み込めません');
+    const fileName = f.path.split('/').pop();
+    return { reportId: r.reportId, recordId: r.recordId, version: r.version, fileName, mime: 'application/pdf', bytes: f.buf.length, sha256: U.sha256(f.buf), base64: f.buf.toString('base64') };
+  };
   H.listReports = (rc) => ({ reports: table('Reports').filter((r) => r.recordId === ctxRec(rc).recordId).sort((a, b) => b.version - a.version).map(C.reportView) });
 
   // ===== 参加 ==========================================================

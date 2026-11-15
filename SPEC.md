@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.19.1 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
+- 版: 1.20.0 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -651,7 +651,7 @@ Items の変更は **責任者だけ** がスプレッドシートで行う(§2 
 | enabledStages | `pre_pour,post_demold` | カンマ区切り。作成可能な段階。**版1.9 の既定は `pre_pour,post_demold`**。`during_pour` などは入れない(項目が無く、サーバーも有効項目0件の段階は作成させない)。既存の本番シートの値は自動では変わらない(§2.6.1b) |
 | pollIntervalSec | `60` | クライアントのポーリング間隔 |
 | driveRootFolderId | (setupで作成) | |
-| pdfShareMode | `anyone_with_link` | または `private`(P-32) |
+| pdfShareMode | `private`(版1.20.0。旧初期値 `anyone_with_link`) | または `anyone_with_link`(P-32・§6.12-4) |
 | mailEnabled | `TRUE` | |
 | appBaseUrl | (要設定) | メール内リンク用 |
 | retentionYears | `10` | 保管年数(表示・運用用。自動削除はしない P-18) |
@@ -804,7 +804,7 @@ UI: S01。①招待コード(6桁)を入力 →「次へ」(`lookupInvite`)→ �
 | uploadPhotoChunk | ○ | ○ | ○ | `side=self`: 編集可能な1次検査側(職長=自班/自分、QA・責任者=自分の1次検査の記録。status∈{draft,fix})。`side=qa`: claim者(status=submitted)。`side=prime`: 承認できる人(§6.9)(status=qa_ok) |
 | deletePhoto | ○ | ○ | ○ | 撮影者本人、かつ同一ラウンド、かつその side が編集可能な状態。削除済みの写真は `NOT_FOUND` |
 | getPhotoThumbs / getPhoto | ○ | ○ | ○ | その写真の記録を `getRecord`(詳細)できる人 |
-| generateReport / listReports | × | ○ | ○ | `generateReport`=承認できる人(§6.9)。`listReports`=担当QA/責任者(従来どおり)。status∈{qa_ok,approved} |
+| generateReport / listReports / getReportFile | × | ○ | ○ | `generateReport`=承認できる人(§6.9)。`listReports`・`getReportFile`(版1.20.0)=担当QA/責任者(従来どおり。`getReportFile` は状態を問わない)。status∈{qa_ok,approved} |
 | requestJoin | ○ | × | × | `joinKey` 一致、`Sites.status=active` |
 | listJoinRequests | ○ | ○ | ○ | 職長=自分の申請のみ。QA=自分が担当の現場。責任者=全て |
 | decideJoin | × | ○ | ○ | `qa_main`。`qa_sub` は主担当が不在登録中のみ。責任者は常に可 |
@@ -1264,6 +1264,7 @@ params:
 
 **generateReport** ★ `{ "recordId" }` → `{ "report":<Report> }`(最大120秒。status∈{qa_ok,approved}。エラー: `REPORT_NOT_ALLOWED`(`{status}`)/ `DRIVE_ERROR` / `FORBIDDEN_SITE` / `APPROVER_NOT_ALLOWED`(承認できない人。版1.12.0。§6.9))。Events `report_generated`(`detail` は `{reportId,version,engine}`。doc 方式から html に切り替えたときは `fallbackFrom`・`fallbackReason` も入る=§10.5.8。**請求・応答の形は変更なし**。生成方式は Config `reportEngine`=§10.5)。
 **listReports** `{ "recordId" }` → `{ "reports":[<Report>] }`(`version` 降順)
+**getReportFile**(版1.20.0) `{ "reportId" }` → `{ "reportId", "recordId", "version", "fileName", "mime", "bytes", "sha256", "base64" }`(PDFの中身。タイムアウト90秒。権限は `listReports` と同じ・状態は問わない。エラー: `NOT_FOUND` / `DRIVE_ERROR`。詳細は §6.12)
 
 #### 5.4.6 参加(QR)
 
@@ -1362,13 +1363,13 @@ params:
 - **招待コードは返さない**。画面が続けて `adminIssueInvite`(`purpose=first`)を呼び、M8 で1回だけ見せる(コード平文を Idem に残さないため。§0.5)。
 
 
-### 5.5 エンドポイント早見表(51 action。版1.13.0 で8つ追加)
+### 5.5 エンドポイント早見表(52 action。版1.13.0 で8つ追加。版1.20.0 で `getReportFile` を追加)
 
 公開: `ping` `lookupInvite` `registerDevice`
 セッション: `me` `setLang` `changePin` `logoutDevice` `getBootstrap`
 記録: `listRecords` `getRecord` `createRecord` `saveDraft` `submitRecord` `claimReview` `releaseClaim` `takeoverReview` `saveQaDraft` `submitVerdict` `recordPrimeSign` `stopPour` `addNote`
 写真: `uploadPhotoChunk` `deletePhoto` `getPhotoThumbs` `getPhoto`
-PDF: `generateReport` `listReports`
+PDF: `generateReport` `listReports` `getReportFile`
 参加: `requestJoin` `listJoinRequests` `decideJoin` `revokeMembership`
 名簿: `listAssignments` `listAbsences`
 管理: `adminListUsers` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` `adminGetSite` `adminCreateSite` `adminUpdateSite` `adminCloseSite` `adminReopenSite` `adminAddAssignment` `adminEndAssignment` `adminCreateUser`
@@ -1592,6 +1593,38 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 
    元請サイン用のキー(`act.prime_sign`・`msg.prime_signed`・`scr.M5.*`・`scr.S09.prime*`・`st.qa_ok`・`method.*`・`ev.prime_signed`・`rule.PRIME_SIGNER_REQUIRED`・`scr.S23.close_qaok`・`err.CLOSE_CONFIRM_REQUIRED`)は辞書に残す(古い記録の履歴・方法の表示に使うものがあるため。使わないものも消さない)。
 10. **テスト(§12 の読み替え)**: `recordPrimeSign` で `approved` にしていたテスト(C-STATE-01/03/09、C-PERM-03/04、C-IDEM-01、C-RESP-01、C-OWN-04、C-STAGE-04、C-PHOTO-04 の prime、E-03・E-15・E-28・E-31 の元請サイン)は、**合格で `approved` になる**ことを確かめる形に直す。`qa_ok` の記録を前提にしていたテスト(C-REP-01・C-STAGE-05・C-DRAW など)は `approved` の記録を使う。新しく **C-NOPRIME-01**(①`submitVerdict(ok)` で `approved`・Events `verdict_ok` の `to=approved` ②`recordPrimeSign` は PIN の有無・正誤によらず `STATE_CONFLICT` で PIN の誤りを数えない ③`uploadPhotoChunk(side=prime)` は `STATE_CONFLICT` ④`actions` に `recordPrimeSign` が無い ⑤`approved` の打設前の記録で `stopPour`・`generateReport` ができる)、harness だけの **C-NOPRIME-02**(シートの行が `qa_ok` の記録を `getRecord`・`listRecords(statuses=[approved])`・`stopPour`・`generateReport` が `approved` として扱う)、**E-37**(QA が合格すると S08 が「打設可」になり、「元請サインを記録」ボタンが無く、サイン欄に元請の枠が無い(版1.19.1)。S09 に「元請待ち」の見出しが無い)を足す。
+
+### 6.12 元請提出用PDFをアプリが直接受け取る(版1.20.0。ユーザー決定 2026-11-15。REQUIREMENTS §24)
+
+**本節は、それより前の版の M6 の「開く」「共有」(`url` を開く・送る)と `pdfShareMode` の初期値の記述に優先する。**
+
+1. **目的**: 元請提出用PDFを開く・元請に渡すときに、Googleドライブの画面を**一瞬も出さない**(最新の版・過去の版とも)。社内の複数人が使うため、ドライブの中身が見えることを避ける。
+2. **新しい action `getReportFile`**(参照。★ではない。オンライン専用。§5.4.5):
+   `{ "reportId" }` → `{ "reportId", "recordId", "version", "fileName", "mime":"application/pdf", "bytes":<int>, "sha256", "base64" }`(タイムアウト90秒)。
+   - `reportId` は `f` で始まる id(形が違えば `VALIDATION_FAILED`)。`Reports` に行が無ければ `NOT_FOUND`。
+   - 権限は `listReports` と同じ(役割=管理者・責任者、現場の担当の検査。担当外は `FORBIDDEN_SITE`、職長は `FORBIDDEN_ROLE`)。**記録の状態は問わない**(過去の版を開くため)。
+   - サーバーは `Reports.driveFileId` のファイルの中身を読み、`base64`(PDFの全体)・`bytes`(バイト数)・`sha256`(中身から計算した値)・`fileName`(ドライブのファイル名=§10.2a の名前)を返す。読めなければ `DRIVE_ERROR`。Events は書かない。
+   - action 数は **51 → 52**(§5.5 の「PDF」、§8.11.2 の「C 参照」に入る。U-CLASS-01・C-KEEP-01・C-REP-05/06 の数も52に読み替える)。
+3. **M6(元請提出用PDF)の画面**: `Report.url` は画面で使わない(開かない・送らない・コピーしない。応答の `url` は互換のため残す)。
+   - 「開く」(最新の版・過去の版の各行とも): `getReportFile` で受け取り、`sha256` を確かめて PDF のファイルにし、**端末の中で開く**(新しいタブで `blob:` の URL。Android は `download` 付きで保存し、端末のPDFアプリで開く)。
+   - 「ファイルで送る」(`act.send_file`。旧「共有」): 受け取ったPDFファイルを `navigator.share({ files })` で送る(LINE・メールなど)。ファイルを送れない端末では保存し、`msg.pdf_saved` を出す。
+   - 受け取り中はそのボタンを押せなくし `msg.pdf_loading` を出す。受け取ったPDFは M6 を閉じるまで端末のメモリに持つ(同じ版をもう一度受け取らない)。受け取りのあと、ブラウザの制限で開けない・送れないときは `msg.pdf_ready_tap`(もう一度押すと、すぐ開く・送る)。`sha256` が合わなければ `msg.pdf_broken`。通信できなければ `err.network`。
+   - 最新の版は、作成が終わったら自動で受け取り始める(1回押すだけで開けるように)。
+4. **共有設定**: `Config.pdfShareMode` の初期値を **`private`** にする(これから作るPDFはドライブで共有しない)。本番の `Config` の行はシートで `private` に変える(運用。§2.14 の行は一括では変えない)。作成済みのPDFの共有は変えない。
+5. **mock・harness**: 同じ契約。mock は保存したPDFの中身を返す。
+6. **i18n(追加・変更)**:
+
+| キー | ja | id |
+|---|---|---|
+| `act.send_file` | ファイルで送る | Kirim berkas |
+| `msg.pdf_loading` | PDFを受け取っています… | Menerima PDF… |
+| `msg.pdf_ready_tap` | 準備ができました。もう一度押してください | Sudah siap. Tekan sekali lagi |
+| `msg.pdf_broken` | PDFを正しく受け取れませんでした。もう一度お試しください | PDF tidak diterima dengan benar. Coba lagi |
+| `msg.pdf_saved` | PDFを保存しました。保存したファイルを送ってください | PDF disimpan. Kirim berkas yang disimpan |
+| `scr.M6.desc`(変更) | 元請に渡すPDFを作ります。「ファイルで送る」でPDFを渡してください。 | Membuat PDF untuk kontraktor. Kirim PDF dengan "Kirim berkas". |
+
+   `act.share`・`msg.link_copied` は辞書に残す(使わない)。
+7. **テスト**: **C-REPF-01**(①`generateReport` のあと `getReportFile` で、`base64` を戻すと `%PDF-` で始まり、`bytes`・`sha256` が中身と一致、`version`・`recordId` が合う ②作り直したあとも v1 を取れる ③職長は `FORBIDDEN_ROLE`、担当外の管理者は `FORBIDDEN_SITE` ④無い `reportId` は `NOT_FOUND`、形の違う id は `VALIDATION_FAILED`)。**E-38**(M6 で最新の版と過去の版の「開く」が `getReportFile` を呼び、ドライブのURL・`Report.url` を開くリンクが画面に無く、開いたタブは `blob:` で中身がPDF。「ファイルで送る」は `navigator.share` にPDFのファイル1つを渡す)。
 
 ## 7. 写真
 
@@ -1861,7 +1894,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 4. 待つ操作(PIN・先着・状態の取り合い・参加・端末登録・ログイン)は **先出ししない**。サーバーが拒否したら従来どおりエラーを表示し、画面は進まない。
 5. 認可はサーバーで検査する(先出しでも変わらない)。先出しは見た目だけで、サーバーが拒否すれば §8.11.4 の失敗の扱いになる。
 
-#### 8.11.2 操作の分類(正本。全51 actionを1回ずつ載せる。U-CLASS-01 が検査する。版1.13.0 で8つ追加)
+#### 8.11.2 操作の分類(正本。全52 actionを1回ずつ載せる(版1.20.0 で52)。U-CLASS-01 が検査する。版1.13.0 で8つ追加)
 
 | 分類 | action | 画面の動き | 理由 |
 |---|---|---|---|
@@ -1874,7 +1907,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | B 待つ(先着・状態) | `claimReview` `releaseClaim` `takeoverReview` `stopPour` `createRecord` | 『送信中…』を出して応答を待つ。拒否(`ALREADY_CLAIMED` `STATE_CONFLICT` `RECORD_LOCKED` `ALREADY_EXISTS` 等)はそのまま表示 | 先着・状態の取り合い・停止の確定。`createRecord` は同じ場所の記録の先着(P-47)。圏外の `stopPour`・`createRecord` だけは従来どおりキューに積む(§8.1) |
 | B 待つ(参加・端末・ログイン) | `lookupInvite` `registerDevice` `logoutDevice` `requestJoin` `decideJoin` `revokeMembership` | 同上 | 認証・参加の確定 |
 | B 待つ(管理・出力) | `generateReport` `adminIssueInvite` `adminUnlockUser` `adminSetUserStatus` `adminRevokeDevice` `adminSetAbsence` `adminCancelAbsence` `adminGetJoinInfo` `adminRotateJoinKey` `adminValidateRoster` `adminCreateSite` `adminUpdateSite` `adminCloseSite` `adminReopenSite` `adminAddAssignment` `adminEndAssignment` `adminCreateUser` | 同上(`generateReport` は最大120秒) | 責任者の管理操作・PDF。結果が画面の内容そのもの |
-| C 参照 | `ping` `me` `getBootstrap` `listRecords` `getRecord` `getPhotoThumbs` `getPhoto` `listReports` `listJoinRequests` `listAssignments` `listAbsences` `adminListUsers` `adminGetSite` | 先出しの対象外(書き込みではない)。キャッシュで先に描く規則は §8.11.9 | — |
+| C 参照 | `ping` `me` `getBootstrap` `listRecords` `getRecord` `getPhotoThumbs` `getPhoto` `listReports` `getReportFile` `listJoinRequests` `listAssignments` `listAbsences` `adminListUsers` `adminGetSite` | 先出しの対象外(書き込みではない)。キャッシュで先に描く規則は §8.11.9 | — |
 
 - 分類の追加・変更は、本表を先に直す(実装が表と食い違うときは実装の誤り)。A に入れる条件は §8.11.1 の1。
 
@@ -2012,7 +2045,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 | M3 | 写真拡大(`getPhoto`、スタンプ文字列、閉じる)。**版1.15.0**: 自分の図面で削除できる間は「書き直す」/「書き足す」(§7.7-5) |
 | M4 | 打設停止(**打設前の記録だけ**。出来形からは開かない。理由必須テキスト、大きい赤ボタン。圏外では「送信待ちになります。至急電話で連絡」)。`masked`(他班)の記録から開いたときは、現場・階・ロット・班名だけを表示し、記録の内容は出さない |
 | M5 | **(版1.19.0 で廃止。開かない。§6.11)** 元請サイン記録(担当者名・方法 paper/pdf/onsite・証跡写真(任意)→PIN入力M1→`recordPrimeSign`)。説明文の語は段階で変わる(出来形は「出来形確認済」。`scr.M5.desc@post_demold`) |
-| M6 | 元請提出用PDF(`generateReport`の進捗→版・URL・「共有」(`navigator.share`、無ければリンクコピー)・「開く」・過去版一覧) |
+| M6 | 元請提出用PDF(`generateReport`の進捗→版・「ファイルで送る」・「開く」・過去版一覧。**版1.20.0: 開く・送るは `getReportFile` で受け取ったPDFで行い、ドライブのURLは使わない(§6.12)**) |
 | M7 | 汎用確認ダイアログ |
 | M8 | 招待コード表示(コード・有効期限・「再表示できません」) |
 | M9 | 参加承認(班名の入力=必須・既定は「{氏名}班」、役=職長/副職長) |
@@ -2800,7 +2833,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-RESP-03(重さ): どの `record` にも `dataUrl`・`thumb` というキーが無く、base64 の本体を含まない(`PhotoMeta` のみ)。エラー応答には `record` が付かない。
 - C-RESP-04(version): 同じ記録に `saveDraft` → `addNote` → `uploadPhotoChunk` → `submitRecord` を順に行うと、各応答の `record`(Detail の応答)の `version` が単調に増える。`uploadPhotoChunk` 単発3本を `Promise.all` で送った場合、各応答の `record.version` は「その写真の追加直後の版」以上で、最終的な `getRecord.version` = 開始 + 3、**3本のうち `version` が最大の応答の `record` には3枚とも載っている**(遅れて届く応答に古い状態があっても、クライアントが `version` で採否を決められる)。
 - C-RESP-05(冪等再生): `submitRecord`(PIN)を同じ `clientId` で再送 → `meta.replayed=true`・`record` は RecordDetail・`record` を除く `data`(`warnings`)は初回と同一・`record.version` は初回以上・Events の件数は1回分。`addNote` の再送も同様で Notes は重複しない。(mock-only/harness)`Idem.responseJson` に `items` を含む RecordDetail が保存されておらず、45,000文字以内。
-- C-KEEP-01(harness-only。GASエディタ専用の関数。§6.7a): ①`ACTIONS` のキー数は §5.5 の数(版1.13.0 で51)のままで、`installKeepWarmTrigger`・`removeKeepWarmTrigger`・`keepWarm` を含まない。HTTP でこれらを `action` に送ると `BAD_REQUEST`。②`installKeepWarmTrigger()` を2回実行しても、ハンドラ `keepWarm` の時間主導トリガーは1本で間隔は5分。`Config.keepWarmMinutes` を 10 にして実行すると10分。1・7・数でない値・欠落のときは5(`1` のときは `Logger` に理由が出る)。③`removeKeepWarmTrigger()` で `keepWarm` のトリガーが0本になり、`escalationTick`・`dailyMaintenance` のトリガーは残る。`setupTriggers()` を実行しても `keepWarm` のトリガーは消えない。④`keepWarmMinutes` の行が無い既存の Config に対し `setupSheets()` が1行だけ追記し、既存の行・値を変えない。
+- C-KEEP-01(harness-only。GASエディタ専用の関数。§6.7a): ①`ACTIONS` のキー数は §5.5 の数(版1.20.0 で52)のままで、`installKeepWarmTrigger`・`removeKeepWarmTrigger`・`keepWarm` を含まない。HTTP でこれらを `action` に送ると `BAD_REQUEST`。②`installKeepWarmTrigger()` を2回実行しても、ハンドラ `keepWarm` の時間主導トリガーは1本で間隔は5分。`Config.keepWarmMinutes` を 10 にして実行すると10分。1・7・数でない値・欠落のときは5(`1` のときは `Logger` に理由が出る)。③`removeKeepWarmTrigger()` で `keepWarm` のトリガーが0本になり、`escalationTick`・`dailyMaintenance` のトリガーは残る。`setupTriggers()` を実行しても `keepWarm` のトリガーは消えない。④`keepWarmMinutes` の行が無い既存の Config に対し `setupSheets()` が1行だけ追記し、既存の行・値を変えない。
 - C-KEEP-02(harness-only): `keepWarm()` の実行の前後で、全シートのセルの内容・Drive のファイル・ScriptProperties・送信メール・`Events`・`Idem` が完全に同じ(書き込み0回)。ロックを取らない。`Users`/`Devices`/`Assignments`/`Memberships`/`Absences` を読まない(shims の読み取り記録で確認)。読み込みを失敗させても例外を投げない。
 
 **写真**
@@ -2848,7 +2881,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - C-REP-02(harness-only。方式の切替。§10.5.1。`/__mock/patch` で Config を書く): ①`reportEngine` の行が無い/空/`html`/`HTML`/`xyz`/`docs` のとき**HTML方式**(`state.lastHtml` が更新され、`/__mock/docShim` の `counts.created=0`)。②`doc`・` Doc `・`DOC` のとき**doc方式**(`counts.created=1` かつ `lastHtml` は `null` のまま)。③どちらでも `url`・`version`・PDFが `%PDF-` で始まる・PDF名(§10.2a)・`Reports` の列と値の形・メール添付(`Reports.driveFileId` の同じファイル)が**同じ形**。④`getBootstrap.config` に `reportEngine` が**ない**。⑤C-REP-01(既定=html)は引き続き全項目を満たす。
 - C-REP-03(harness-only。doc方式の中身。§10.5.2〜10.5.6。`reportEngine=doc`、写真(`kind=photo`)6枚(うち1枚は `side=prime` で項目なし)+図面1枚(印2個)+NG項目あり+職長コメントと管理者コメントあり、の `qa_ok` 記録): `/__mock/docShim` の `lastDoc` で次を確認。①**用紙**: `pageWidth=595.28`・`pageHeight=841.89`(±0.01)、四辺の余白 `34.02`(±0.05)。②`fontFamily` が `Noto Sans JP`。③**画像の数**: `images.length` = 写真6 + 図面1 = 7。写真の画像は**枠の中で最大**(版1.14.0): 幅 ≤ 305.62pt かつ 高さ ≤ 226.77pt(±0.5。版1.14.1)で、**幅か高さのどちらかが枠に一致**(±0.5)し、縦横比が元画像と±1%以内、図面は幅 ≤ 521.57pt かつ 高さ ≤ 476.71pt(±0.5)。**大きさは `w`/`h`(pt)で見る。shim に渡されたピクセルの値 `wPx`/`hPx` は pt×96/72 の整数(版1.14.2)**。基本情報表に 記録ID・提出ラウンド・版 のセルが無く、打設前は `打設予定日時|…|ステータス|…` と `生成日時|…||` の行がある(版1.14.2)。④**改ページ数(版1.14.3 で改訂)**: `pageBreaks` = 図面の枚数(1)+写真の前(1。写真が1枚以上のときだけ)+ `floor((写真枚数−1)/3)`(=1)= **3**。写真3枚の記録では 図面の数+1、**写真0枚では 図面の数だけ**、写真4枚で+1、6枚で+1、7枚で+2。**`body.appendPageBreak()` の改ページ段落は0個**(shim の `bodyBreakParas=0`。改ページは全て `docSpacer_` の段落の中)。本文の段落に「写真」の見出しが無い(版1.14.3)。**最後の写真ブロックの後に改ページがない**(写真が3の倍数のときも)。⑤**表**: 写真ブロックの表の数 = 写真の枚数(6)、各表は2列・列幅 110×184/186 = 308.46pt / 76×184/186 = 213.12pt(±0.5。合計 521.57pt。版1.14.0)・最低行高 229.61pt(±0.5。縮めない。版1.14.1)・写真のセルの余白 1.42pt(四辺)。項目表は7列・列幅 **8/40/14/18/46/30/30mm**(版1.11.0。旧 8/62/14/18/24/30/30)の各値に 184/186 を掛けて pt 換算した値(±0.5)・最低行高 17.0pt。基本情報表は4列(30/63/30/63mm ×184/186)、サイン表は3列(62mm×3 ×184/186)、図面の凡例表は**6列**(**24/76/28/24/17/17mm** ×184/186。版1.11.0。旧5列 24/82/24/28/28)。**全ての表(基本情報・サイン・結果サマリ・項目・凡例・図面画像・写真ブロック)で列幅の合計 = 521.57pt(±0.5)**。**keepWithNext(版1.11.2 で撤回)**: 検査しない。代わりに、shim の `Paragraph` に `setKeepWithNext` が無い(`typeof p.setKeepWithNext === 'undefined'`)ことを確認し、ReportDoc.gs が doc 方式を最後まで通せる(`fallbackFrom` なし)こと⑥**内容**: `text` に subject・段階名・職長コメント全文・管理者コメント全文・スタンプ文字が含まれ、職長コメントと管理者コメントは別のセル(別の列/別の段落)。項目に紐づかない写真(`side=prime`)のブロックのセルには項目No.・コメントのラベルが出ない。NG行の全セルの背景が `#FDE8E8`(`cellBackgrounds`)。⑦**フッタ**: `footerText` に記録IDと64桁のハッシュ(`reportSnapshotHash_` と同じ値)が含まれ、ページ番号がない。本文末尾に同じハッシュの段落が**ない**。⑧**後始末**: 変換後に一時文書が `trashed=true`、`counts.trashed=counts.created`、`/__mock/drive` に一時文書が残らない(`/__mock/driveLog` に `create` と `trash` が1組出る)。⑨`report_generated` の `detail.engine='doc'`・`fallbackFrom` なし。
 - C-REP-04(harness-only。フォールバック。§10.5.8): `reportEngine=doc` で `failMode` を `create` / `image` / `convert` / `slow` の各場合に設定して `generateReport`: ①いずれも `ok:true` で、PDF(HTML方式)ができ、`Reports` に1行増え、PDF名・保存先・共有・メール添付が通常と同じ。②Events `report_generated` の `detail` が `engine='html'`・`fallbackFrom='doc'`・`fallbackReason`(空でない文字列、200文字以内)を持つ。③PDF の Drive ファイルの説明が `engine=html (fallback from doc: …)` で始まる(成功した doc 方式は `engine=doc`、通常の html は `engine=html`)。④`create` 以外では一時文書が作られていたら必ずゴミ箱に入っている(`counts.created=counts.trashed`)。⑤`Logger` に理由が出る(shim の `Logger` 記録で確認)。⑥`REPORT_NOT_ALLOWED`(`submitted` の記録)はフォールバックせずそのエラーのまま、`counts.created=0`。⑦HTML方式も失敗させた場合(Drive 保存の失敗)は従来どおり `DRIVE_ERROR`。
-- C-REP-05(harness-only。ACTIONS と編集関数): ①`ACTIONS` のキー数は §5.5 の数(版1.13.0 で51)のままで `checkReportEngine` を含まない。HTTP でこれを `action` に送ると `BAD_REQUEST`。②`checkReportEngine()` を呼ぶと文字列 `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` を返し、`lastDoc` の用紙が A4、一時文書はゴミ箱、全シートの内容・Events・Reports・ScriptProperties は変わらない。`failMode=convert` のときは例外(メッセージを握りつぶさない)。
+- C-REP-05(harness-only。ACTIONS と編集関数): ①`ACTIONS` のキー数は §5.5 の数(版1.20.0 で52)のままで `checkReportEngine` を含まない。HTTP でこれを `action` に送ると `BAD_REQUEST`。②`checkReportEngine()` を呼ぶと文字列 `OK: doc 方式の変換に成功しました(A4 595.28×841.89pt)` を返し、`lastDoc` の用紙が A4、一時文書はゴミ箱、全シートの内容・Events・Reports・ScriptProperties は変わらない。`failMode=convert` のときは例外(メッセージを握りつぶさない)。
 - C-REP-06(ユニット/静的検査。`tests/unit`): ①`backend/appsscript.json` の `oauthScopes` に `https://www.googleapis.com/auth/documents` が含まれ、既存の4つ(spreadsheets / drive / script.scriptapp / script.send_mail)も残っている。②`setupSheets()` が `reportEngine` の行が無い既存の Config に**1行だけ**追記し(値 `html`、type `str`)、既存の行・値を変えない。③spec-sync: §2.14 の Config キー(`reportEngine` を含む)と mock の `configKeys` が一致。
 - C-REP-07(版1.11.0。実測の表示=HTML方式。§10.2d・§10.2b-A/B。**harness**(`/__mock/lastReportHtml`)。**データ**: `pre_pour` の `qa_ok` 記録。`saveDraft`/`saveQaDraft` で次の値を入れる(`itemId` は seed。項目番号 N は `getRecord` の項目の並びの1始まりで求める): i4(許容5)職長 `[-5,-5,-2,-5,3,-1,5,-5]` / i6(許容2)職長 `[1,-3,2,-2.5]`(職長の結果は **`ng`**・備考・重さ `minor`・写真あり。許容超の `ok` は §5.3.1 で提出できないため)かつ管理者 `[2,3]` / i5(許容5)職長 `[1,2]`・管理者 `[7]`(職長・管理者とも結果 `ok`。**管理者の許容超の `ok` は `qaNote` が非空なら通る**=§5.3.1 版1.11.1) / i8(許容なし)職長 `[2,-1,0]` / i7(許容5)は値なし。管理者の結果は全項目 `ok`(判定 `ok` で `qa_ok`)。**管理者の値が許容超の i5(`[7]`)・i6(`[2,3]`)は `saveQaDraft` で `qaNote` に非空の文(例 `図面で確認済み`)を入れる**(版1.11.1: 入れないと `submitVerdict` が §5.3.1 の `QA_OVER_TOL_COMMENT_REQUIRED` で拒否される)。i6 と i8 に `kind=photo` の写真を1枚ずつ付ける): ①**項目表の実測セルの文字列**(タグを除いたテキスト): i4=`職長: -5、 -5、 -2、 -5、 +3、 -1、 +5、 -5` と `n=8 最小-5/最大+5/許容±5mm`(**境界の ±5 は許容内**=`▲` なし)。i6=`職長: +1、 ▲-3、 +2、 ▲-2.5` と `n=4 最小-3/最大+2/許容±2mm ▲許容超2件`(` `=半角スペース1つ)、続けて `管理者: +2、 ▲+3` と `n=2 最小+2/最大+3/許容±2mm ▲許容超1件`(**職長の2行→管理者の2行の順。混ぜた要約がない**)。i5=`職長: +1、 +2` と `n=2 最小+1/最大+2/許容±5mm`、続けて `管理者: ▲+7` と `n=1 許容±5mm ▲許容超1件`。i8=`職長: +2、 -1、 0` と `n=3 最小-1/最大+2`(**`許容`・`▲` を含まない**)。i7(値なし)のセルは**空**。②**マークアップ**: i6 の `▲-3`・`▲-2.5`・`▲+3`、i5 の `▲+7` と要約の `▲許容超2件`/`▲許容超1件` が `class="over"` かつ `font-weight:bold;color:#cc0000` の `<span>` の中にあり、`+1`・`+2` と i4 の値は `over` の外。③**旧形式の廃止**: HTML に ` / 許容±` と値の ` | ` 連結が出ない。④**注記**: `実測の ▲ は許容(±)を超えた値の目安です` を含む段落が項目表の直後に1つ。全項目の許容ありの実測を空にした記録(i8 だけ値あり)では**この注記が出ない**。⑤**判定への非影響**: **i5 の行(許容超の `▲+7` があるが職長・管理者とも `ok`)に NG の赤背景 `#fde8e8` が付かない**(i6 の行は職長 `ng` なので赤で正しい)。結果サマリの件数は実測の有無で変わらない。実測セル・注記に `不合格`・`不適合` の語がない。⑥**写真ブロック(版1.14.0 で改訂。§10.2b-B の情報欄2)**: i6 の写真の情報欄の結果の行が `職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件`(`▲許容超2件`・`▲許容超1件` は `class="over"` の `<span>` の中)。i8 の写真は `職長: 合 / 管理者: 合`(許容なし=`▲` を含まない)。**写真ブロックのどこにも `実測(` と値の並び(`+1、 ▲-3` など)と要約(`n=`)が出ない**。⑦**出来形(`post_demold`)にも同じ規則**: `post_demold` の記録で i56(許容10)職長 `[-10,11,4]` → `-10、 ▲+11、 +4` と `n=3 最小-10/最大+11/許容±10mm ▲許容超1件`、i57(許容3)職長 `[3,-3]` → `+3、 -3` と `n=2 最小-3/最大+3/許容±3mm`。⑧**レイアウト制約**: `display:flex`/`display:grid`/`calc(` を含まない(§10.2b 共通)。
 - C-REP-08(版1.11.0。実測の表示=doc方式。**harness-only**。`reportEngine=doc`。C-REP-07 と**同じデータ**。`lastDoc` の追加観測=§11.4): ①項目表(7列)の `cellTexts` の実測列(5列目): C-REP-07 ① と**同じ文字列**(段落の区切りは `\n`。i7 は `""`)。②`coloredTexts['#CC0000']` に `▲-3`・`▲-2.5`・`▲+3`・`▲+7`・`▲許容超2件`・`▲許容超1件` が含まれ、`+1`・`+2`・`-5` など許容内の値は含まれない。`boldTexts` にも同じ文字列が含まれる(許容超の部分だけが太字)。③項目表の直後の本文段落に C-REP-07 ④ と同じ注記(注記が出ない記録では出ない)。旧注記 `管理者コメントの全文は` が本文に**ない**。④管理者コメント(200文字)が項目表の `cellTexts` に**全文**ある。⑤**(版1.14.0 で改訂)** i6 の写真ブロックの右セルの `cellTexts` に `職長: NG(軽微) ▲許容超2件 / 管理者: 合 ▲許容超1件` が出て、`実測(`・`n=` が出ない。`▲許容超2件`・`▲許容超1件` は `coloredTexts['#CC0000']` と `boldTexts` に含まれる。⑥`post_demold` でも C-REP-07 ⑦ と同じ文字列。⑦NG行以外の背景が変わらない(**i5 の行(`▲+7` あり・`ok`)は背景 `null`**)。⑧C-REP-03 のその他の項目(列幅・改ページ。keepWithNext は版1.11.2 で撤回)は新しい幅で通る。
@@ -2867,7 +2900,7 @@ M6 で生成中表示 → 完了後に版・URL・共有ボタン。`navigator.s
 - U-OUTBOX-04(送信可否規則 §8.4。フロントは `outbox.js` に純関数 `selectSendable(rows, {now, photoParallel})`(送る行の `seq` 配列を返す。**契約として確定。テストが直接呼ぶ**)を置く。`claimSendable`・`normParallel` などの内部関数は実装の自由でSPEC外(テストは依存しない)。データ駆動 `tests/fixtures/outbox-schedule-cases.json`): ①写真の行3件(先行の非写真の行なし)で `photoParallel=3` → 3件、`=2` → 2件、`=9` → 6件を上限、設定なし/`null`/0以下 → 1件(入力は整数のみ。小数・文字列の丸めは検査しない) ②同じ記録に先行する `createRecord`(`pending`/`sending`/`failed`/`blocked`)があるうちは写真の行を選ばない(完了して行が消えたら選ぶ) ③`seq` が 写真A・写真B・`saveDraft`・写真C の順 → A,B は同時に選ばれ、`saveDraft` は A,B が両方消えるまで選ばれず(`sending` 中・`failed` でも)、C は `saveDraft` が消えるまで選ばれない ④別の記録の `saveDraft` 2件 → 同時に1件だけ ⑤別の記録の写真の行と非写真の行は同時に選べる ⑥同じ `photoId` の行が2件 → 1件だけ ⑦写真Aが `failed` でも同じ記録の写真B,Cは選ばれ続け、後続の `saveDraft` は選ばれない(確定失敗の通知で `blocked`)。非写真の行が `failed` なら同じ記録の後続の写真の行も `blocked` ⑧`stopPour` は写真の行の完了を待たず最優先で選ばれる。写真の行・非写真の行(`saveDraft` 等)が `failed` になっても、同じ記録の `pending` の `stopPour` は `blocked` にならず選ばれる(`stopPour` 自身が `failed` のときだけ後続が `blocked`) ⑨写真の行が backoff 待ちでも他の写真の行は選ばれる ⑩連続通信失敗カウントは並行する要求を通算し、成功1件でリセット(3回でオフライン)。
 - U-OUTBOX-05(写真の送信状態。§8.11.5): `KW.outbox.photoState(row)` が データ駆動(`tests/fixtures/photo-state-cases.json`)で、`null`→`saved`、`pending`(`tries=0`)→`queued`、`pending`(`tries=2`)→`queued`、`sending`→`sending`、`failed`→`failed`、`failed`(`lastError.code='EXPIRED'`)→`failed`、`blocked`(`blockReason='record'`)→`failed`。
 - U-OUTBOX-06(保存状態。§8.11.6): `KW.outbox.saveStateOf(rows, online)` が、0件→`synced`、`sending` あり→`sending`、`pending` のみ+オンライン→`queued`、`pending` のみ+圏外→`offline`、`failed` または `blocked` あり→`failed`(`sending` と混在しても `failed`)を返し、`n`=全行数・`m`=`failed`+`blocked` の数になる。
-- U-CLASS-01(操作の分類。§8.11.2): SPEC の §8.11.2 の表(`#### 8.11.2` から次の `####` まで)にバッククォートで書かれた action 名の集合が、§5.5 の51 action(版1.13.0。以前は43)と完全に一致し、同じ名前が2回出ない。C(参照)は13個。`spec-sync.test.js` に加える。
+- U-CLASS-01(操作の分類。§8.11.2): SPEC の §8.11.2 の表(`#### 8.11.2` から次の `####` まで)にバッククォートで書かれた action 名の集合が、§5.5 の52 action(版1.20.0。版1.13.0 は51、以前は43)と完全に一致し、同じ名前が2回出ない。C(参照)は14個。`spec-sync.test.js` に加える。
 - U-RESP-01(応答の反映。§5.1a の3): `KW.data.putDetail` に、`version` が小さい詳細→捨てて既存を残す/同じ→反映/大きい→反映、を渡す。`masked` 形は既存の詳細を上書きしない。`drafts`・`outbox`・`photoBlobs` は変わらない。応答に `record` が無い(または `items` が無い)ときは `getRecord` にフォールバックする(`loadDetail` のモック呼び出しで確認)。反映から15秒以内の `loadDetail(recordId, {maxAgeMs:15000})` は API を呼ばず、16秒後は呼ぶ。
 
 - U-PHOTO-01: base64分割(分割モードに入ったときのみ): 連結=元、各チャンク≤90,000文字かつ4の倍数、`total=ceil(len/90000)`、最大12(超えたら `err.photo_too_large`)。
@@ -3268,3 +3301,4 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-14 | 1.18.0 | ユーザー決定(2026-11-14「案Aと案Bを進める」)。**読み取り側の待ち短縮(旧 仮置き P-45)を確定**。§8.11.9 を仮置きから外し、細部を確定: ①起動時の `me`/`getBootstrap` を並列に ②保存済みの `me`・`bootstrap` があれば応答を待たずに描く(ホーム表示中に役割が変わったときだけ描き直す。認証系エラーは従来どおり S01/S02) ③S06/S07/S08/S10 はキャッシュの詳細で先に描き、裏の `getRecord` で版が大きければ差し替える(S06・S10 は未送信・変更・保存待ちが無いときだけ。S07 は開き直す)。その間 `msg.checking_latest`(`.checking`)。`KW.data.loadDetail` に `cacheFirst`。§9.4 の注記、§12 の E-29(時間の目安を 1500ms に)、§13 の責務、§14 P-45・§14.2 の14①、付録A-1・5 を更新。サーバー・action・シートの変更なし。あわせて REQUIREMENTS §15 に keepWarm の本番設置(2026-11-14)を記録 |
 | 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |
 | 2026-11-15 | 1.19.1 | ユーザー決定(2026-11-15)「記録の詳細の画面に 元請サイン 元請はPDFに記入の表示は不要」: S08 のサイン欄で、元請サインが記録されていない記録は元請の枠を出さない(職長・承認者の2枠を2列)。記録済みの古い記録は従来どおり3枠。§6.11-7・§6.11-10(E-37)を更新。API・シートの変更なし。 |
+| 2026-11-15 | 1.20.0 | ユーザー決定(2026-11-15。REQUIREMENTS §24)「PDFを開くとドライブの画面が出る。社内の複数人が使うアプリでドライブが一瞬でも表示されるのはやめてください」「過去の資料を開く際もドライブが見えないように」: §6.12 新設。①参照の action `getReportFile` を追加(51→52)②M6 の開く・送るは受け取ったPDFで行い、ドライブのURLを使わない。「共有」→「ファイルで送る」(PDFファイルを送る)③`pdfShareMode` の初期値を `private` に ④i18n 5キー追加・`scr.M6.desc` 変更 ⑤C-REPF-01・E-38。シートの列の変更なし。 |
