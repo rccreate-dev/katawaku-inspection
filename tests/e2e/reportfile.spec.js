@@ -73,7 +73,7 @@ describe('E-38 元請提出用PDFをアプリで開く・送る(ドライブを�
     await page.waitForFunction(() => window.__shared.length === 1);
     const sh = (await page.evaluate(() => window.__shared))[0];
     assert.equal(sh.n, 1); assert.equal(sh.type, 'application/pdf'); assert.equal(sh.url, null, 'URL は送らない');
-    assert.match(sh.name, /_v1_\d{8}-\d{4}\.pdf$/); assert.ok(sh.size > 0);
+    assert.match(sh.name, /^C現場\(仮\) 1F 東 L1 打設可 \d{4}-\d{2}-\d{2}\.pdf$/, '名前は 件名 ステータス 生成日(版1.20.1): ' + sh.name); assert.ok(sh.size > 0);
 
     // 作り直して過去の版(v1)を開く
     await sheet.getByRole('button', { name: s.t('act.regenerate') }).click();

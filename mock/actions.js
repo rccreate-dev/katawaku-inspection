@@ -685,7 +685,14 @@ module.exports = function install(C) {
     const r = rc.ctx.report;
     const f = C.S().driveFiles.get(r.driveFileId);
     if (!f || !f.buf || f.trashed) fail('DRIVE_ERROR', 'PDFを読み込めません');
-    const fileName = f.path.split('/').pop();
+    // 版1.20.1(§6.12-8): {件名} {ステータス} {YYYY-MM-DD}[(n)].pdf(ドライブのファイル名は変えない)
+    const rec = ctxRec(rc); const site = siteRow(rec.siteId);
+    const subject = [site.name, rec.floor, rec.zone, rec.lot].map((x) => String(x == null ? '' : x).trim()).filter(Boolean).join(' ');
+    const st = r.recordStatus === 'qa_ok' ? 'approved' : r.recordStatus;
+    const label = st === 'approved' ? (rec.stage === 'post_demold' ? '出来形確認済' : '打設可') : ({ draft: '入力中', submitted: '確認待ち', fix: '是正中' }[st] || st);
+    const day = String(r.generatedAt).slice(0, 10);
+    const n = table('Reports').filter((x) => x.recordId === r.recordId && String(x.generatedAt).slice(0, 10) === day && x.version <= r.version).length;
+    const fileName = `${subject.replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60)} ${label} ${day}${n >= 2 ? `(${n})` : ''}.pdf`;
     return { reportId: r.reportId, recordId: r.recordId, version: r.version, fileName, mime: 'application/pdf', bytes: f.buf.length, sha256: U.sha256(f.buf), base64: f.buf.toString('base64') };
   };
   H.listReports = (rc) => ({ reports: table('Reports').filter((r) => r.recordId === ctxRec(rc).recordId).sort((a, b) => b.version - a.version).map(C.reportView) });

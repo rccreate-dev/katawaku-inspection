@@ -610,18 +610,30 @@ function act_getReportFile(ctx) {
   if (!row) throw new ApiError('NOT_FOUND', 'PDFが見つかりません');
   var rec = loadRecord_(row.recordId);
   requireAuth_(ctx.actor, 'getReportFile', { record: rec, params: ctx.params });
-  var bytes, name;
+  var bytes;
   try {
-    var file = DriveApp.getFileById(row.driveFileId);
-    bytes = file.getBlob().getBytes();
-    name = file.getName();
+    bytes = DriveApp.getFileById(row.driveFileId).getBlob().getBytes();
   } catch (e) {
     throw new ApiError('DRIVE_ERROR', 'PDFを読み込めません');
   }
   return {
-    reportId: row.reportId, recordId: row.recordId, version: row.version, fileName: name, mime: 'application/pdf',
+    reportId: row.reportId, recordId: row.recordId, version: row.version,
+    fileName: reportSendName_(rec, Repo.get('Sites', rec.siteId), row, Repo.where('Reports', 'recordId', rec.recordId)), mime: 'application/pdf',
     bytes: bytes.length, sha256: Util.sha256Hex(bytes), base64: Util.b64encode(bytes)
   };
+}
+
+/**
+ * 版1.20.1(SPEC §6.12-8): 送る・開くときのPDFの名前。{件名} {ステータス} {YYYY-MM-DD}[(n)].pdf
+ * ステータスはその版を作ったときの状態(qa_ok は approved とみなす)。同じ日の2つ目から (2)…を付ける。ドライブのファイル名は変えない
+ */
+function reportSendName_(rec, site, row, rows) {
+  var dayOf = function (x) { var g = x.generatedAt; return (g instanceof Date ? Util.fmtDt(g) : String(g || '')).slice(0, 10); };
+  var day = dayOf(row);
+  var st = row.recordStatus === 'qa_ok' ? 'approved' : row.recordStatus;
+  var n = rows.filter(function (x) { return dayOf(x) === day && x.version <= row.version; }).length;
+  return Util.sanitizeName(reportSubject_(rec, site || { name: '' })) + ' ' + statusLabel_({ status: st, stage: rec.stage }) + ' ' + day +
+    (n >= 2 ? '(' + n + ')' : '') + '.pdf';
 }
 
 /** サイン欄の氏名の下に会社名を出す(空なら何も出さない) */
