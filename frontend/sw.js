@@ -3,8 +3,11 @@
  *   ※ シェル(JS/CSS/i18n など)のファイルを変更したら必ず SW_VERSION を上げること。
  * ・同一 SW_VERSION の間は、シェルのファイルを実行時に取得して上書きしない(JS/CSS/i18n が新旧混在になるのを防ぐ)。
  * ・唯一の例外はナビゲーション(HTMLへの遷移)だけ stale-while-revalidate。
- * ・APIは一切キャッシュしない(別オリジンは素通し)。 */
-var SW_VERSION = '1.0.0-46';
+ * ・APIは一切キャッシュしない(別オリジンは素通し)。
+ * ・版1.20.4(SPEC §6.12-13): pdf/{reportId}/{名前}.pdf は、画面が katawaku-pdf に入れた元請提出用PDFを返す(名前付きで開くため)。
+ *   無ければアプリの先頭へ戻す。サーバーには取りに行かない。 */
+var SW_VERSION = '1.0.0-47';
+var PDF_CACHE = 'katawaku-pdf';
 var CACHE = 'katawaku-shell-' + SW_VERSION;
 var SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'manifest.webmanifest',
@@ -42,6 +45,13 @@ self.addEventListener('fetch', function (e) {
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // API(別オリジン)は素通し
+  var scope = new URL(self.registration.scope);
+  if (url.pathname.indexOf(scope.pathname + 'pdf/') === 0) {
+    e.respondWith(caches.open(PDF_CACHE).then(function (c) { return c.match(url.href); }).then(function (hit) {
+      return hit || Response.redirect(scope.href, 302);
+    }));
+    return;
+  }
   if (req.mode === 'navigate') {
     // ナビゲーションのみ: キャッシュを返しつつ裏で取得して更新
     e.respondWith(caches.open(CACHE).then(function (cache) {

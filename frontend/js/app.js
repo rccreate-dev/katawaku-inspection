@@ -239,6 +239,7 @@
    * discard でないとき outbox は既に空(無し、または送信済み)なので drafts・photoBlobs も消す */
   function wipeForSwitch(discard) {
     S.bootstrap = null; S.lastSyncAt = null; S.joinPending = 0;
+    if (window.caches) caches.delete('katawaku-pdf').catch(function () { /* 版1.20.4: 開いた元請PDFも消す */ });
     if (discard) {
       return Promise.all([KW.db.kvGet('pendingJoin'), KW.db.kvGet('skewMs')]).then(function (v) {
         return KW.db.clearAll().then(function () {
