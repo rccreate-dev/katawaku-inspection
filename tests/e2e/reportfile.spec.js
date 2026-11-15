@@ -1,6 +1,6 @@
 // E-38(版1.20.0。SPEC §6.12。版1.20.2 で応答に url が無いことを追加): 元請提出用PDFは、アプリが getReportFile で受け取って端末の中で開く・送る。
 //   ドライブのURL(Report.url)を開くリンクが画面に無く、最新の版・過去の版とも「開く」で blob: のPDFが開く。
-//   「ファイルで送る」は navigator.share に PDF のファイル1つを渡す。mock、ja、375px
+//   版1.20.3: 「ファイルで送る」は無く「開く」だけ。mock、ja、375px
 'use strict';
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,7 +27,7 @@ const SHARE_STUB = `
 `;
 
 describe('E-38 元請提出用PDFをアプリで開く・送る(ドライブを出さない)', () => {
-  it('最新の版・過去の版の「開く」は blob: のPDF。「ファイルで送る」はPDFファイル。ドライブ・Report.url へのリンクが無い', async () => {
+  it('最新の版・過去の版の「開く」は blob: のPDF。「ファイルで送る」は無い。ドライブ・Report.url へのリンクが無い', async () => {
     const s = await E.newSession(env);
     await s.ctx.addInitScript(SHARE_STUB);
     const calls = [];
@@ -74,12 +74,12 @@ describe('E-38 元請提出用PDFをアプリで開く・送る(ドライブを�
     await popup.close();
     assert.equal(calls.length, 1, '受け取り済みの版は取り直さない');
 
-    // 「ファイルで送る」→ PDF ファイル1つ
-    await sheet.locator('.card [data-pdf="send"]').click();
-    await page.waitForFunction(() => window.__shared.length === 1);
-    const sh = (await page.evaluate(() => window.__shared))[0];
-    assert.equal(sh.n, 1); assert.equal(sh.type, 'application/pdf'); assert.equal(sh.url, null, 'URL は送らない');
-    assert.match(sh.name, /^C現場\(仮\) 1F 東 L1 打設可 \d{4}-\d{2}-\d{2}\.pdf$/, '名前は 件名 ステータス 生成日(版1.20.1): ' + sh.name); assert.ok(sh.size > 0);
+    // 版1.20.3(§6.12-12): 「ファイルで送る」は無く、最新の版のカードのボタンは「開く」1つだけ。navigator.share を呼ばない
+    assert.equal(await sheet.locator('[data-pdf="send"]').count(), 0, '「ファイルで送る」が無い');
+    assert.equal(await sheet.locator('.card [data-pdf="open"]:not([data-version])').count(), 1);
+    assert.deepEqual(await sheet.locator('.card:not(.row) button').allInnerTexts(), [s.t('act.open')], '最新の版のカードは「開く」だけ');
+    assert.ok(!(await sheet.innerText()).includes('ファイルで送る'));
+    assert.equal(await page.evaluate(() => window.__shared.length), 0, 'navigator.share を呼ばない');
 
     // 作り直して過去の版(v1)を開く
     await sheet.getByRole('button', { name: s.t('act.regenerate') }).click();

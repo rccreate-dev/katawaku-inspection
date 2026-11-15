@@ -508,7 +508,8 @@
   };
 
   /* ---- M6 元請提出用PDF ---- */
-  // 版1.20.0(SPEC §6.12): PDF はアプリが getReportFile で直接受け取り、端末の中で開く・送る。
+  // 版1.20.0(SPEC §6.12): PDF はアプリが getReportFile で直接受け取り、端末の中で開く。
+  // 版1.20.3(§6.12-12): 「ファイルで送る」は出さない。開いたPDFから端末の機能で送る
   // ドライブの URL(Report.url)は開かない・送らない・コピーしない(ドライブの画面を一瞬も出さない)
   function b64ToBytes(b64) {
     var bin = atob(b64), u = new Uint8Array(bin.length);
@@ -552,14 +553,6 @@
       if (isAndroid) { savePdf(p); return true; }   // Android は保存して端末のPDFアプリで開く
       return !!window.open(p.url, '_blank');
     }
-    function sendPdf(p) {
-      var data = { files: [p.file], title: p.file.name };
-      if (navigator.canShare && navigator.share && navigator.canShare(data)) {
-        return navigator.share(data).then(function () { return true; }, function (e) { return !(e && e.name === 'NotAllowedError'); });
-      }
-      savePdf(p); C.toast(t('msg.pdf_saved'));
-      return true;
-    }
     /** ボタンを押したとき: 受け取り済みならすぐ実行。まだなら受け取ってから実行し、ブラウザに止められたら「もう一度」 */
     function withPdf(reportId, btn, fn) {
       var label = btn.textContent;
@@ -593,8 +586,7 @@
           h('div', { class: 'row' }, h('b', null, 'v' + r.version), C.statusChip(r.recordStatus, false, rec.stage)),
           h('div', { class: 'sub' }, C.fmt(r.generatedAt) + ' / ' + (r.generatedByName || '')),
           h('div', { class: 'gap' },
-            pdfBtn(r.reportId, 'btn small', t('act.send_file'), sendPdf, { 'data-pdf': 'send' }),
-            pdfBtn(r.reportId, 'btn small ghost', t('act.open'), openPdf, { 'data-pdf': 'open' }))));
+            pdfBtn(r.reportId, 'btn small', t('act.open'), openPdf, { 'data-pdf': 'open' }))));
         prefetch(r.reportId);   // 作成が終わったら受け取り始める(1回押すだけで開けるように)
       }
       function loadHist() {

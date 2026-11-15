@@ -1,6 +1,6 @@
 # SPEC.md — 型枠検査記録アプリ(RCCREATE)仕様書
 
-- 版: 1.20.2 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
+- 版: 1.20.3 / 作成日: 2026-10-07(最終改訂 2026-11-15) / 作成: 設計担当
 - 正本の位置づけ: 本書は **API契約・シート定義・画面一覧・権限表** の正本(CLAUDE.md §1)。実装と食い違ったら実装より先に本書を直し、末尾「変更履歴」に1行書く。
 - 読者: バックエンド担当(`backend/`)、フロント担当(`frontend/`)、モック担当(`mock/`)、テスト担当(`tests/`)。**本書だけを見て並行実装して食い違わない**ことを目標に、値・列名・コードは全て確定値で書く。
 - 決められなかった点は「§14 仮置き事項」に `P-xx` で列挙し、本文中でも `(仮置き P-xx)` と明記する。ユーザー確認が必要なものは §14.2 にまとめた。
@@ -1607,7 +1607,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
    - action 数は **51 → 52**(§5.5 の「PDF」、§8.11.2 の「C 参照」に入る。U-CLASS-01・C-KEEP-01・C-REP-05/06 の数も52に読み替える)。
 3. **M6(元請提出用PDF)の画面**: `Report.url` は画面で使わない(開かない・送らない・コピーしない。版1.20.2 で応答からも外した=9)。
    - 「開く」(最新の版・過去の版の各行とも): `getReportFile` で受け取り、`sha256` を確かめて PDF のファイルにし、**端末の中で開く**(新しいタブで `blob:` の URL。Android は `download` 付きで保存し、端末のPDFアプリで開く)。
-   - 「ファイルで送る」(`act.send_file`。旧「共有」): 受け取ったPDFファイルを `navigator.share({ files })` で送る(LINE・メールなど)。ファイルを送れない端末では保存し、`msg.pdf_saved` を出す。
+   - **(版1.20.3 で廃止。12)** 「ファイルで送る」(`act.send_file`。旧「共有」): 受け取ったPDFファイルを `navigator.share({ files })` で送る(LINE・メールなど)。ファイルを送れない端末では保存し、`msg.pdf_saved` を出す。
    - 受け取り中はそのボタンを押せなくし `msg.pdf_loading` を出す。受け取ったPDFは M6 を閉じるまで端末のメモリに持つ(同じ版をもう一度受け取らない)。受け取りのあと、ブラウザの制限で開けない・送れないときは `msg.pdf_ready_tap`(もう一度押すと、すぐ開く・送る)。`sha256` が合わなければ `msg.pdf_broken`。通信できなければ `err.network`。
    - 最新の版は、作成が終わったら自動で受け取り始める(1回押すだけで開けるように)。
 4. **共有設定**: `Config.pdfShareMode` の初期値を **`private`** にする(これから作るPDFはドライブで共有しない)。本番の `Config` の行はシートで `private` に変える(運用。§2.14 の行は一括では変えない)。作成済みのPDFの共有は変えない。
@@ -1616,12 +1616,12 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
 
 | キー | ja | id |
 |---|---|---|
-| `act.send_file` | ファイルで送る | Kirim berkas |
+| `act.send_file`(版1.20.3 で削除) | ファイルで送る | Kirim berkas |
 | `msg.pdf_loading` | PDFを受け取っています… | Menerima PDF… |
 | `msg.pdf_ready_tap` | 準備ができました。もう一度押してください | Sudah siap. Tekan sekali lagi |
 | `msg.pdf_broken` | PDFを正しく受け取れませんでした。もう一度お試しください | PDF tidak diterima dengan benar. Coba lagi |
-| `msg.pdf_saved` | PDFを保存しました。保存したファイルを送ってください | PDF disimpan. Kirim berkas yang disimpan |
-| `scr.M6.desc`(変更) | 元請に渡すPDFを作ります。「ファイルで送る」でPDFを渡してください。 | Membuat PDF untuk kontraktor. Kirim PDF dengan "Kirim berkas". |
+| `msg.pdf_saved`(版1.20.3 で削除) | PDFを保存しました。保存したファイルを送ってください | PDF disimpan. Kirim berkas yang disimpan |
+| `scr.M6.desc`(変更。版1.20.3 で 12 の文に変更) | 元請に渡すPDFを作ります。「ファイルで送る」でPDFを渡してください。 | Membuat PDF untuk kontraktor. Kirim PDF dengan "Kirim berkas". |
 
    `act.share`・`msg.link_copied` は辞書に残す(使わない)。
 7. **テスト**: **C-REPF-01**(①`generateReport` のあと `getReportFile` で、`base64` を戻すと `%PDF-` で始まり、`bytes`・`sha256` が中身と一致、`version`・`recordId` が合う ②作り直したあとも v1 を取れる ③職長は `FORBIDDEN_ROLE`、担当外の管理者は `FORBIDDEN_SITE` ④無い `reportId` は `NOT_FOUND`、形の違う id は `VALIDATION_FAILED` ⑤(版1.20.1)`fileName` が 8 の名前で、同じ日の2つ目は `(2)`。出来形は「出来形確認済」)。**E-38**(M6 で最新の版と過去の版の「開く」が `getReportFile` を呼び、ドライブのURL・`Report.url` を開くリンクが画面に無く、開いたタブは `blob:` で中身がPDF。「ファイルで送る」は `navigator.share` にPDFのファイル1つを渡す)。
@@ -1641,6 +1641,12 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
    - `unshareReportFiles()`: 共有されているPDFを `setSharing(PRIVATE, NONE)` で共有しない状態に変える(`changed` に数える)。**フォルダは変えない**(見るだけ)。シート・Config・Events には書かない。何度実行してもよい。
    - 本番では `checkReportSharing` → 結果を責任者に報告 → 承認のあと `unshareReportFiles` の順で実行する。フォルダが共有されていたら、変える前に責任者に報告する。
 11. **テスト(版1.20.2)**: C-REP-01・C-REP-02・C-STAGE-05 は応答に `url` が無いことを確かめ、PDFの中身・ドライブのファイル名は `Reports` 行(`/__mock/state`)から読む。**C-REP-07**(harness): ①`pdfShareMode=anyone_with_link` でも共有しない ②`generateReport`・`listReports` に `url` が無い ③`checkReportSharing` は数えるだけで変えない ④`unshareReportFiles` で共有が止まり、2回目は0件 ⑤シートに書かない。**E-38** に「API の応答にドライブのURL・`/files/reports/`・`"url":` が無い」を追加。
+12. **「開く」だけにする(版1.20.3。ユーザー決定 2026-11-15。REQUIREMENTS §24-6)**: M6 の最新の版のカードは **「開く」1つだけ**(主ボタン `btn small`)。「ファイルで送る」ボタンと `navigator.share` を使う処理は無くす。元請へは、開いたPDFの画面から端末の機能(iPhone の共有など)で送る。
+   - 「開く」は今のまま: 受け取ったPDFを `fileName`(8 の名前)を付けたファイルにし、新しいタブで `blob:` の URL で開く(Android は保存して端末のPDFアプリで開く)。過去の版の「開く」も同じ。
+   - i18n: `act.send_file`・`msg.pdf_saved` を辞書から削除。`scr.M6.desc` を ja「元請に渡すPDFを作ります。「開く」でPDFを表示し、その画面から元請に送ってください。」/ id「Membuat PDF untuk kontraktor. Buka PDF dengan "Buka", lalu kirim ke kontraktor dari layar itu.」に変更。
+   - 注意(端末の制約): 開いた画面から端末の機能で送るとき、送る先に表示される名前を決めるのは端末(ブラウザ)で、8 の名前にならないことがある。
+   - `sw.js` の `SW_VERSION` を上げる。サーバー(GAS)・mock は変えない。
+   - テスト: **E-38** を「最新の版のカードに `[data-pdf="send"]` が無く、「開く」が1つだけ」「`navigator.share` を呼ばない」に直す(開く・過去の版・応答のURLの確認は今のまま)。
 
 ## 7. 写真
 
@@ -3318,5 +3324,6 @@ Node v22.22.0(確認済み)。Playwright 1.56.0 のCLIは存在するが **ブ�
 | 2026-11-15 | 1.19.0 | ユーザー決定(2026-11-15。REQUIREMENTS §23)「元請サインを記録は不要になりました。1次検査→承認者確認→元請提出用PDFを作成→元請にPDFを提出。元請のサインは作成提出したPDFに直接書き込んでもらう」。**§6.11 を新設(それより前の記述に優先)**: ①`submitVerdict(ok)` で `submitted→approved`(T5)②`recordPrimeSign`(T9)と `uploadPhotoChunk(side=prime)` は常に `STATE_CONFLICT`(action数43・enum は残す)③既存の `qa_ok` の行は、サーバーが読むときに `approved` とみなす(シートを一括で書き換えない)④古い元請サインの記録・証跡写真は従来どおり表示 ⑤PDFの元請欄は空欄(従来の未記録時と同じ)⑥S08 の M5 ボタンを出さず、元請の枠に `lbl.sig_prime_on_pdf`、S09 の「元請待ち」を出さない、S10 の合格の PIN 見出し ⑦テストの読み替えと C-NOPRIME-01/02・E-37。§6.1・§6.2(T5・T9)・§6.3・§4.1・§5.4・§9.1(S08/S09/M5)・§10.2 に注記 |
 | 2026-11-15 | 1.19.1 | ユーザー決定(2026-11-15)「記録の詳細の画面に 元請サイン 元請はPDFに記入の表示は不要」: S08 のサイン欄で、元請サインが記録されていない記録は元請の枠を出さない(職長・承認者の2枠を2列)。記録済みの古い記録は従来どおり3枠。§6.11-7・§6.11-10(E-37)を更新。API・シートの変更なし。 |
 | 2026-11-15 | 1.20.0 | ユーザー決定(2026-11-15。REQUIREMENTS §24)「PDFを開くとドライブの画面が出る。社内の複数人が使うアプリでドライブが一瞬でも表示されるのはやめてください」「過去の資料を開く際もドライブが見えないように」: §6.12 新設。①参照の action `getReportFile` を追加(51→52)②M6 の開く・送るは受け取ったPDFで行い、ドライブのURLを使わない。「共有」→「ファイルで送る」(PDFファイルを送る)③`pdfShareMode` の初期値を `private` に ④i18n 5キー追加・`scr.M6.desc` 変更 ⑤C-REPF-01・E-38。シートの列の変更なし。 |
+| 2026-11-15 | 1.20.3 | ユーザー決定(2026-11-15。REQUIREMENTS §24-6)「ファイルで送るは不要です。開くだけ表示させてください」: §6.12-12 新設。M6 の「ファイルで送る」を廃止し「開く」だけに。i18n 2キー削除・`scr.M6.desc` 変更。E-38 を更新。フロントのみ(GAS・mock・シートの変更なし)。 |
 | 2026-11-15 | 1.20.2 | ユーザー決定(2026-11-15。REQUIREMENTS §24-5)「ドライブは社内専用ではないので利用者に一瞬でも見れてしまう、アクセスできてしまうのを回避してください」: §6.12-9〜11 新設。`Report` 応答から `url` を外す。PDFは常に共有しない(`pdfShareMode` 廃止)。作成済みPDFの共有を止めるエディタ専用関数 `checkReportSharing`・`unshareReportFiles`。C-REP-07・E-38 追加分。シートの列・action 数の変更なし。 |
 | 2026-11-15 | 1.20.1 | ユーザー決定(2026-11-15)「送信した時に表示される資料の名称を 現場名・階・工区・打設箇所・ステータス・生成日 にしてください」: §6.12-8 新設。`getReportFile.fileName` を `{件名} {ステータス} {YYYY-MM-DD}[(n)].pdf` に(日付の形と同じ日の2つ目以降の `(2)` はユーザー決定)。ドライブのファイル名(§10.2a)は変えない。C-REPF-01⑤・E-38 を更新。 |
