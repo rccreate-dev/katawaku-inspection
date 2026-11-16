@@ -1691,6 +1691,7 @@ GAS Webアプリは、しばらく使われないと最初の1回が遅い(起�
   4. **印**: スタンプの末尾に **「 ・ ライブラリ」** を足す(§7.2)。`stampText` も同じ文字列になるので、拡大表示(M3)・元請提出用PDF・`Photos.stampText` に残る。印の語は表示言語によらず日本語(i18n の `photo.library_mark` の ja)。`takenAt` とスタンプの時刻は **選んで登録操作をした時刻**(元の写真の撮影日時ではない)。
   5. **送り方・上限・権限**: 撮った写真と同じ(outbox の `uploadPhotoChunk`、`photoMaxPerItem` に数える。**確認画面の「文字を書く」(§7.8)もそのまま使える**=撮った写真と同じ)。**API 契約・シートの列・GAS は変えない**(`stampText` は従来どおり自由な文字列 ≤300字)。
   6. `ALLOW_FILE_PHOTO`(テスト用ビルドだけのファイル選択)と i18n `photo.pick_file` は廃止。
+  7. 実機の確認(2026-11-16): iPhone で 1〜4 を確認済み(ユーザー「確認できました」)。
 - `navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })` で全画面カメラ(M2)を表示し、シャッターで `<video>` のフレームを `<canvas>` に描画して撮影する。**`<input type="file">` や `capture` 属性は使わない**(端末ギャラリーの流用・加工を防ぐ)。
 - カメラが使えない/権限拒否のときは撮影不可の案内(`err.camera_denied`)を表示。**代替としてギャラリー選択は提供しない**。ただし自動テスト用に、`frontend/config.js` の `ALLOW_FILE_PHOTO`(既定 `false`)が `true` のビルドでのみファイル選択を許す。E2EテストはChromiumの `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` を使いカメラ経路を通す。
 - 撮影枚数: 項目×side あたり `photoMaxPerItem`(5)枚まで。
