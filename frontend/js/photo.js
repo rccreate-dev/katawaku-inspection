@@ -6,18 +6,20 @@
 
   /* ---- 純関数 ---- */
 
-  /* スタンプ文字列: {現場名} {階}{・工区} ・ {検査者名} ・ {YYYY-MM-DD HH:mm}(JST) */
+  /* スタンプ文字列: {現場名} {階}{・工区} ・ {検査者名} ・ {YYYY-MM-DD HH:mm}(JST)
+   * 版1.21.0(§7.1): ライブラリから選んだ写真は末尾に「 ・ {o.mark}」(ライブラリの印)を足す */
+  function markTail(o) { return o.mark ? ' ' + DOT + ' ' + o.mark : ''; }
   function stampText(o) {
     var T = KW.time;
     var place = o.siteName + ' ' + o.floor + (o.zone ? DOT + o.zone : '');
-    return place + ' ' + DOT + ' ' + o.inspector + ' ' + DOT + ' ' + T.fmtFull(o.ms);
+    return place + ' ' + DOT + ' ' + o.inspector + ' ' + DOT + ' ' + T.fmtFull(o.ms) + markTail(o);
   }
   /* 折り返し用に2行へ分ける(「 ・ {検査者名}」の手前) */
   function stampLines(o) {
     var T = KW.time;
     return [
       o.siteName + ' ' + o.floor + (o.zone ? DOT + o.zone : ''),
-      DOT + ' ' + o.inspector + ' ' + DOT + ' ' + T.fmtFull(o.ms)
+      DOT + ' ' + o.inspector + ' ' + DOT + ' ' + T.fmtFull(o.ms) + markTail(o)
     ];
   }
 

@@ -174,8 +174,7 @@ Apps Script エディタ上部の関数選択プルダウンで関数を選び�
 window.KW_CONFIG = {
   API_URL: 'http://localhost:8787/api',
   APP_BASE_URL: '',
-  APP_VERSION: '1.0.0',
-  ALLOW_FILE_PHOTO: false
+  APP_VERSION: '1.0.0'
 };
 ```
 
@@ -183,7 +182,7 @@ window.KW_CONFIG = {
 - `API_URL` → 手順3-7で控えた「ウェブアプリのURL」(`…/exec`)に置き換える。
 - `APP_BASE_URL` → アプリの公開URL(手順5)。※ 現在の frontend のコードはこの値を読んでいる箇所を確認できませんでした(要確認)。サーバー側の Config `appBaseUrl`(3-8)が実際にQRのURLを決めます。両方同じ値を入れておけば安全です。
 - `APP_VERSION` はそのまま(`1.0.0`)。Config の `minClientVersion`(`1.0.0`)より小さくすると全端末が「アプリが古すぎます」で止まります。
-- `ALLOW_FILE_PHOTO: false` のまま(本番は現場のアプリ内カメラのみ。SPEC §7.1)。
+- (版1.21.0 で `ALLOW_FILE_PHOTO` は廃止。検査写真は誰でも「ライブラリから選ぶ」で選べる。SPEC §7.1)
 
 注意: 公開リポジトリには GASのURLが載ります。URL自体は秘密ではない設計ですが、誰でもAPIを呼べる前提で、認証はアプリ側のPIN・端末登録に依存します。
 
@@ -412,7 +411,7 @@ Usersシートの **`company`(会社名)列**に会社名を入れておくと�
 | 画面を直したのに **スマホで古いまま**(キャッシュ) | `sw.js` の `SW_VERSION` を上げていない(4-3)。上げて公開し直す。端末は「更新があります」をタップ。それでも古い場合はアプリを完全に閉じて開き直す。GitHub Pages の反映に数分かかることもある。 |
 | `API_URL` を直したのに古いURLに送っている | 同上(`config.js` は事前キャッシュ対象)。`SW_VERSION` を上げる。 |
 | PDFが作れない `DRIVE_ERROR` / 共有リンクにならない | Drive権限・組織の共有ポリシー。共有できない場合はPDFは非共有のまま保存される(`pdfShareMode` を `private` にすると最初から共有しない)。 |
-| 写真が撮れない | カメラ許可、およびHTTPSで開いていること。ファイル選択はオフ(`ALLOW_FILE_PHOTO: false`)。 |
+| 写真が撮れない | カメラ許可、およびHTTPSで開いていること。カメラが使えなくても「ライブラリから選ぶ」で登録できる(版1.21.0)。 |
 
 ---
 

@@ -207,7 +207,9 @@
       // 版1.16.0(§7.1): 縦持ちのときの案内(検査写真だけ)
       var turn = h('div', { class: 'camturn', role: 'status', hidden: true }, KW.icon('turn'), h('span', null, t('photo.turn_landscape')));
       var blocked = false, camReady = false, blockTimer = null;
-      var fileIn = null;
+      // 版1.21.0(§7.1-ライブラリ): 検査写真はライブラリ(アルバム)からも選べる。スタンプに「ライブラリ」の印を焼き込む
+      var libBtn = h('button', { type: 'button', class: 'cambtn', 'data-act': 'library', hidden: drawingMode }, t('photo.pick_library'));
+      var libIn = h('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': t('photo.pick_library') });
       var shutter = h('button', { type: 'button', class: 'shutter', 'aria-label': t('photo.shutter'), disabled: true });
       var retake = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.retake'));
       var rotate = h('button', { type: 'button', class: 'cambtn', hidden: true }, t('photo.rotate'));
@@ -218,8 +220,8 @@
       var cancel = h('button', { type: 'button', class: 'cambtn' }, t('act.cancel'));
       var count = h('span', { hidden: drawingMode }, t('photo.count', { n: o.count || 0, max: o.max || 5 }));
       if (drawingMode) hint.hidden = true;
-      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), shutter, retake, rotate, textBtn, use);
-      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, turn, bar);
+      var bar = h('div', { class: 'bar2' }, cancel, h('span', { class: 'row' }, count), libBtn, shutter, retake, rotate, textBtn, use);
+      var box = h('div', { class: 'cambox', role: 'dialog', 'aria-modal': 'true' }, video, prev, info, hint, msg, turn, bar, drawingMode ? null : libIn);
       layer.appendChild(box);
       M.fit(box);
 
@@ -231,8 +233,10 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         resolve(v);
       }
-      function stampCtx(ms) {
-        return { siteName: o.siteName, floor: o.floor, zone: o.zone || '', inspector: KW.state.me ? KW.state.me.name : '', ms: ms };
+      function stampCtx(ms, lib) {
+        // ライブラリの印は記録の一部なので、表示言語によらず日本語で焼き込む(PDF も日本語)
+        var mark = lib ? ((root.I18N && root.I18N.ja && root.I18N.ja['photo.library_mark']) || t('photo.library_mark')) : '';
+        return { siteName: o.siteName, floor: o.floor, zone: o.zone || '', inspector: KW.state.me ? KW.state.me.name : '', ms: ms, mark: mark };
       }
       function showErr(code) {
         msg.hidden = false; KW.clear(msg).appendChild(document.createTextNode(t(code)));
@@ -258,28 +262,29 @@
           rotate.disabled = false; use.disabled = false;
         }, 'image/jpeg', 0.92);
       }
-      function processSource(source, w, hgt) {
+      function processSource(source, w, hgt, lib) {
         if (drawingMode) return processDrawing(source, w, hgt);
         var ms = KW.time.nowMs(KW.state.skewMs);
-        lastSrc = { source: source, w: w, h: hgt };
-        shutter.disabled = true;
+        lastSrc = { source: source, w: w, h: hgt, lib: !!lib };
+        shutter.disabled = true; libBtn.disabled = true;
         // 縮小・スタンプ・圧縮・ハッシュの間は『処理中…』を出す(SPEC §8.11.5)
         msg.hidden = false; KW.clear(msg).appendChild(document.createTextNode(t('photo.processing')));
         rotate.disabled = true; use.disabled = true;
-        return KW.photo.process({ source: source, width: w, height: hgt }, stampCtx(ms)).then(function (p) {
+        return KW.photo.process({ source: source, width: w, height: hgt }, stampCtx(ms, lib)).then(function (p) {
           p.takenAt = KW.time.toIso(ms);
+          p.library = !!lib;
           p.text = null;   // 版1.17.0: {texts, baked}(文字を書いたとき)
           result = p;
           prev.src = C.blobUrl(p.full);
           prev.hidden = false; video.hidden = true;
-          shutter.hidden = true; retake.hidden = false; rotate.hidden = false; use.hidden = false;
+          shutter.hidden = true; libBtn.hidden = true; libBtn.disabled = false; retake.hidden = false; rotate.hidden = false; use.hidden = false;
           textBtn.hidden = false; setTextLabel();
           KW.clear(info).appendChild(document.createTextNode(p.stampText));
           msg.hidden = true;
           rotate.disabled = false; use.disabled = false;
         }, function (e) {
           showErr(e && e.code === 'PHOTO_TOO_LARGE' ? 'err.photo_too_large' : 'err.INTERNAL');
-          shutter.disabled = false; rotate.disabled = false; use.disabled = false;
+          shutter.disabled = !camReady; libBtn.disabled = false; rotate.disabled = false; use.disabled = false;
         });
       }
       function setTextLabel() { KW.clear(textBtn).appendChild(document.createTextNode(t(result && result.text ? 'photo.edit_text' : 'photo.add_text'))); }
@@ -319,7 +324,8 @@
         processSource(c, c.width, c.height);
       });
       retake.addEventListener('click', function () {
-        result = null; prev.hidden = true; video.hidden = false; shutter.hidden = false; shutter.disabled = false;
+        result = null; prev.hidden = true; video.hidden = false; shutter.hidden = false; shutter.disabled = !camReady;
+        libBtn.hidden = drawingMode; libBtn.disabled = false; msg.hidden = true;
         retake.hidden = true; rotate.hidden = true; use.hidden = true; textBtn.hidden = true; KW.clear(info);
         blocked = false; checkPortrait();
       });
@@ -333,7 +339,18 @@
         var g = rc.getContext('2d');
         g.translate(rc.width, 0); g.rotate(Math.PI / 2);
         g.drawImage(lastSrc.source, 0, 0, lastSrc.w, lastSrc.h);
-        processSource(rc, rc.width, rc.height);
+        processSource(rc, rc.width, rc.height, lastSrc.lib);
+      });
+      /* ライブラリから選ぶ(検査写真だけ)。カメラが使えないときも選べる */
+      libBtn.addEventListener('click', function () { libIn.click(); });
+      libIn.addEventListener('change', function () {
+        var f = libIn.files && libIn.files[0];
+        libIn.value = '';
+        if (!f) return;
+        var img = new Image();
+        img.onload = function () { processSource(img, img.naturalWidth, img.naturalHeight, true); };
+        img.onerror = function () { showErr('err.photo_unreadable'); shutter.disabled = !camReady; };
+        img.src = C.blobUrl(f);
       });
       use.addEventListener('click', function () { finish(result); });
       cancel.addEventListener('click', function () { finish(null); });
@@ -351,16 +368,8 @@
           msg.appendChild(h('br')); msg.appendChild(document.createTextNode(t('drawing.camera_fallback')));
           return;
         }
-        if (KW.config.ALLOW_FILE_PHOTO) {
-          fileIn = h('input', { type: 'file', accept: 'image/*', class: 'cambtn', 'aria-label': t('photo.pick_file') });
-          fileIn.addEventListener('change', function () {
-            var f = fileIn.files && fileIn.files[0]; if (!f) return;
-            var img = new Image();
-            img.onload = function () { processSource(img, img.naturalWidth, img.naturalHeight); };
-            img.src = C.blobUrl(f);
-          });
-          bar.insertBefore(fileIn, shutter);
-        }
+        // 検査写真: 「ライブラリから選ぶ」は使える(版1.21.0)
+        msg.appendChild(h('br')); msg.appendChild(document.createTextNode(t('photo.camera_fallback')));
       });
     });
   };

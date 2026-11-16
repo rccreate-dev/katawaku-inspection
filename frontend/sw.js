@@ -5,8 +5,9 @@
  * ・唯一の例外はナビゲーション(HTMLへの遷移)だけ stale-while-revalidate。
  * ・APIは一切キャッシュしない(別オリジンは素通し)。
  * ・版1.20.5(SPEC §6.12-14): 版1.20.4 の名前付きの場所(pdf/…)はやめた。そのとき端末に置いた katawaku-pdf は activate で消す。
- * ・版1.20.7(SPEC §6.12-16): M6 を「ファイルで送る」+「開く」に戻した。 */
-var SW_VERSION = '1.0.0-50';
+ * ・版1.20.7(SPEC §6.12-16): M6 を「ファイルで送る」+「開く」に戻した。
+ * ・版1.21.0(SPEC §7.1): 検査写真をライブラリからも選べる(スタンプに「ライブラリ」の印)。 */
+var SW_VERSION = '1.0.0-51';
 var CACHE = 'katawaku-shell-' + SW_VERSION;
 var SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'i18n.js', 'manifest.webmanifest',

@@ -232,7 +232,9 @@
 
     /* 写真・未送信 */
     ['photo.count', '{n}/{max}枚', '{n}/{max} foto'],
-    ['photo.pick_file', 'ファイルを選ぶ(テスト用)', 'Pilih berkas (uji)'],
+    ['photo.pick_library', 'ライブラリから選ぶ', 'Pilih dari galeri'],
+    ['photo.library_mark', 'ライブラリ', 'Galeri'],
+    ['photo.camera_fallback', '「ライブラリから選ぶ」で写真を選べます', 'Foto bisa dipilih dengan "Pilih dari galeri"'],
     ['photo.retake', '撮り直す', 'Ulangi'],
     ['photo.rotate', '回転', 'Putar'],
     ['photo.landscape_hint', 'スマホを横向きにして撮影してください(PDFの写真枠が横長のため)', 'Ambil foto dengan ponsel posisi horizontal (bingkai foto di PDF melebar)'],
@@ -359,6 +361,7 @@
     ['err.DRIVE_ERROR', '保存に失敗しました。もう一度お試しください', 'Gagal menyimpan. Coba lagi'],
     ['err.INTERNAL', 'エラーが発生しました', 'Terjadi kesalahan'],
     ['err.network', '通信できません', 'Tidak bisa terhubung'],
+    ['err.photo_unreadable', 'この画像は読み込めません', 'Gambar ini tidak bisa dibaca'],
     ['err.camera_denied', 'カメラを使えません。設定でカメラを許可してください', 'Kamera tidak bisa dipakai. Izinkan kamera di pengaturan'],
     ['err.photo_too_large', '写真が大きすぎます。撮り直してください', 'Foto terlalu besar. Ambil ulang'],
     ['err.drawing_unreadable', '図面の画像を読み込めません。スクリーンショットかカメラで撮り直してください', 'Gambar tidak dapat dibaca. Ambil ulang dengan screenshot atau kamera'],
